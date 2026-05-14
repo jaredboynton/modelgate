@@ -106,7 +106,10 @@ Responses WebSocket passthrough:
 
 - `GET /v1/responses` and `GET /api/provider/openai/v1/responses` accept RFC 6455 upgrades.
 - The first client frame can be raw Responses JSON or a `response.create` event.
-- The proxy applies hot routing for `format: "responses"`, forwards only Codex-capable targets over WSS, injects Codex OAuth headers, then relays frames both ways.
+- The proxy applies hot routing for `format: "responses"` on every `response.create`.
+  Codex-backed targets use upstream Responses WSS with Codex OAuth; Bedrock and
+  Google targets use provider-isolated HTTP/SSE bridges and stream back over the
+  same downstream WebSocket.
 
 OpenAI-compatible facade disposition:
 
@@ -181,9 +184,12 @@ model_catalog_json = "/Users/jaredboynton/.codex/model-catalog-ump-v2-codex-ws.j
 ```
 
 `supports_websockets` is provider-wide in Codex CLI, so UMP owns the mixed
-provider facade. The downstream socket binds to the first route/model on that
-connection; route/model changes on the same socket are rejected unless they are
-valid `previous_response_id` continuations for the same route/model.
+provider facade. After a response reaches a terminal event, the same downstream
+socket may send an independent `response.create` for a different provider or
+model. While a response is in flight, another `response.create` is rejected with
+`response_already_in_flight`. `previous_response_id` is connection-local and
+must exactly match the prior route/model fingerprint; it never authorizes a
+cross-provider continuation.
 
 Useful model choices:
 

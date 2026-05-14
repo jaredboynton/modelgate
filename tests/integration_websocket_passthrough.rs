@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{
     extract::{
@@ -7,7 +7,7 @@ use axum::{
     },
     http::HeaderMap,
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use bytes::Bytes;
@@ -35,6 +35,7 @@ enum UpstreamBehavior {
 #[derive(Debug)]
 enum CapturedEvent {
     FirstFrame(CapturedWebSocket),
+    HttpRequest(String),
     Control(String),
 }
 
@@ -159,7 +160,7 @@ async fn responses_websocket_accepts_flat_codex_cli_response_create_frame() {
 }
 
 #[tokio::test]
-async fn responses_websocket_rejects_followup_model_switch_frames() {
+async fn responses_websocket_accepts_same_provider_model_switch_after_terminal() {
     let (capture_tx, mut capture_rx) = mpsc::unbounded_channel();
     let upstream = spawn_upstream(capture_tx, UpstreamBehavior::Complete).await;
 
@@ -189,7 +190,7 @@ async fn responses_websocket_rejects_followup_model_switch_frames() {
     let frame: Value = serde_json::from_str(&first.first_frame).unwrap();
     assert_eq!(frame["model"], "gpt-5.5");
     assert_eq!(frame["stream"], true);
-    let completed = expect_json_frame(&mut ws).await;
+    let completed = expect_json_frame_type(&mut ws, "response.completed").await;
     assert_eq!(completed["type"], "response.completed");
 
     ws.send_text(
@@ -204,10 +205,13 @@ async fn responses_websocket_rejects_followup_model_switch_frames() {
     .await
     .unwrap();
 
-    let error = expect_json_frame(&mut ws).await;
-    assert_eq!(error["type"], "error");
-    assert_eq!(error["error"]["code"], "websocket_route_model_changed");
-    assert_no_upstream_frame(&mut capture_rx).await;
+    let second = expect_first_frame(&mut capture_rx).await;
+    let frame: Value = serde_json::from_str(&second.first_frame).unwrap();
+    assert_eq!(frame["model"], "gpt-5.4");
+    assert_eq!(frame["stream"], true);
+    assert_eq!(frame["input"][0]["content"][0]["text"], "second");
+    let completed = expect_json_frame_type(&mut ws, "response.completed").await;
+    assert_eq!(completed["type"], "response.completed");
 
     let _ = ws.close(None).await;
     proxy.handle.abort();
@@ -215,7 +219,7 @@ async fn responses_websocket_rejects_followup_model_switch_frames() {
 }
 
 #[tokio::test]
-async fn responses_websocket_rejects_codex_then_google_and_bedrock_independent_turns() {
+async fn responses_websocket_accepts_codex_then_google_and_bedrock_independent_turns() {
     let (capture_tx, mut capture_rx) = mpsc::unbounded_channel();
     let upstream = spawn_upstream(capture_tx, UpstreamBehavior::Complete).await;
 
@@ -265,12 +269,7 @@ async fn responses_websocket_rejects_codex_then_google_and_bedrock_independent_t
     )
     .await
     .unwrap();
-    let google_error = expect_json_frame(&mut ws).await;
-    assert_eq!(google_error["type"], "error");
-    assert_eq!(
-        google_error["error"]["code"],
-        "websocket_route_model_changed"
-    );
+    expect_synthetic_lifecycle(&mut ws).await;
 
     ws.send_text(
         json!({
@@ -285,12 +284,7 @@ async fn responses_websocket_rejects_codex_then_google_and_bedrock_independent_t
     )
     .await
     .unwrap();
-    let bedrock_error = expect_json_frame(&mut ws).await;
-    assert_eq!(bedrock_error["type"], "error");
-    assert_eq!(
-        bedrock_error["error"]["code"],
-        "websocket_route_model_changed"
-    );
+    expect_synthetic_lifecycle(&mut ws).await;
     assert_no_upstream_frame(&mut capture_rx).await;
 
     let _ = ws.close(None).await;
@@ -299,7 +293,7 @@ async fn responses_websocket_rejects_codex_then_google_and_bedrock_independent_t
 }
 
 #[tokio::test]
-async fn responses_websocket_rejects_google_and_bedrock_then_codex_independent_turns() {
+async fn responses_websocket_accepts_google_and_bedrock_prewarm_then_codex_independent_turn() {
     let (capture_tx, mut capture_rx) = mpsc::unbounded_channel();
     let upstream = spawn_upstream(capture_tx, UpstreamBehavior::Complete).await;
 
@@ -331,10 +325,7 @@ async fn responses_websocket_rejects_google_and_bedrock_then_codex_independent_t
     )
     .await
     .unwrap();
-    let created = expect_json_frame(&mut ws).await;
-    assert_eq!(created["type"], "response.created");
-    let completed = expect_json_frame(&mut ws).await;
-    assert_eq!(completed["type"], "response.completed");
+    expect_synthetic_lifecycle(&mut ws).await;
 
     ws.send_text(
         json!({
@@ -349,12 +340,7 @@ async fn responses_websocket_rejects_google_and_bedrock_then_codex_independent_t
     )
     .await
     .unwrap();
-    let bedrock_error = expect_json_frame(&mut ws).await;
-    assert_eq!(bedrock_error["type"], "error");
-    assert_eq!(
-        bedrock_error["error"]["code"],
-        "websocket_route_model_changed"
-    );
+    expect_synthetic_lifecycle(&mut ws).await;
 
     ws.send_text(
         json!({
@@ -367,13 +353,16 @@ async fn responses_websocket_rejects_google_and_bedrock_then_codex_independent_t
     )
     .await
     .unwrap();
-    let codex_error = expect_json_frame(&mut ws).await;
-    assert_eq!(codex_error["type"], "error");
+    let captured = expect_first_frame(&mut capture_rx).await;
+    let frame: Value = serde_json::from_str(&captured.first_frame).unwrap();
+    assert_eq!(frame["model"], "gpt-5.5");
+    assert_eq!(frame["stream"], true);
     assert_eq!(
-        codex_error["error"]["code"],
-        "websocket_route_model_changed"
+        frame["input"][0]["content"][0]["text"],
+        "codex independent turn"
     );
-    assert_no_upstream_frame(&mut capture_rx).await;
+    let completed = expect_json_frame(&mut ws).await;
+    assert_eq!(completed["type"], "response.completed");
 
     let _ = ws.close(None).await;
     proxy.handle.abort();
@@ -430,7 +419,10 @@ async fn responses_websocket_in_flight_response_create_errors_without_closing() 
     )
     .await;
 
-    let test_state = codex_test_state_with_route("slow-codex-model");
+    let test_state = codex_test_state_with_route_specs(&[
+        ("slow-codex-model", "codex", "gpt-5.5"),
+        ("overlap-google-model", "google", "gemini-3-flash-preview"),
+    ]);
     let mut state = test_state.state.clone();
     state.runtime.codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
@@ -455,8 +447,75 @@ async fn responses_websocket_in_flight_response_create_errors_without_closing() 
     ws.send_text(
         json!({
             "type": "response.create",
-            "model": "slow-codex-model",
-            "input": "second overlapping turn",
+            "response": {
+                "model": "overlap-google-model",
+                "input": "second overlapping provider turn",
+                "stream": true,
+                "generate": false
+            }
+        })
+        .to_string(),
+    )
+    .await
+    .unwrap();
+    let error = expect_json_frame(&mut ws).await;
+    assert_eq!(error["type"], "error");
+    assert_eq!(error["error"]["code"], "response_already_in_flight");
+
+    let completed = expect_json_frame_type(&mut ws, "response.completed").await;
+    assert_eq!(completed["type"], "response.completed");
+    assert_no_upstream_frame(&mut capture_rx).await;
+
+    let _ = ws.close(None).await;
+    proxy.handle.abort();
+    upstream.handle.abort();
+}
+
+#[tokio::test]
+async fn responses_websocket_http_backed_in_flight_response_create_errors_without_second_provider_execution(
+) {
+    let (capture_tx, mut capture_rx) = mpsc::unbounded_channel();
+    let google = spawn_google_stream_upstream(
+        capture_tx,
+        "google streamed turn",
+        Duration::from_millis(250),
+    )
+    .await;
+
+    let test_state = codex_test_state_with_route_specs(&[
+        ("slow-google-model", "google", "gemini-3-flash-preview"),
+        ("overlap-codex-model", "codex", "gpt-5.5"),
+    ]);
+    let mut state = test_state.state.clone();
+    state.google_api_key = Some(Arc::<str>::from("fixture-google-key"));
+    state.runtime.google_generate_base_url = format!("http://{}", google.addr);
+    let proxy = spawn_proxy(state).await;
+
+    let mut ws = connect_proxy_ws(&proxy, "/v1/responses").await;
+    ws.send_text(
+        json!({
+            "type": "response.create",
+            "response": {
+                "model": "slow-google-model",
+                "input": "first slow HTTP-backed turn",
+                "stream": true
+            }
+        })
+        .to_string(),
+    )
+    .await
+    .unwrap();
+    let request_path = tokio::select! {
+        path = expect_http_request(&mut capture_rx) => path,
+        frame = expect_json_frame(&mut ws) => panic!("expected Google HTTP request before downstream frame, got {frame}"),
+    };
+    assert!(request_path.contains("gemini-3-flash-preview:streamGenerateContent"));
+
+    ws.send_text(
+        json!({
+            "type": "response.create",
+            "model": "overlap-codex-model",
+            "input": "overlapping codex turn",
             "stream": true
         })
         .to_string(),
@@ -467,13 +526,13 @@ async fn responses_websocket_in_flight_response_create_errors_without_closing() 
     assert_eq!(error["type"], "error");
     assert_eq!(error["error"]["code"], "response_already_in_flight");
 
-    let completed = expect_json_frame(&mut ws).await;
+    let completed = expect_json_frame_type(&mut ws, "response.completed").await;
     assert_eq!(completed["type"], "response.completed");
     assert_no_upstream_frame(&mut capture_rx).await;
 
     let _ = ws.close(None).await;
     proxy.handle.abort();
-    upstream.handle.abort();
+    google.handle.abort();
 }
 
 #[tokio::test]
@@ -481,7 +540,10 @@ async fn responses_websocket_accepts_binary_raw_responses_body_for_compatibility
     let (capture_tx, mut capture_rx) = mpsc::unbounded_channel();
     let upstream = spawn_upstream(capture_tx, UpstreamBehavior::Complete).await;
 
-    let test_state = codex_test_state_with_route("binary-raw-model");
+    let test_state = codex_test_state_with_routes(&[
+        ("binary-raw-model", "gpt-5.5"),
+        ("binary-raw-second-model", "gpt-5.4"),
+    ]);
     let mut state = test_state.state.clone();
     state.runtime.codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
@@ -505,6 +567,31 @@ async fn responses_websocket_accepts_binary_raw_responses_body_for_compatibility
     assert_eq!(frame["model"], "gpt-5.5");
     assert_eq!(frame["input"][0]["content"][0]["text"], "raw binary body");
     assert_eq!(frame["stream"], true);
+    let completed = expect_json_frame(&mut ws).await;
+    assert_eq!(completed["type"], "response.completed");
+
+    ws.send(SpecterMessage::Binary(Bytes::from(
+        json!({
+            "model": "binary-raw-second-model",
+            "input": "second raw binary body",
+            "stream": true
+        })
+        .to_string(),
+    )))
+    .await
+    .unwrap();
+
+    let captured = expect_first_frame(&mut capture_rx).await;
+    let frame: Value = serde_json::from_str(&captured.first_frame).unwrap();
+    assert_eq!(frame["type"], "response.create");
+    assert_eq!(frame["model"], "gpt-5.4");
+    assert_eq!(
+        frame["input"][0]["content"][0]["text"],
+        "second raw binary body"
+    );
+    assert_eq!(frame["stream"], true);
+    let completed = expect_json_frame(&mut ws).await;
+    assert_eq!(completed["type"], "response.completed");
 
     let _ = ws.close(None).await;
     proxy.handle.abort();
@@ -769,6 +856,17 @@ async fn spawn_upstream(
     spawn_router(app).await
 }
 
+async fn spawn_google_stream_upstream(
+    capture_tx: mpsc::UnboundedSender<CapturedEvent>,
+    response_text: &'static str,
+    delay: Duration,
+) -> SpawnedServer {
+    let app = Router::new()
+        .fallback(post(google_stream_upstream))
+        .with_state((capture_tx, response_text, delay));
+    spawn_router(app).await
+}
+
 async fn spawn_router(app: Router) -> SpawnedServer {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -776,6 +874,40 @@ async fn spawn_router(app: Router) -> SpawnedServer {
         axum::serve(listener, app).await.unwrap();
     });
     SpawnedServer { addr, handle }
+}
+
+async fn google_stream_upstream(
+    State((capture_tx, response_text, delay)): State<(
+        mpsc::UnboundedSender<CapturedEvent>,
+        &'static str,
+        Duration,
+    )>,
+    uri: axum::http::Uri,
+) -> impl IntoResponse {
+    capture_tx
+        .send(CapturedEvent::HttpRequest(uri.path().to_string()))
+        .unwrap();
+    tokio::time::sleep(delay).await;
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+        format!(
+            "data: {}\n\n",
+            json!({
+                "candidates": [{
+                    "content": {
+                        "role": "model",
+                        "parts": [{ "text": response_text }]
+                    },
+                    "finishReason": "STOP"
+                }],
+                "usageMetadata": {
+                    "promptTokenCount": 1,
+                    "candidatesTokenCount": 1,
+                    "totalTokenCount": 2
+                }
+            })
+        ),
+    )
 }
 
 async fn upstream_ws(
@@ -987,6 +1119,17 @@ async fn expect_first_frame(
     }
 }
 
+async fn expect_http_request(capture_rx: &mut mpsc::UnboundedReceiver<CapturedEvent>) -> String {
+    match tokio::time::timeout(Duration::from_secs(2), capture_rx.recv())
+        .await
+        .unwrap()
+        .unwrap()
+    {
+        CapturedEvent::HttpRequest(path) => path,
+        other => panic!("expected HTTP-backed provider request, got {other:?}"),
+    }
+}
+
 async fn expect_control(capture_rx: &mut mpsc::UnboundedReceiver<CapturedEvent>) -> String {
     match tokio::time::timeout(Duration::from_secs(2), capture_rx.recv())
         .await
@@ -1014,6 +1157,28 @@ async fn expect_json_frame(ws: &mut specter::WebSocket) -> Value {
         }
         other => panic!("expected websocket text JSON frame, got {other:?}"),
     }
+}
+
+async fn expect_json_frame_type(ws: &mut specter::WebSocket, expected_type: &str) -> Value {
+    for _ in 0..8 {
+        let frame = expect_json_frame(ws).await;
+        if frame["type"] == expected_type {
+            return frame;
+        }
+    }
+    panic!("expected websocket frame type {expected_type}");
+}
+
+async fn expect_synthetic_lifecycle(ws: &mut specter::WebSocket) {
+    let created = expect_json_frame(ws).await;
+    assert_eq!(created["type"], "response.created");
+    let response_id = created["response"]["id"].as_str().unwrap().to_string();
+    assert!(response_id.starts_with("resp_ws_bridge_"));
+
+    let completed = expect_json_frame(ws).await;
+    assert_eq!(completed["type"], "response.completed");
+    assert_eq!(completed["response"]["id"], response_id);
+    assert_eq!(completed["response"]["usage"]["total_tokens"], 0);
 }
 
 async fn expect_proxy_error(ws: &mut specter::WebSocket) -> String {

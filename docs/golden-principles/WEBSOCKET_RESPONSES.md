@@ -4,9 +4,13 @@ Golden rule: `/v1/responses` WebSocket handling must fail closed with JSON error
 
 ## Contract
 
-- WebSocket Responses is Codex-capable only after the first frame routes to `ResponsesRoute::CodexResponses`.
-- Non-Codex Responses routes must reject instead of tunneling to Codex.
-- One socket owns one route/model fingerprint. Model or provider switches on later frames return an error event.
+- Downstream WebSocket Responses is a mixed-provider facade, not a Codex-only tunnel.
+- Each `response.create` resolves its own `format: "responses"` route/model fingerprint.
+- After a response reaches a terminal event, later `response.create` events may switch provider or model independently on the same connection.
+- While a response is in flight, another raw Responses body or `response.create` returns `response_already_in_flight` and must not start another upstream call.
+- `previous_response_id` is connection-local. Unknown IDs, non-string IDs, or IDs from another connection return JSON error events.
+- `previous_response_id` continuations must exactly match the prior route/model fingerprint. Cross-provider, cross-model, or changed request-field continuations return JSON error events.
+- Codex-backed requests use Codex upstream WSS; Bedrock and Google requests use provider-specific HTTP/SSE bridges and stream normalized Responses events back to the downstream socket.
 - Unsupported parseable events return an error event and keep the socket usable when possible.
 - Upstream failures are reported downstream as top-level JSON error events before close handling.
 
@@ -43,5 +47,7 @@ Required fields:
 
 - Does the client see a JSON error event before relying on a close reason?
 - Is the error code stable enough for Codex CLI and tests?
-- Does the first frame lock the route/model, and do follow-up frames preserve it?
+- Can independent post-terminal `response.create` events switch provider/model on the same downstream socket?
+- Are in-flight `response.create` events rejected with `response_already_in_flight`?
+- Are `previous_response_id` continuations connection-local and exact-match for route/model plus stable request fields?
 - Are ping, pong, binary compatibility, upstream close, and malformed JSON cases still covered?

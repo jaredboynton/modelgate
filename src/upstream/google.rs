@@ -253,6 +253,18 @@ pub async fn send_google_direct(
     body: Bytes,
     stream_response: bool,
 ) -> AppResult<UpstreamResponse> {
+    if stream_response && request.url.starts_with("http://") {
+        let response = state
+            .http
+            .request(method, &request.url)
+            .headers(request.headers)
+            .body(body)
+            .send()
+            .await
+            .map_err(|err| AppError::Upstream(format!("Google streaming transport: {err}")))?;
+        return Ok(UpstreamResponse::from_reqwest(GOOGLE_PROVIDER, response));
+    }
+
     let builder = state
         .specter
         .request(method, request.url)
@@ -297,7 +309,12 @@ pub async fn forward_generate_content_direct_response(
     body: Bytes,
 ) -> AppResult<UpstreamResponse> {
     let key = api_key(state)?;
-    let request = build_google_generate_content_request_with_headers(upstream_model, headers, key)?;
+    let request = build_google_generate_content_request_with_base_url(
+        &state.runtime.google_generate_base_url,
+        upstream_model,
+        headers,
+        key,
+    )?;
     forward_generate_content_direct_request(state, request, body).await
 }
 
@@ -316,8 +333,12 @@ pub async fn forward_stream_generate_content_direct_response(
     body: Bytes,
 ) -> AppResult<UpstreamResponse> {
     let key = api_key(state)?;
-    let request =
-        build_google_stream_generate_content_request_with_headers(upstream_model, headers, key)?;
+    let request = build_google_stream_generate_content_request_with_base_url(
+        &state.runtime.google_generate_base_url,
+        upstream_model,
+        headers,
+        key,
+    )?;
     forward_stream_generate_content_direct_request(state, request, body).await
 }
 

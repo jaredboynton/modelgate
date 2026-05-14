@@ -236,7 +236,6 @@ struct BridgeRouteFingerprint {
 
 #[derive(Default)]
 struct BridgeSessionState {
-    bound_fingerprint: Option<BridgeRouteFingerprint>,
     responses: VecDeque<BridgeResponseState>,
 }
 
@@ -248,9 +247,6 @@ impl BridgeSessionState {
     }
 
     fn record(&mut self, response: BridgeResponseState) {
-        if self.bound_fingerprint.is_none() {
-            self.bound_fingerprint = Some(response.fingerprint.clone());
-        }
         self.responses
             .retain(|existing| existing.response_id != response.response_id);
         self.responses.push_back(response);
@@ -430,13 +426,15 @@ fn prepare_bridge_request(
     fingerprint: &BridgeRouteFingerprint,
     session: &BridgeSessionState,
 ) -> Result<Value, BridgePolicyError> {
-    let Some(previous_response_id) = request
-        .get("previous_response_id")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-    else {
-        ensure_socket_binding_matches(fingerprint, session)?;
-        return Ok(request);
+    let previous_response_id = match request.get("previous_response_id") {
+        None => return Ok(request),
+        Some(Value::String(value)) => value.clone(),
+        Some(_) => {
+            return Err(BridgePolicyError::new(
+                "invalid_previous_response_id",
+                "previous_response_id must be a string",
+            ));
+        }
     };
     let Some(prior) = session.get(&previous_response_id) else {
         return Err(BridgePolicyError::new(
@@ -492,25 +490,6 @@ fn prepare_bridge_request(
     append_input_values(Some(&delta_input), &mut merged_input);
     full_request["input"] = Value::Array(merged_input);
     Ok(full_request)
-}
-
-fn ensure_socket_binding_matches(
-    fingerprint: &BridgeRouteFingerprint,
-    session: &BridgeSessionState,
-) -> Result<(), BridgePolicyError> {
-    let Some(bound) = &session.bound_fingerprint else {
-        return Ok(());
-    };
-    if bound == fingerprint {
-        return Ok(());
-    }
-    Err(BridgePolicyError::new(
-        "websocket_route_model_changed",
-        format!(
-            "route/model changes on one socket are not supported; open a new WebSocket for {}",
-            fingerprint.model
-        ),
-    ))
 }
 
 fn bridge_route_lane(route: &ResponsesRoute) -> &'static str {
@@ -764,6 +743,7 @@ async fn run_bridge_provider_task(
     full_request: Value,
 ) -> AppResult<Option<BridgeExecutionResult>> {
     let (sender, mut receiver) = mpsc::channel(8);
+    let mut terminal_forwarded = false;
     let mut task = tokio::spawn(async move {
         let response = match execute_responses_request(
             &state,
@@ -794,10 +774,12 @@ async fn run_bridge_provider_task(
         tokio::select! {
             frame = receiver.recv() => {
                 if let Some(frame) = frame {
+                    let is_terminal = is_bridge_terminal_event(&frame);
                     if let Err(error) = send_ws_json(client, frame).await {
                         task.abort();
                         return Err(error);
                     }
+                    terminal_forwarded = terminal_forwarded || is_terminal;
                 }
             }
             result = &mut task => {
@@ -812,7 +794,7 @@ async fn run_bridge_provider_task(
                     ))),
                 };
             }
-            message = client.next() => {
+            message = client.next(), if !terminal_forwarded => {
                 let Some(message) = message else {
                     task.abort();
                     return Ok(None);
@@ -1484,15 +1466,21 @@ mod tests {
     }
 
     #[test]
-    fn bridge_rejects_independent_route_switch_without_previous_response_id() {
-        let session = BridgeSessionState {
-            bound_fingerprint: Some(BridgeRouteFingerprint {
+    fn bridge_accepts_independent_route_switch_without_previous_response_id() {
+        let mut session = BridgeSessionState::default();
+        session.record(BridgeResponseState {
+            fingerprint: BridgeRouteFingerprint {
                 route: ResponsesRoute::BedrockMessages,
                 model: "claude-opus-4-7".into(),
                 upstream_model: "anthropic.claude-opus-4-7".into(),
+            },
+            response_id: "resp_prior".into(),
+            full_request: json!({
+                "model": "claude-opus-4-7",
+                "input": "prior"
             }),
-            ..Default::default()
-        };
+            output_item_done_items: Vec::new(),
+        });
         let request = json!({
             "model": "gpt-5.5",
             "input": "independent turn"
@@ -1503,13 +1491,103 @@ mod tests {
             upstream_model: "gpt-5.5".into(),
         };
 
-        let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
+        let prepared = prepare_bridge_request(request, &fingerprint, &session).unwrap();
 
-        assert_eq!(error.code, "websocket_route_model_changed");
+        assert_eq!(prepared["model"], "gpt-5.5");
+        assert_eq!(prepared["input"], "independent turn");
     }
 
     #[test]
-    fn bridge_previous_response_id_requires_matching_fingerprint() {
+    fn bridge_rejects_null_previous_response_id() {
+        let session = BridgeSessionState::default();
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": "bad continuation",
+            "previous_response_id": null
+        });
+        let fingerprint = BridgeRouteFingerprint {
+            route: ResponsesRoute::CodexResponses,
+            model: "gpt-5.5".into(),
+            upstream_model: "gpt-5.5".into(),
+        };
+
+        let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
+
+        assert_eq!(error.code, "invalid_previous_response_id");
+    }
+
+    #[test]
+    fn bridge_rejects_non_string_previous_response_id() {
+        let session = BridgeSessionState::default();
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": "bad continuation",
+            "previous_response_id": 42
+        });
+        let fingerprint = BridgeRouteFingerprint {
+            route: ResponsesRoute::CodexResponses,
+            model: "gpt-5.5".into(),
+            upstream_model: "gpt-5.5".into(),
+        };
+
+        let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
+
+        assert_eq!(error.code, "invalid_previous_response_id");
+    }
+
+    #[test]
+    fn bridge_rejects_unknown_previous_response_id() {
+        let session = BridgeSessionState::default();
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [],
+            "previous_response_id": "resp_missing"
+        });
+        let fingerprint = BridgeRouteFingerprint {
+            route: ResponsesRoute::CodexResponses,
+            model: "gpt-5.5".into(),
+            upstream_model: "gpt-5.5".into(),
+        };
+
+        let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
+
+        assert_eq!(error.code, "unknown_previous_response_id");
+    }
+
+    #[test]
+    fn bridge_previous_response_id_rejects_same_lane_different_model() {
+        let mut session = BridgeSessionState::default();
+        session.record(BridgeResponseState {
+            fingerprint: BridgeRouteFingerprint {
+                route: ResponsesRoute::BedrockMessages,
+                model: "claude-opus-4-7".into(),
+                upstream_model: "anthropic.claude-opus-4-7".into(),
+            },
+            response_id: "resp_prewarm".into(),
+            full_request: json!({
+                "model": "claude-opus-4-7",
+                "input": "warm"
+            }),
+            output_item_done_items: Vec::new(),
+        });
+        let request = json!({
+            "model": "claude-sonnet-4-7",
+            "input": [],
+            "previous_response_id": "resp_prewarm"
+        });
+        let fingerprint = BridgeRouteFingerprint {
+            route: ResponsesRoute::BedrockMessages,
+            model: "claude-sonnet-4-7".into(),
+            upstream_model: "anthropic.claude-sonnet-4-7".into(),
+        };
+
+        let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
+
+        assert_eq!(error.code, "previous_response_model_mismatch");
+    }
+
+    #[test]
+    fn bridge_previous_response_id_rejects_cross_lane_mismatch() {
         let mut session = BridgeSessionState::default();
         session.record(BridgeResponseState {
             fingerprint: BridgeRouteFingerprint {
@@ -1539,5 +1617,35 @@ mod tests {
         let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
 
         assert_eq!(error.code, "previous_response_route_mismatch");
+    }
+
+    #[test]
+    fn bridge_lru_evicts_old_previous_response_ids() {
+        let mut session = BridgeSessionState::default();
+        let fingerprint = BridgeRouteFingerprint {
+            route: ResponsesRoute::CodexResponses,
+            model: "gpt-5.5".into(),
+            upstream_model: "gpt-5.5".into(),
+        };
+        for index in 0..=BRIDGE_RESPONSE_STATE_LIMIT {
+            session.record(BridgeResponseState {
+                fingerprint: fingerprint.clone(),
+                response_id: format!("resp_{index}"),
+                full_request: json!({
+                    "model": "gpt-5.5",
+                    "input": format!("turn {index}")
+                }),
+                output_item_done_items: Vec::new(),
+            });
+        }
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [],
+            "previous_response_id": "resp_0"
+        });
+
+        let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
+
+        assert_eq!(error.code, "unknown_previous_response_id");
     }
 }

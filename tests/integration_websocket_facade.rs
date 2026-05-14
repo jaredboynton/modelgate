@@ -54,7 +54,7 @@ async fn websocket_facade_generate_false_sends_synthetic_lifecycle() {
 }
 
 #[tokio::test]
-async fn websocket_facade_rejects_model_switches_after_terminal_events() {
+async fn websocket_facade_allows_model_switches_after_terminal_events() {
     let test_state = http_backed_mixed_state();
     let proxy = spawn_proxy(test_state.state.clone()).await;
     let mut ws = connect_proxy_ws(&proxy).await;
@@ -70,36 +70,43 @@ async fn websocket_facade_rejects_model_switches_after_terminal_events() {
     ws.send_text(response_create_generate_false("facade-bedrock-model").to_string())
         .await
         .unwrap();
-    let error = expect_json_frame(&mut ws).await;
-    assert_eq!(error["type"], "error");
-    assert_eq!(error["error"]["code"], "websocket_route_model_changed");
+    let bedrock_created = expect_json_frame(&mut ws).await;
+    assert_eq!(bedrock_created["type"], "response.created");
+    let bedrock_completed = expect_json_frame(&mut ws).await;
+    assert_eq!(bedrock_completed["type"], "response.completed");
 
     assert_no_raw_sse(&google_created);
     assert_no_raw_sse(&google_completed);
-    assert_no_raw_sse(&error);
+    assert_no_raw_sse(&bedrock_created);
+    assert_no_raw_sse(&bedrock_completed);
 
     proxy.handle.abort();
 }
 
 #[tokio::test]
-async fn websocket_facade_generate_false_prewarm_then_real_cross_model_turn_rejects() {
+async fn websocket_facade_generate_false_prewarm_then_real_cross_model_turn_reaches_provider() {
     let test_state = http_backed_mixed_state();
     let proxy = spawn_proxy(test_state.state.clone()).await;
     let mut ws = connect_proxy_ws(&proxy).await;
 
-    ws.send_text(response_create_generate_false("facade-google-model").to_string())
+    ws.send_text(response_create_generate_false("facade-bedrock-model").to_string())
         .await
         .unwrap();
     let _created = expect_json_frame(&mut ws).await;
     let _completed = expect_json_frame(&mut ws).await;
 
-    ws.send_text(response_create("facade-bedrock-model", "real turn").to_string())
+    ws.send_text(response_create("facade-google-model", "real turn").to_string())
         .await
         .unwrap();
 
     let error = expect_json_frame(&mut ws).await;
     assert_eq!(error["type"], "error");
-    assert_eq!(error["error"]["code"], "websocket_route_model_changed");
+    assert_ne!(error["error"]["code"], "websocket_route_model_changed");
+    let message = error["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("missing credential") || message.contains("Google API key"),
+        "{message}"
+    );
 
     proxy.handle.abort();
 }
@@ -157,6 +164,39 @@ async fn websocket_facade_unknown_previous_response_id_returns_json_error_not_ra
         .unwrap()
         .contains("unknown previous_response_id"));
     assert_no_raw_sse(&error);
+
+    proxy.handle.abort();
+}
+
+#[tokio::test]
+async fn websocket_facade_rejects_malformed_previous_response_id_and_recovers() {
+    let test_state = http_backed_mixed_state();
+    let proxy = spawn_proxy(test_state.state.clone()).await;
+    let mut ws = connect_proxy_ws(&proxy).await;
+
+    ws.send_text(
+        response_create_with_previous_response_id_value("facade-google-model", Value::Null)
+            .to_string(),
+    )
+    .await
+    .unwrap();
+
+    let error = expect_json_frame(&mut ws).await;
+    assert_eq!(error["type"], "error");
+    assert_eq!(error["error"]["code"], "invalid_previous_response_id");
+    assert!(error["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("previous_response_id must be a string"));
+    assert_no_raw_sse(&error);
+
+    ws.send_text(response_create_generate_false("facade-bedrock-model").to_string())
+        .await
+        .unwrap();
+    let created = expect_json_frame(&mut ws).await;
+    assert_eq!(created["type"], "response.created");
+    let completed = expect_json_frame(&mut ws).await;
+    assert_eq!(completed["type"], "response.completed");
 
     proxy.handle.abort();
 }
@@ -225,7 +265,7 @@ async fn websocket_facade_cross_route_previous_response_id_error_keeps_socket_us
     );
     assert_no_raw_sse(&error);
 
-    ws.send_text(response_create_generate_false("facade-google-model").to_string())
+    ws.send_text(response_create_generate_false("facade-bedrock-model").to_string())
         .await
         .unwrap();
     let next_created = expect_json_frame(&mut ws).await;
@@ -316,6 +356,16 @@ fn response_create_generate_false(model: &str) -> Value {
 }
 
 fn response_create_with_previous_response_id(model: &str, previous_response_id: &str) -> Value {
+    response_create_with_previous_response_id_value(
+        model,
+        Value::String(previous_response_id.into()),
+    )
+}
+
+fn response_create_with_previous_response_id_value(
+    model: &str,
+    previous_response_id: Value,
+) -> Value {
     json!({
         "type": "response.create",
         "response": {
