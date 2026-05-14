@@ -34,7 +34,7 @@ git ls-files | while IFS= read -r path; do
     line_no=${match%%:*}
     line_text=${match#*:}
     case "$line_text" in
-      *"grep "*"/Users/"*|*"git grep "*"/Users/"*) continue ;;
+      *"grep "*"/Users/"*) continue ;;
     esac
     label=$(classify "$path" "$line_text")
     printf '%s:%s [%s] %s\n' "$path" "$line_no" "$label" "$line_text" >> "$report"

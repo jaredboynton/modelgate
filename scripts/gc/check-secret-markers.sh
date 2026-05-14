@@ -22,7 +22,7 @@ check_path() {
     *.pem|*.key|*.p12|*.pfx|*.jks|*.keystore) reason="private key/certificate store filename" ;;
     *service-account*.json|*service_account*.json|*gcloud*credentials*.json) reason="cloud service credential filename" ;;
     *credentials*.json|*credential*.json|*secrets*.json|*secret*.json|*tokens*.json|*token*.json|*auth.json|*oauth*.json|*cookies*.json|*cookie*.json|*session*.json) reason="credential capture filename" ;;
-    *.netrc|*/.netrc|*.npmrc|*/.npmrc|*.pypirc|*/.pypirc) reason="tool credential file" ;;
+    *.netrc|*.npmrc|*.pypirc) reason="tool credential file" ;;
   esac
 
   if [ -n "$reason" ]; then
