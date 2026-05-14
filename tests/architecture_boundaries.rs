@@ -127,30 +127,22 @@ fn rules() -> Vec<Rule> {
 }
 
 fn normalized_import_edges(source: &str) -> Vec<String> {
-    let without_comments = strip_line_comments(source);
+    let without_comments = strip_comments_and_strings(source);
     let mut imports = Vec::new();
 
     for statement in semicolon_statements(&without_comments) {
-        let compact = compact_whitespace(&statement);
+        let trimmed = statement.trim();
 
-        if compact.starts_with("usecrate::") || compact.starts_with("usesuper::") {
-            imports.extend(expand_use_statement(&compact));
+        if trimmed.starts_with("use crate::") || trimmed.starts_with("use super::") {
+            imports.extend(expand_use_statement(trimmed));
         }
 
-        imports.extend(crate_paths_in_statement(&compact));
+        imports.extend(crate_paths_in_statement(trimmed));
     }
 
     imports.sort();
     imports.dedup();
     imports
-}
-
-fn strip_line_comments(source: &str) -> String {
-    source
-        .lines()
-        .map(|line| line.split_once("//").map_or(line, |(before, _)| before))
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn semicolon_statements(source: &str) -> Vec<String> {
@@ -172,16 +164,9 @@ fn semicolon_statements(source: &str) -> Vec<String> {
     statements
 }
 
-fn compact_whitespace(value: &str) -> String {
-    value
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect()
-}
-
 fn expand_use_statement(statement: &str) -> Vec<String> {
     let Some(path) = statement
-        .strip_prefix("use")
+        .strip_prefix("use ")
         .and_then(|value| value.strip_suffix(';'))
     else {
         return Vec::new();
@@ -190,9 +175,10 @@ fn expand_use_statement(statement: &str) -> Vec<String> {
     expand_path(path)
         .into_iter()
         .map(|path| {
-            path.strip_prefix("super::")
+            strip_alias(&path)
+                .strip_prefix("super::")
                 .map(|rest| format!("super::{rest}"))
-                .unwrap_or(path)
+                .unwrap_or_else(|| strip_alias(&path))
         })
         .collect()
 }
@@ -208,11 +194,12 @@ fn expand_path(path: &str) -> Vec<String> {
 
         split_top_level(inner, ',')
             .into_iter()
+            .map(str::trim)
             .filter(|part| !part.is_empty() && *part != "self")
-            .flat_map(|part| expand_path(&format!("{prefix}{part}{suffix}")))
+            .flat_map(|part| expand_path(&format!("{}{}{}", prefix.trim(), part, suffix.trim())))
             .collect()
     } else {
-        vec![path.trim_end_matches(';').to_string()]
+        vec![path.trim_end_matches(';').trim().to_string()]
     }
 }
 
@@ -274,6 +261,13 @@ fn crate_paths_in_statement(statement: &str) -> Vec<String> {
     paths
 }
 
+fn strip_alias(path: &str) -> String {
+    path.split_once(" as ")
+        .map_or(path, |(before_alias, _)| before_alias)
+        .trim()
+        .to_string()
+}
+
 fn path_tail_len(value: &str) -> usize {
     value
         .char_indices()
@@ -292,6 +286,7 @@ fn path_tail_len(value: &str) -> usize {
 fn import_targets(import: &str, target: &str) -> bool {
     import == format!("crate::{target}")
         || import.starts_with(&format!("crate::{target}::"))
+        || import == format!("super::{target}")
         || import.starts_with(&format!("super::{target}::"))
 }
 
@@ -301,6 +296,135 @@ fn router_imports_provider_runtime_layers(imports: &[String]) -> bool {
             || import_targets(import, "adapter")
             || import_targets(import, "auth")
     })
+}
+
+fn strip_comments_and_strings(source: &str) -> String {
+    let mut output = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    let mut in_line_comment = false;
+    let mut block_comment_depth = 0usize;
+    let mut in_string = false;
+    let mut in_char = false;
+    let mut raw_string_hashes: Option<usize> = None;
+
+    while let Some(character) = chars.next() {
+        if in_line_comment {
+            if character == '\n' {
+                in_line_comment = false;
+                output.push('\n');
+            } else {
+                output.push(' ');
+            }
+            continue;
+        }
+
+        if block_comment_depth > 0 {
+            if character == '/' && chars.peek() == Some(&'*') {
+                chars.next();
+                block_comment_depth += 1;
+                output.push_str("  ");
+            } else if character == '*' && chars.peek() == Some(&'/') {
+                chars.next();
+                block_comment_depth -= 1;
+                output.push_str("  ");
+            } else if character == '\n' {
+                output.push('\n');
+            } else {
+                output.push(' ');
+            }
+            continue;
+        }
+
+        if let Some(hash_count) = raw_string_hashes {
+            if character == '"' {
+                let mut matched_hashes = 0;
+                while matched_hashes < hash_count && chars.peek() == Some(&'#') {
+                    chars.next();
+                    matched_hashes += 1;
+                }
+                if matched_hashes == hash_count {
+                    raw_string_hashes = None;
+                }
+                output.push(' ');
+            } else if character == '\n' {
+                output.push('\n');
+            } else {
+                output.push(' ');
+            }
+            continue;
+        }
+
+        if in_string {
+            if character == '\\' {
+                output.push(' ');
+                if chars.next().is_some() {
+                    output.push(' ');
+                }
+            } else if character == '"' {
+                in_string = false;
+                output.push(' ');
+            } else if character == '\n' {
+                output.push('\n');
+            } else {
+                output.push(' ');
+            }
+            continue;
+        }
+
+        if in_char {
+            if character == '\\' {
+                output.push(' ');
+                if chars.next().is_some() {
+                    output.push(' ');
+                }
+            } else if character == '\'' {
+                in_char = false;
+                output.push(' ');
+            } else if character == '\n' {
+                output.push('\n');
+            } else {
+                output.push(' ');
+            }
+            continue;
+        }
+
+        if character == '/' && chars.peek() == Some(&'/') {
+            chars.next();
+            in_line_comment = true;
+            output.push_str("  ");
+        } else if character == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            block_comment_depth = 1;
+            output.push_str("  ");
+        } else if character == 'r' {
+            let mut probe = chars.clone();
+            let mut hash_count = 0;
+            while probe.peek() == Some(&'#') {
+                probe.next();
+                hash_count += 1;
+            }
+            if probe.peek() == Some(&'"') {
+                for _ in 0..hash_count {
+                    chars.next();
+                }
+                chars.next();
+                raw_string_hashes = Some(hash_count);
+                output.push_str(&" ".repeat(hash_count + 2));
+            } else {
+                output.push(character);
+            }
+        } else if character == '"' {
+            in_string = true;
+            output.push(' ');
+        } else if character == '\'' {
+            in_char = true;
+            output.push(' ');
+        } else {
+            output.push(character);
+        }
+    }
+
+    output
 }
 
 fn format_violations(violations: &[Violation]) -> String {

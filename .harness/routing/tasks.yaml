@@ -9,12 +9,11 @@ defaults:
 routes:
   docs:
     paths:
-      - "README.md"
       - "docs/**"
       - "LAYERS.md"
     preferred_role: "writer"
     validation:
-      - "rg -n 'TODO|FIXME|HACK' docs README.md LAYERS.md"
+      - "scripts/gc/check-todos.sh"
 
   harness:
     paths:
@@ -49,4 +48,5 @@ blocked_without_lead:
   - "src/**"
   - "Cargo.toml"
   - "Cargo.lock"
+  - "README.md"
   - "launchd/**"

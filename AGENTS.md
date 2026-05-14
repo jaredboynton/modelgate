@@ -49,7 +49,8 @@ Route layer parse/validate request shape, enforce provider/model fit, call relev
 | Model catalog and aliases | `src/model_alias.rs`, `src/codex_catalog.rs`, `tests/unit_model_alias.rs` |
 | SSE or WebSocket behavior | `src/sse/`, `src/route/websocket.rs`, `tests/integration_websocket_*` |
 | Launchd/local service setup | `launchd/`, `README.md` |
-| Validation and distribution gates | `docs/guides/local-validation.md`, `docs/guides/distribution-readiness.md` |
+| Validation and distribution gates | `docs/guides/local-validation.md`, `docs/guides/distribution-readiness.md`, `scripts/gc/run-all.sh`, `.githooks/pre-commit` |
+| Multi-agent coordination | `.harness/coordination/board.md`, `.harness/tasks/README.md`, `.harness/routing/tasks.yaml` |
 
 ## Coding Conventions
 
@@ -97,3 +98,5 @@ Route layer parse/validate request shape, enforce provider/model fit, call relev
 - Test: `cargo test`
 - Lint: `cargo clippy --all-targets --all-features -- -D warnings`
 - Run locally: `cargo run`
+- Harness GC: `scripts/gc/run-all.sh`
+- Install hook: `git config core.hooksPath .githooks`

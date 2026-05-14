@@ -42,7 +42,7 @@ done
 if [ -s "$failures" ]; then
   echo "GC hard fail: tracked or staged runtime artifacts were found." >&2
   echo "Remove these files from git and keep them ignored/local:" >&2
-  while IFS='\t' read -r path reason; do
+  while IFS="$(printf '\t')" read -r path reason; do
     printf '  - %s (%s)\n' "$path" "$reason" >&2
   done < "$failures"
   echo "Remediation: git rm --cached <path> for accidental tracked files; move live captures under ignored local scratch." >&2

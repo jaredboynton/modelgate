@@ -8,7 +8,7 @@ Use this board for additive harness/runtime-safe work only. Do not use it to cla
 |---|---|---|---|---|---|
 | 1 |  |  | todo |  |  |
 | 2 |  |  | todo |  |  |
-| 3 |  | `.harness/**` | in progress |  |  |
+| 3 |  |  | todo |  |  |
 
 ## Status Values
 

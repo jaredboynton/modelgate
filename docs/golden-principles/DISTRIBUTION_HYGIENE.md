@@ -17,7 +17,7 @@ Golden rule: this repo is not remote/distribution-ready until clone-affecting lo
 ## Report-Only Until Policy Lands
 
 - Absolute local paths in docs, planning notes, launchd files, and manifests.
-- TODO/FIXME/HACK inventory.
+- Task-marker inventory.
 - Oversized files that are already known artifacts.
 
 Manifest paths that affect `cargo metadata`, `cargo build --locked`, or remote clone behavior must be labeled pre-remote blockers even if the script exits report-only.

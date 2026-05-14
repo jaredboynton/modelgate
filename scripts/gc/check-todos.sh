@@ -7,17 +7,17 @@ cd "$repo_root"
 report=$(mktemp)
 trap 'rm -f "$report"' EXIT
 
-for path in $(git ls-files); do
+git ls-files | while IFS= read -r path; do
   [ -f "$path" ] || continue
   file "$path" 2>/dev/null | grep -Eq 'text|empty|JSON|TOML|YAML|XML|shell|script|Rust|Markdown|ASCII|UTF-8' || continue
-  grep -nE 'TODO|FIXME|HACK|XXX' "$path" 2>/dev/null >> "$report" || true
+  grep -nE '\b(T[O]DO|F[I]XME|H[A]CK|X[X]X)\b' "$path" 2>/dev/null >> "$report" || true
 done
 
 if [ -s "$report" ]; then
-  echo "GC report: TODO/FIXME/HACK inventory found."
+  echo "GC report: task marker inventory found."
   cat "$report"
 else
-  echo "OK: no TODO/FIXME/HACK markers found in tracked files."
+  echo "OK: no task markers found in tracked files."
 fi
 
 exit 0

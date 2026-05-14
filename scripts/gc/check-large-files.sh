@@ -15,7 +15,7 @@ is_allowed_large_file() {
   return 1
 }
 
-for path in $(git ls-files); do
+git ls-files | while IFS= read -r path; do
   [ -f "$path" ] || continue
   is_allowed_large_file "$path" && continue
   size=$(wc -c < "$path" | tr -d ' ')

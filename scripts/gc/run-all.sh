@@ -21,7 +21,7 @@ run_check() {
 run_check "tracked runtime artifacts" scripts/gc/check-tracked-runtime-artifacts.sh
 run_check "secret marker filenames" scripts/gc/check-secret-markers.sh
 run_check "absolute local paths report" scripts/gc/check-local-paths.sh
-run_check "TODO inventory report" scripts/gc/check-todos.sh
+run_check "task marker inventory report" scripts/gc/check-todos.sh
 if [ -x scripts/gc/check-large-files.sh ]; then
   run_check "large files report" scripts/gc/check-large-files.sh
 fi
