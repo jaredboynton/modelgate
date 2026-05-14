@@ -17,6 +17,7 @@ use crate::{
         },
     },
     model_alias::{resolve_model_required, Provider, ResolvedModel},
+    route::models::validate_codex_catalog_request,
     upstream, AppError, AppResult, AppState, UpstreamResponse,
 };
 
@@ -42,8 +43,12 @@ pub async fn execute_responses_request(
     let alias = state.resolve_model_for_format(&requested_model, "responses")?;
     match responses_route_for_alias(&requested_model, &alias)? {
         ResponsesRoute::CodexResponses => {
-            value["model"] = serde_json::Value::String(alias.upstream_model);
-            codex_response_bytes(upstream::codex::responses(state, value).await?)
+            let upstream_model = alias.upstream_model.clone();
+            let prepared = upstream::codex::prepare_responses_body_with_resolver(value, |model| {
+                state.resolve_model_for_format(model, "responses")
+            })?;
+            validate_codex_catalog_request(state, &prepared, &upstream_model).await?;
+            codex_response_bytes(upstream::codex::responses_prepared(state, prepared).await?)
         }
         ResponsesRoute::BedrockMessages => {
             if options.force_stream {

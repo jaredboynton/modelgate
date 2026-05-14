@@ -1,0 +1,92 @@
+name: Distribution preflight report
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_cargo_probe:
+        description: "Attempt Cargo metadata/build probes even if local path blockers are present"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  report:
+    name: report-only distribution preflight
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Explain report-only status
+        run: |
+          cat <<'MSG'
+          This workflow is manual and report-only.
+          Local path blockers such as specter are expected until dependency portability is resolved.
+          Findings here are distribution readiness evidence, not a required green remote gate.
+          No live credentials are used.
+          MSG
+
+      - name: Run GC preflight if available
+        shell: bash
+        run: |
+          set +e
+          if [[ -x scripts/gc/run-all.sh ]]; then
+            scripts/gc/run-all.sh
+            exit_code=$?
+          elif [[ -f scripts/gc/run-all.sh ]]; then
+            bash scripts/gc/run-all.sh
+            exit_code=$?
+          else
+            echo "scripts/gc/run-all.sh is not present yet; skipping GC preflight."
+            exit_code=0
+          fi
+          echo "GC preflight exit code: ${exit_code}"
+          exit 0
+
+      - name: Run local path inventory if available
+        shell: bash
+        run: |
+          set +e
+          if [[ -x scripts/gc/check-local-paths.sh ]]; then
+            scripts/gc/check-local-paths.sh
+            exit_code=$?
+          elif [[ -f scripts/gc/check-local-paths.sh ]]; then
+            bash scripts/gc/check-local-paths.sh
+            exit_code=$?
+          else
+            echo "scripts/gc/check-local-paths.sh is not present yet; using lightweight fallback."
+            git grep -nE '/Users/|/home/|path *= *"/' || true
+            exit_code=0
+          fi
+          echo "Local path inventory exit code: ${exit_code}"
+          exit 0
+
+      - name: Cargo metadata portability probe
+        if: ${{ inputs.run_cargo_probe == true }}
+        shell: bash
+        run: |
+          set +e
+          cargo metadata --locked --format-version=1
+          metadata_exit=$?
+          cargo build --locked
+          build_exit=$?
+          cat <<MSG
+          cargo metadata exit code: ${metadata_exit}
+          cargo build exit code: ${build_exit}
+          Non-zero exits are expected while specter remains a local absolute path.
+          MSG
+          exit 0
+
+      - name: Summarize current blocker
+        run: |
+          cat <<'MSG'
+          Pre-remote blocker: specter must be made portable before required GitHub-hosted CI or distribution claims.
+          Current valid claim: CI and distribution-preflight scaffolding exist, with remote-required checks gated by dependency portability.
+          MSG

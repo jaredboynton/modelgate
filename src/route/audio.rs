@@ -1,5 +1,7 @@
 use axum::{http::StatusCode, Json};
-use serde_json::{json, Value};
+use serde_json::Value;
+
+use crate::error::openai_error_body;
 
 pub async fn realtime_transcription_sessions() -> (StatusCode, Json<Value>) {
     feature_gated(
@@ -21,12 +23,27 @@ pub async fn transcribe() -> (StatusCode, Json<Value>) {
 
 fn feature_gated(message: &str) -> (StatusCode, Json<Value>) {
     (
-        StatusCode::BAD_REQUEST,
-        Json(json!({
-            "error": {
-                "type": "unsupported_route",
-                "message": message,
-            }
-        })),
+        StatusCode::NOT_IMPLEMENTED,
+        Json(openai_error_body(
+            message,
+            "invalid_request_error",
+            None,
+            Some("unsupported_feature"),
+        )),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn audio_feature_gates_return_unsupported_feature_contract() {
+        let (status, Json(body)) = audio_speech().await;
+
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["error"]["type"], "invalid_request_error");
+        assert_eq!(body["error"]["code"], "unsupported_feature");
+        assert!(body["error"]["param"].is_null());
+    }
 }

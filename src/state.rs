@@ -12,6 +12,7 @@ use std::{
 
 use crate::{
     amp_compat::AmpStore,
+    codex_catalog::{CodexCatalogCache, CodexCatalogConfig},
     hot_config::HotRoutingConfig,
     model_alias::{resolve_model_required, ResolvedModel},
     AppResult,
@@ -33,6 +34,7 @@ pub struct AppState {
     pub bedrock_region: Arc<str>,
     pub runtime: RuntimeConfig,
     pub routing_config: HotRoutingConfig,
+    pub codex_catalog: CodexCatalogCache,
     response_storage: ResponseStorage,
     codex_wss_latched: Arc<AtomicBool>,
     codex_wss_failures: Arc<AtomicU32>,
@@ -47,6 +49,8 @@ pub struct RuntimeConfig {
     pub codex_wss_connect_timeout: Duration,
     pub codex_max_concurrent: usize,
     pub codex_handshakes_per_min: u32,
+    pub codex_catalog_client_version: String,
+    pub codex_catalog_ttl: Duration,
     pub bedrock_discovery_timeout: Duration,
 }
 
@@ -133,6 +137,7 @@ impl AppState {
                 .unwrap_or_else(|_| "us-east-1".to_string()),
         );
         let routing_config = HotRoutingConfig::from_env(&auth_home);
+        let codex_catalog = CodexCatalogCache::new(runtime.codex_catalog_config());
 
         Self {
             http: reqwest::Client::new(),
@@ -144,6 +149,7 @@ impl AppState {
             bedrock_region,
             runtime,
             routing_config,
+            codex_catalog,
             response_storage: ResponseStorage::default(),
             codex_wss_latched: Arc::new(AtomicBool::new(false)),
             codex_wss_failures: Arc::new(AtomicU32::new(0)),
@@ -154,6 +160,8 @@ impl AppState {
         assert_test_home(&codex_home);
         assert_test_home(&auth_home);
         let routing_config = HotRoutingConfig::from_path(auth_home.join("config.json"));
+        let runtime = RuntimeConfig::for_tests();
+        let codex_catalog = CodexCatalogCache::new(runtime.codex_catalog_config());
 
         Self {
             http: reqwest::Client::new(),
@@ -163,8 +171,9 @@ impl AppState {
             auth_home,
             google_api_key: None,
             bedrock_region: Arc::<str>::from("us-east-1"),
-            runtime: RuntimeConfig::for_tests(),
+            runtime,
             routing_config,
+            codex_catalog,
             response_storage: ResponseStorage::default(),
             codex_wss_latched: Arc::new(AtomicBool::new(false)),
             codex_wss_failures: Arc::new(AtomicU32::new(0)),
@@ -315,6 +324,7 @@ impl RuntimeConfig {
     where
         F: FnMut(&str) -> Result<String, env::VarError>,
     {
+        let codex_catalog_config = CodexCatalogConfig::from_env_vars(&mut var)?;
         Ok(Self {
             listen_addr: var("UMP_V2_LISTEN_ADDR")
                 .unwrap_or_else(|_| "127.0.0.1:18743".to_string())
@@ -336,6 +346,8 @@ impl RuntimeConfig {
             )?,
             codex_max_concurrent: usize_env(&mut var, "UMP_V2_CODEX_MAX_CONCURRENT", 20)?,
             codex_handshakes_per_min: u32_env(&mut var, "UMP_V2_CODEX_HANDSHAKES_PER_MIN", 55)?,
+            codex_catalog_client_version: codex_catalog_config.client_version,
+            codex_catalog_ttl: codex_catalog_config.ttl,
             bedrock_discovery_timeout: duration_ms_env(
                 &mut var,
                 "UMP_V2_BEDROCK_DISCOVERY_TIMEOUT_MS",
@@ -351,6 +363,13 @@ impl RuntimeConfig {
             ..Self::default()
         }
     }
+
+    pub fn codex_catalog_config(&self) -> CodexCatalogConfig {
+        CodexCatalogConfig {
+            client_version: self.codex_catalog_client_version.clone(),
+            ttl: self.codex_catalog_ttl,
+        }
+    }
 }
 
 impl Default for RuntimeConfig {
@@ -363,6 +382,8 @@ impl Default for RuntimeConfig {
             codex_wss_connect_timeout: Duration::from_millis(5000),
             codex_max_concurrent: 20,
             codex_handshakes_per_min: 55,
+            codex_catalog_client_version: CodexCatalogConfig::default().client_version,
+            codex_catalog_ttl: CodexCatalogConfig::default().ttl,
             bedrock_discovery_timeout: Duration::from_millis(5000),
         }
     }

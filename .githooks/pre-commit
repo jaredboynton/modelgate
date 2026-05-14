@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+echo "pre-commit: checking whitespace in staged diff"
+git diff --check --cached
+
+echo "pre-commit: checking tracked/staged runtime artifacts"
+scripts/gc/check-tracked-runtime-artifacts.sh
+
+echo "pre-commit: checking tracked/staged secret marker filenames"
+scripts/gc/check-secret-markers.sh
+
+echo "pre-commit: checking Rust formatting"
+cargo fmt --check
+
+if [ "${FULL_PRECOMMIT:-0}" = "1" ]; then
+  echo "pre-commit: FULL_PRECOMMIT=1 running cargo check"
+  cargo check
+
+  echo "pre-commit: FULL_PRECOMMIT=1 running all GC checks"
+  scripts/gc/run-all.sh
+fi
+
+echo "pre-commit: ok"

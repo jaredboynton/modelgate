@@ -1,0 +1,52 @@
+# Lightweight routing hints for harness-safe task assignment.
+# This file is advisory; AGENTS.md and explicit user scope win.
+
+defaults:
+  require_write_scope: true
+  no_live_credentials: true
+  preserve_runtime_behavior: true
+
+routes:
+  docs:
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "LAYERS.md"
+    preferred_role: "writer"
+    validation:
+      - "rg -n 'TODO|FIXME|HACK' docs README.md LAYERS.md"
+
+  harness:
+    paths:
+      - ".harness/**"
+    preferred_role: "executor"
+    validation:
+      - "find .harness -type f | sort"
+
+  architecture_tests:
+    paths:
+      - "tests/**"
+    preferred_role: "test-engineer"
+    validation:
+      - "cargo test architecture"
+
+  gc_scripts:
+    paths:
+      - "scripts/gc/**"
+    preferred_role: "executor"
+    validation:
+      - "scripts/gc/run-all.sh"
+
+  ci:
+    paths:
+      - ".github/workflows/**"
+      - ".githooks/**"
+    preferred_role: "executor"
+    validation:
+      - ".githooks/pre-commit"
+
+blocked_without_lead:
+  - "src/**"
+  - "Cargo.toml"
+  - "Cargo.lock"
+  - "launchd/**"

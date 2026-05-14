@@ -130,7 +130,7 @@ If crates.io lacks the merged Specter WebSocket APIs, use a local/path dependenc
 |---|---|---|---|
 | GET | `/health` | `route::health` | none |
 | GET | `/v1/models` | `route::models` | synthesized |
-| GET | `/api/provider/openai/v1/models` | `route::models` | synthesized |
+| GET | `/api/provider/openai/v1/models` | `route::models` | live Codex catalog projection |
 | POST | `/api/provider/anthropic/v1/messages` | `route::messages` | Bedrock Mantle |
 | POST | `/api/provider/anthropic/v1/messages/count_tokens` | `route::count_tokens` | local approx/stub |
 | POST | `/api/provider/openai/v1/responses` | `route::responses` | Codex WSS, HTTP fallback |
@@ -401,7 +401,9 @@ Observed Codex Desktop image path:
 - Stream contains `image_generation_call`.
 - `image_generation_call.result` is base64 PNG.
 - Local app saves PNG under `~/.codex/generated_images/<thread_id>/<call_id>.png`.
-- Public `/v1/images/*` fallback code exists only for real `OPENAI_API_KEY`.
+- Public `/v1/images/*` remains unsupported in v0.1; true public OpenAI
+  API-key routing belongs to a future explicit provider, not the Codex OAuth
+  facade.
 
 Amp `gpt-image-2` inbound routes:
 

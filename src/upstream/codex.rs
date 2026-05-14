@@ -320,6 +320,25 @@ pub async fn responses_with_endpoints(
     let body = prepare_responses_body_with_resolver(body, |model| {
         state.resolve_model_for_format(model, "responses")
     })?;
+    responses_prepared_with_endpoints(state, body, wss_url, http_url).await
+}
+
+pub async fn responses_prepared(state: &AppState, body: serde_json::Value) -> AppResult<Bytes> {
+    responses_prepared_with_endpoints(
+        state,
+        body,
+        &state.runtime.codex_responses_wss_url,
+        &state.runtime.codex_responses_http_url,
+    )
+    .await
+}
+
+async fn responses_prepared_with_endpoints(
+    state: &AppState,
+    body: serde_json::Value,
+    wss_url: &str,
+    http_url: &str,
+) -> AppResult<Bytes> {
     match state.runtime.codex_transport {
         CodexTransport::Wss => send_wss_with_refresh(state, wss_url, &body).await,
         CodexTransport::Http => send_http_with_refresh(state, http_url, &body).await,

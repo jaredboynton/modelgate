@@ -21,6 +21,9 @@ Keep changes small, provider-aware. `README.md` = short product summary; `PLANNI
 ```text
 Cargo.toml             crate manifest; keep Cargo.lock tracked
 README.md              short product summary and local listen address
+LAYERS.md              short layer map; links to canonical docs
+docs/architecture/     layer contracts and forbidden edges
+docs/guides/           local validation and distribution readiness
 PLANNING/              durable plans and adapter design notes
 launchd/               local service launch assets
 src/main.rs            tracing setup, env state, bind/serve entrypoint
@@ -36,6 +39,17 @@ tests/                 route, auth, model, upstream, and SSE coverage
 ```
 
 Route layer parse/validate request shape, enforce provider/model fit, call relevant upstream module. Shared service state in `AppState`, not globals.
+
+## Where To Look First
+
+| Need | Start here |
+|---|---|
+| Layer ownership or forbidden imports | `LAYERS.md`, `docs/architecture/LAYERS.md` |
+| Routes, upstreams, adapters, auth | `src/route/`, `src/upstream/`, `src/adapter/`, `src/auth/` |
+| Model catalog and aliases | `src/model_alias.rs`, `src/codex_catalog.rs`, `tests/unit_model_alias.rs` |
+| SSE or WebSocket behavior | `src/sse/`, `src/route/websocket.rs`, `tests/integration_websocket_*` |
+| Launchd/local service setup | `launchd/`, `README.md` |
+| Validation and distribution gates | `docs/guides/local-validation.md`, `docs/guides/distribution-readiness.md` |
 
 ## Coding Conventions
 
@@ -73,6 +87,7 @@ Route layer parse/validate request shape, enforce provider/model fit, call relev
 - Don't weaken test-home guards; prevent accidental reads/writes to real auth state
 - Don't reorder model-not-supported/missing-credential failures w/o updating route tests + relevant planning note
 - Don't rely on close-frame-only WebSocket failures for Codex CLI. Use wrapped top-level error events with `type = "error"`, numeric `status`, and `error.code`
+- Don't claim remote clone readiness while `specter` uses `/Users/jaredboynton/__devlocal/specter`; it is a pre-remote blocker, and CI stays manual/pending or dependency-gated until portable
 - Don't commit `.env`, `.omx/`, `target/`, logs, live runtime captures
 
 ## Commands

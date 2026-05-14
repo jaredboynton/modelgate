@@ -1,0 +1,2 @@
+# Local actionlint config used by the global pre-commit hook.
+# Keep empty unless the workflows add custom runner labels or config variables.

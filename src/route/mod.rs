@@ -17,6 +17,8 @@ use axum::{
 };
 use serde_json::json;
 
+use crate::error::openai_error_body;
+
 pub async fn not_found(method: Method, uri: Uri) -> (StatusCode, Json<serde_json::Value>) {
     tracing::warn!(%method, %uri, "unmatched route");
     (
@@ -27,5 +29,17 @@ pub async fn not_found(method: Method, uri: Uri) -> (StatusCode, Json<serde_json
                 "message": format!("route not found: {method} {uri}"),
             }
         })),
+    )
+}
+
+pub async fn unsupported_public_openai_route() -> (StatusCode, Json<serde_json::Value>) {
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(openai_error_body(
+            "public OpenAI route is not implemented for the Codex OAuth facade",
+            "invalid_request_error",
+            None,
+            Some("unsupported_route"),
+        )),
     )
 }

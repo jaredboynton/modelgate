@@ -10,6 +10,12 @@ The proxy also serves Amp's local control-plane compatibility surface:
 thread/task/report storage, thread search/markdown, attachments, telemetry,
 GitHub/Bitbucket helper stubs, and startup account/plugin probes.
 
+UMP's OpenAI-shaped routes are an OpenAI-compatible facade, not a claim of
+public OpenAI API parity. Each route resolves a model to an explicit provider
+disposition before upstream dispatch. Today, GPT Responses and chat-compatible
+traffic use Codex OAuth from `~/.codex/auth.json`; public OpenAI API-key
+transport is not a fallback.
+
 ## Run Locally
 
 Debug run:
@@ -102,6 +108,28 @@ Responses WebSocket passthrough:
 - The first client frame can be raw Responses JSON or a `response.create` event.
 - The proxy applies hot routing for `format: "responses"`, forwards only Codex-capable targets over WSS, injects Codex OAuth headers, then relays frames both ways.
 
+OpenAI-compatible facade disposition:
+
+- `/v1/responses` and `/v1/chat/completions` are aggregate facade routes. They
+  route by requested model: Codex-backed GPT models use Codex OAuth,
+  Claude-shaped models go through Bedrock adapters, and Gemini models go
+  through Google adapters where that edge exists.
+- `/api/provider/openai/v1/responses` and
+  `/api/provider/openai/v1/chat/completions` are OpenAI-shaped facade
+  entrypoints. Codex-backed GPT dispositions use Codex OAuth; these routes are
+  neither blanket public OpenAI API proxies nor blanket Codex backends for
+  every model.
+- `/api/provider/openai/v1/models` fetches the live Codex model catalog from
+  the ChatGPT Codex backend using Codex OAuth headers.
+- `/v1/models` returns the aggregate catalog: built-in static models plus
+  configured hot-route models. It does not call the live Codex catalog.
+- Public-only OpenAI features that are not mapped to Codex or another explicit
+  provider fail closed with `unsupported_route`, `model_not_supported`, or
+  `invalid_request` instead of falling through to public OpenAI.
+- A future `public-openai` API-key provider may be added as an explicit,
+  disabled-by-default provider. It must not become an implicit fallback for
+  Codex-backed GPT flows.
+
 ## Codex CLI
 
 Codex only accepts Responses API providers, so point `~/.codex/config.toml`
@@ -159,7 +187,8 @@ valid `previous_response_id` continuations for the same route/model.
 
 Useful model choices:
 
-- `gpt-5.5` / `openai:gpt-5.5` routes to the Codex/ChatGPT OAuth endpoint.
+- `gpt-5.5` / `openai:gpt-5.5` routes to the Codex/ChatGPT OAuth endpoint
+  with credentials from `~/.codex/auth.json`.
 - `claude-sonnet-4-6` routes Responses requests through the Anthropic adapter
   to Bedrock Runtime.
 - `claude-sonnet-4-6-max` uses the same Bedrock Runtime model with

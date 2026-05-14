@@ -7,12 +7,16 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::{
-    model_alias::KNOWN_MODELS, upstream::codex::codex_headers, AppError, AppResult, AppState,
+    codex_catalog::{
+        codex_models_endpoint as shared_codex_models_endpoint, CodexCatalog, CodexCatalogRequest,
+        CODEX_MODELS_URL, DEFAULT_CODEX_CLIENT_VERSION,
+    },
+    model_alias::KNOWN_MODELS,
+    upstream::codex::codex_headers,
+    AppError, AppResult, AppState,
 };
 
 const HIDDEN_CODEX_MODEL_IDS: &[&str] = &["codex-auto-review"];
-const CODEX_MODELS_URL: &str = "https://chatgpt.com/backend-api/codex/models";
-const DEFAULT_CODEX_CLIENT_VERSION: &str = "26.506.31421";
 
 #[derive(Debug, Deserialize)]
 pub struct ModelsQuery {
@@ -64,13 +68,71 @@ async fn codex_models(
     State(state): State<AppState>,
     Query(query): Query<ModelsQuery>,
 ) -> AppResult<Json<Value>> {
-    let client_version = query
-        .client_version
-        .as_deref()
-        .unwrap_or(DEFAULT_CODEX_CLIENT_VERSION);
-    let url = codex_models_endpoint(CODEX_MODELS_URL, Some(client_version))?;
+    codex_openai_models_projection(
+        &state,
+        query
+            .client_version
+            .as_deref()
+            .unwrap_or(DEFAULT_CODEX_CLIENT_VERSION),
+        query.include_hidden.unwrap_or(false),
+    )
+    .await
+    .map(Json)
+}
+
+pub async fn codex_openai_models_projection(
+    state: &AppState,
+    client_version: &str,
+    include_hidden: bool,
+) -> AppResult<Value> {
+    let client_version = required_client_version(Some(client_version))?;
+    let catalog = codex_catalog_for_client_version(state, client_version).await?;
+    Ok(catalog.to_openai_models(include_hidden))
+}
+
+pub async fn validate_codex_catalog_request(
+    state: &AppState,
+    request: &Value,
+    upstream_model: &str,
+) -> AppResult<()> {
+    let catalog = codex_catalog(state).await?;
+    validate_codex_catalog_request_with_catalog(&catalog, request, upstream_model)
+}
+
+pub async fn validate_codex_catalog_websocket_request(
+    state: &AppState,
+    request: &Value,
+    upstream_model: &str,
+) -> AppResult<()> {
+    if let Some(catalog) = state.codex_catalog.get_if_fresh() {
+        return validate_codex_catalog_request_with_catalog(&catalog, request, upstream_model);
+    }
+    validate_codex_catalog_request(state, request, upstream_model).await
+}
+
+async fn codex_catalog(state: &AppState) -> AppResult<CodexCatalog> {
+    if let Some(catalog) = state.codex_catalog.get_if_fresh() {
+        return Ok(catalog);
+    }
+    let headers = codex_headers(state)?;
+    state
+        .codex_catalog
+        .refresh_from_endpoint(&state.http, &headers, CODEX_MODELS_URL)
+        .await
+}
+
+async fn codex_catalog_for_client_version(
+    state: &AppState,
+    client_version: &str,
+) -> AppResult<CodexCatalog> {
+    if client_version == state.codex_catalog.client_version() {
+        return codex_catalog(state).await;
+    }
+
+    let headers = codex_headers(state)?;
+    let url = shared_codex_models_endpoint(CODEX_MODELS_URL, client_version)?;
     let mut request = state.http.get(url);
-    for (name, value) in codex_headers(&state)?.iter() {
+    for (name, value) in headers.iter() {
         request = request.header(name, value);
     }
     let response = request
@@ -87,21 +149,13 @@ async fn codex_models(
             "Codex models returned {status}: {text}"
         )));
     }
-    let catalog: Value = serde_json::from_str(&text)?;
-    codex_catalog_to_openai_models(
-        Some(client_version),
-        &catalog,
-        query.include_hidden.unwrap_or(false),
-    )
-    .map(Json)
+    let raw = serde_json::from_str(&text)?;
+    CodexCatalog::parse(client_version, &raw)
 }
 
 pub fn codex_models_endpoint(base_url: &str, client_version: Option<&str>) -> AppResult<String> {
     let client_version = required_client_version(client_version)?;
-    let separator = if base_url.contains('?') { '&' } else { '?' };
-    Ok(format!(
-        "{base_url}{separator}client_version={client_version}"
-    ))
+    shared_codex_models_endpoint(base_url, client_version)
 }
 
 pub fn codex_catalog_to_openai_models(
@@ -109,27 +163,8 @@ pub fn codex_catalog_to_openai_models(
     catalog: &Value,
     include_hidden: bool,
 ) -> AppResult<Value> {
-    required_client_version(client_version)?;
-    let models = catalog
-        .get("models")
-        .and_then(Value::as_array)
-        .ok_or_else(|| AppError::BadRequest("Codex models catalog missing models".into()))?;
-    let data = models
-        .iter()
-        .filter_map(|model| codex_catalog_model_id(model, include_hidden))
-        .map(|id| {
-            json!({
-                "id": id,
-                "object": "model",
-                "owned_by": "codex",
-            })
-        })
-        .collect::<Vec<_>>();
-
-    Ok(json!({
-        "object": "list",
-        "data": data
-    }))
+    let client_version = required_client_version(client_version)?;
+    Ok(CodexCatalog::parse(client_version, catalog)?.to_openai_models(include_hidden))
 }
 
 fn required_client_version(client_version: Option<&str>) -> AppResult<&str> {
@@ -139,29 +174,98 @@ fn required_client_version(client_version: Option<&str>) -> AppResult<&str> {
         .ok_or_else(|| AppError::BadRequest("client_version is required for Codex models".into()))
 }
 
-fn codex_catalog_model_id(model: &Value, include_hidden: bool) -> Option<&str> {
-    let id = model.get("slug").and_then(Value::as_str)?;
-    if !include_hidden && is_hidden_codex_catalog_model(model, id) {
-        return None;
-    }
-    if model
-        .get("supported_in_api")
-        .and_then(Value::as_bool)
-        .is_some_and(|supported| !supported)
-    {
-        return None;
-    }
-    Some(id)
-}
-
-fn is_hidden_codex_catalog_model(model: &Value, id: &str) -> bool {
-    is_hidden_codex_model(id)
-        || model
-            .get("visibility")
-            .and_then(Value::as_str)
-            .is_some_and(|visibility| visibility != "list")
-}
-
 fn is_hidden_codex_model(id: &str) -> bool {
     HIDDEN_CODEX_MODEL_IDS.contains(&id)
+}
+
+fn validate_codex_catalog_request_with_catalog(
+    catalog: &CodexCatalog,
+    request: &Value,
+    upstream_model: &str,
+) -> AppResult<()> {
+    let reasoning_effort = request
+        .get("reasoning")
+        .and_then(Value::as_object)
+        .and_then(|reasoning| reasoning.get("effort"))
+        .and_then(Value::as_str);
+    let service_tier = request.get("service_tier").and_then(Value::as_str);
+    let verbosity = request
+        .get("text")
+        .and_then(Value::as_object)
+        .and_then(|text| text.get("verbosity"))
+        .or_else(|| request.get("verbosity"))
+        .and_then(Value::as_str);
+    let truncation = request.get("truncation").and_then(Value::as_str);
+    let input_modalities = input_modalities(request);
+    let output_modalities = string_array(request.get("output_modalities"))
+        .or_else(|| string_array(request.get("modalities")))
+        .unwrap_or_default();
+    let input_modalities = input_modalities
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let output_modalities = output_modalities
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+
+    catalog.validate_request(CodexCatalogRequest {
+        model: upstream_model,
+        include_hidden: false,
+        reasoning_effort,
+        service_tier,
+        verbosity,
+        truncation,
+        input_modalities: &input_modalities,
+        output_modalities: &output_modalities,
+    })?;
+    Ok(())
+}
+
+fn input_modalities(request: &Value) -> Vec<String> {
+    let mut modalities = Vec::new();
+    collect_input_modalities(request.get("input"), &mut modalities);
+    modalities.sort();
+    modalities.dedup();
+    modalities
+}
+
+fn collect_input_modalities(value: Option<&Value>, modalities: &mut Vec<String>) {
+    match value {
+        Some(Value::String(_)) => push_modality(modalities, "text"),
+        Some(Value::Array(values)) => {
+            for value in values {
+                collect_input_modalities(Some(value), modalities);
+            }
+        }
+        Some(Value::Object(object)) => {
+            match object.get("type").and_then(Value::as_str) {
+                Some("input_text" | "text") => push_modality(modalities, "text"),
+                Some("input_image" | "image") => push_modality(modalities, "image"),
+                Some("message") => collect_input_modalities(object.get("content"), modalities),
+                _ => {}
+            }
+            collect_input_modalities(object.get("content"), modalities);
+        }
+        _ => {}
+    }
+}
+
+fn push_modality(modalities: &mut Vec<String>, modality: &str) {
+    if !modalities.iter().any(|value| value == modality) {
+        modalities.push(modality.to_string());
+    }
+}
+
+fn string_array(value: Option<&Value>) -> Option<Vec<String>> {
+    let values = value?.as_array()?;
+    Some(
+        values
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .collect(),
+    )
 }

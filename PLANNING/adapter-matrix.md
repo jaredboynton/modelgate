@@ -10,8 +10,8 @@ Use OpenAI Responses as the hub format.
 Reasons:
 
 - Codex CLI only supports `wire_api = "responses"`.
-- Amp already reaches OpenAI-compatible `/responses` and `/chat/completions`
-  routes.
+- Amp already reaches OpenAI-compatible facade routes for `/responses` and
+  `/chat/completions`.
 - Responses can represent text, multimodal inputs, tool calls, tool outputs,
   reasoning controls, and hosted-tool metadata better than chat-only formats.
 
@@ -49,11 +49,39 @@ These are intentional gaps, not implicit fallbacks:
 - OpenAI Images request/response <-> Responses hosted image tool. Needed before
   `gpt-image-2` can replace Gemini image generation.
 - Public OpenAI Responses auth/transport. Current OpenAI-shaped traffic routes
-  to Codex/ChatGPT OAuth only.
+  to explicit provider dispositions only; Codex-backed GPT Responses/chat flows
+  use Codex/ChatGPT OAuth, not public OpenAI API keys.
 - Provider-specific hosted tools. Unsupported tools must fail closed until each
   semantic mapping is explicit.
 - Non-text multimodal output normalization across providers. Do not route image,
   audio, or binary outputs through text-only adapters.
+- `public-openai` API-key provider. This is a disabled-by-default follow-up
+  provider, not a fallback when Codex auth, route mapping, or model disposition
+  fails.
+
+## OpenAI-Compatible Facade Contract
+
+OpenAI-shaped routes are compatibility facades. They are not blanket public
+OpenAI API parity and they are not blanket Codex backend routes.
+
+Route/model disposition:
+
+- `/v1/responses` and `/v1/chat/completions` resolve the requested model
+  through the aggregate route table. Codex GPT models go to Codex Responses,
+  Claude models go to Bedrock Messages through adapters, and Gemini models go
+  to Google `generateContent` through adapters where implemented.
+- `/api/provider/openai/v1/responses` and
+  `/api/provider/openai/v1/chat/completions` are OpenAI-shaped facade
+  entrypoints. Codex-backed GPT dispositions use Codex OAuth; other model
+  dispositions still follow explicit route/provider rules. They validate
+  model/provider fit before upstream dispatch.
+- `/api/provider/openai/v1/models` reads the live Codex catalog from the
+  ChatGPT Codex backend using Codex OAuth headers.
+- `/v1/models` remains aggregate and local: static allowlist plus configured
+  hot-route models.
+
+Unsupported public-only OpenAI features fail closed until each semantic mapping,
+credential source, and test path is explicit.
 
 ## Routing Contract
 

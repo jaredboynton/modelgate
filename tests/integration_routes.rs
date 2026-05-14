@@ -62,6 +62,14 @@ fn request_json_without_google_env(
     request_json_without_env_vars(method, path, body, &["GOOGLE_API_KEY"])
 }
 
+fn request_json_without_openai_env(
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    request_json_without_env_vars(method, path, body, &["OPENAI_API_KEY"])
+}
+
 fn request_json_without_env_vars(
     method: &str,
     path: &str,
@@ -78,6 +86,25 @@ fn request_json_without_env_vars(
         .build()
         .unwrap()
         .block_on(request_json(method, path, body))
+}
+
+fn request_json_with_state_without_env_vars(
+    state: AppState,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+    keys: &[&'static str],
+) -> (StatusCode, Value) {
+    let _guard = UPSTREAM_ENV_LOCK.lock().unwrap();
+    let _restores = keys
+        .iter()
+        .map(|key| EnvRestore::clear(key))
+        .collect::<Vec<_>>();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(request_json_with_state(state, method, path, body))
 }
 
 async fn request_json_with_state(
@@ -127,6 +154,56 @@ async fn request_text_with_state(
     (status, text)
 }
 
+fn assert_missing_codex_auth_contract(status: StatusCode, body: &Value) {
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["type"], "authentication_error");
+    assert_eq!(body["error"]["code"], "invalid_api_key");
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("~/.codex/auth.json"));
+}
+
+fn write_codex_auth(codex_home: &TempDir) {
+    fs::write(
+        codex_home.path().join("auth.json"),
+        r#"{"access_token":"codex-access-test","account_id":"acct-test"}"#,
+    )
+    .unwrap();
+}
+
+fn seed_codex_catalog(state: &AppState, models: &[(&str, &str, bool)]) {
+    state
+        .codex_catalog
+        .store_validated(&serde_json::json!({
+            "models": models
+                .iter()
+                .map(|(slug, visibility, supported_in_api)| {
+                    serde_json::json!({
+                        "slug": slug,
+                        "display_name": slug,
+                        "visibility": visibility,
+                        "supported_in_api": supported_in_api,
+                        "supported_reasoning_levels": [
+                            { "effort": "low", "description": "Low" },
+                            { "effort": "medium", "description": "Medium" },
+                            { "effort": "high", "description": "High" },
+                            { "effort": "xhigh", "description": "XHigh" }
+                        ],
+                        "service_tiers": [
+                            { "id": "auto", "name": "Auto", "description": "Default" }
+                        ],
+                        "support_verbosity": true,
+                        "truncation_policy": { "mode": "tokens", "limit": 12345 },
+                        "input_modalities": ["text", "image"],
+                        "output_modalities": ["text"]
+                    })
+                })
+                .collect::<Vec<_>>()
+        }))
+        .unwrap();
+}
+
 #[tokio::test]
 async fn integration_routes_health_route_reports_ok() {
     let (status, body) = request_json("GET", "/health", None).await;
@@ -161,12 +238,33 @@ async fn integration_routes_openai_provider_models_uses_codex_auth_gate() {
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
-    assert_eq!(body["error"]["type"], "missing_credential");
-    assert!(body["error"]["message"]
-        .as_str()
+    assert_missing_codex_auth_contract(status, &body);
+}
+
+#[test]
+fn integration_routes_openai_provider_models_does_not_require_openai_api_key() {
+    let (status, body) = request_json_without_openai_env(
+        "GET",
+        "/api/provider/openai/v1/models?client_version=26.506.31421",
+        None,
+    );
+    assert_missing_codex_auth_contract(status, &body);
+}
+
+#[test]
+fn integration_routes_v1_models_aggregate_is_local_not_live_codex_catalog() {
+    let (status, body) = request_json_without_openai_env("GET", "/v1/models", None);
+    assert_eq!(status, StatusCode::OK);
+    let ids: Vec<&str> = body["data"]
+        .as_array()
         .unwrap()
-        .contains("~/.codex/auth.json"));
+        .iter()
+        .map(|model| model["id"].as_str().unwrap())
+        .collect();
+
+    assert!(ids.contains(&"openai:gpt-5.5"));
+    assert!(ids.contains(&"gpt-image-2"));
+    assert!(!ids.contains(&"codex-auto-review"));
 }
 
 #[tokio::test]
@@ -327,7 +425,8 @@ async fn integration_routes_count_tokens_is_local_stub_and_rejects_unknown_model
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(body["error"]["type"], "model_not_supported");
+    assert_eq!(body["error"]["type"], "invalid_request_error");
+    assert_eq!(body["error"]["code"], "model_not_supported");
 }
 
 #[tokio::test]
@@ -339,7 +438,8 @@ async fn integration_routes_known_gpt_messages_route_rejects_lossy_token_cap_bef
     });
     let (status, body) = request_json("POST", "/v1/messages", Some(gpt_messages)).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(body["error"]["type"], "invalid_request");
+    assert_eq!(body["error"]["type"], "invalid_request_error");
+    assert_eq!(body["error"]["code"], "unsupported_feature");
     let message = body["error"]["message"].as_str().unwrap();
     assert!(message.contains("max_tokens") || message.contains("max_output_tokens"));
 }
@@ -509,11 +609,7 @@ async fn integration_routes_hot_config_reloads_model_routes_between_requests() {
 
     let (status, response) =
         request_json_with_state(state.clone(), "POST", "/v1/responses", Some(body.clone())).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
-    assert!(response["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("~/.codex/auth.json"));
+    assert_missing_codex_auth_contract(status, &response);
 
     fs::write(
         &config_path,
@@ -582,11 +678,7 @@ async fn integration_routes_hot_config_uses_source_format_for_same_model() {
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
-    assert!(body["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("~/.codex/auth.json"));
+    assert_missing_codex_auth_contract(status, &body);
 }
 
 #[tokio::test]
@@ -629,7 +721,8 @@ async fn integration_routes_route_model_resolvers_reject_unknown_models_before_c
     let unknown_chat = serde_json::json!({ "model": "nope/nope", "messages": [] });
     let (status, body) = request_json("POST", "/v1/chat/completions", Some(unknown_chat)).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(body["error"]["type"], "model_not_supported");
+    assert_eq!(body["error"]["type"], "invalid_request_error");
+    assert_eq!(body["error"]["code"], "model_not_supported");
 }
 
 #[tokio::test]
@@ -639,25 +732,144 @@ async fn integration_routes_known_gpt_chat_routes_to_codex_without_real_upstream
         "messages": [{ "role": "user", "content": "hello" }]
     });
     let (status, body) = request_json("POST", "/v1/chat/completions", Some(gpt_chat)).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
-    assert_eq!(body["error"]["type"], "missing_credential");
+    assert_missing_codex_auth_contract(status, &body);
+}
+
+#[test]
+fn integration_routes_known_gpt_responses_uses_codex_auth_not_openai_api_key() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    write_codex_auth(&codex_home);
+    let state = test_state(&codex_home, &auth_home);
+    seed_codex_catalog(&state, &[("gpt-5.5", "list", true)]);
+    let body = serde_json::json!({ "model": "openai:gpt-5.5", "input": "hello" });
+
+    let (status, response) = request_json_with_state_without_env_vars(
+        state,
+        "POST",
+        "/v1/responses",
+        Some(body),
+        &["OPENAI_API_KEY"],
+    );
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert_eq!(response["error"]["type"], "upstream_error");
+    assert_ne!(response["error"]["code"], "invalid_api_key");
+    assert!(!response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("OPENAI_API_KEY"));
+}
+
+#[tokio::test]
+async fn integration_routes_hidden_and_catalog_absent_codex_models_fail_before_auth() {
+    for model in ["codex-auto-review", "gpt-5.99-not-in-catalog"] {
+        let body = serde_json::json!({ "model": model, "input": "hello" });
+        let (status, response) = request_json("POST", "/v1/responses", Some(body)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{model}");
+        assert_eq!(
+            response["error"]["type"], "invalid_request_error",
+            "{model}"
+        );
+        assert_eq!(response["error"]["code"], "model_not_supported", "{model}");
+        assert!(!response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("~/.codex/auth.json"));
+    }
+}
+
+#[tokio::test]
+async fn integration_routes_known_codex_alias_absent_from_catalog_fails_before_auth() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    let state = test_state(&codex_home, &auth_home);
+    seed_codex_catalog(&state, &[("gpt-5.4", "list", true)]);
+
+    let body = serde_json::json!({ "model": "openai:gpt-5.5", "input": "hello" });
+    let (status, response) =
+        request_json_with_state(state, "POST", "/v1/responses", Some(body)).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(response["error"]["type"], "invalid_request_error");
+    assert_eq!(response["error"]["code"], "model_not_supported");
+    assert!(!response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("~/.codex/auth.json"));
+}
+
+#[tokio::test]
+async fn integration_routes_hidden_catalog_model_fails_before_auth() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    fs::write(
+        auth_home.path().join("config.json"),
+        serde_json::json!({
+            "routes": [{
+                "source": { "model": "fixture-hidden-codex-model", "format": "responses" },
+                "target": { "provider": "codex", "model": "gpt-hidden", "format": "responses" }
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let state = test_state(&codex_home, &auth_home);
+    seed_codex_catalog(&state, &[("gpt-hidden", "hidden", true)]);
+
+    let body = serde_json::json!({ "model": "fixture-hidden-codex-model", "input": "hello" });
+    let (status, response) =
+        request_json_with_state(state, "POST", "/v1/responses", Some(body)).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(response["error"]["type"], "invalid_request_error");
+    assert_eq!(response["error"]["code"], "model_not_supported");
+    assert!(!response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("~/.codex/auth.json"));
+}
+
+#[tokio::test]
+async fn integration_routes_unsupported_codex_fields_fail_before_auth_and_catalog() {
+    let body = serde_json::json!({
+        "model": "openai:gpt-5.5",
+        "input": "hello",
+        "max_output_tokens": 16
+    });
+    let (status, response) = request_json("POST", "/v1/responses", Some(body)).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(response["error"]["type"], "invalid_request_error");
+    assert_eq!(response["error"]["code"], "unsupported_feature");
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("max_output_tokens"));
+    assert!(!response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("~/.codex/auth.json"));
 }
 
 #[tokio::test]
 async fn integration_routes_image_routes_return_explicit_unsupported_error() {
     let body = serde_json::json!({ "model": "gpt-image-2", "prompt": "paint" });
-    let (status, body) = request_json(
-        "POST",
+    for path in [
         "/api/provider/openai/v1/images/generations",
-        Some(body),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(body["error"]["type"], "model_not_supported");
-    assert!(body["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("gpt-image-2"));
+        "/api/provider/openai/v1/images/edits",
+        "/v1/images/generations",
+        "/v1/images/edits",
+    ] {
+        let (status, body) = request_json("POST", path, Some(body.clone())).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{path}");
+        assert_eq!(body["error"]["type"], "invalid_request_error", "{path}");
+        assert_eq!(body["error"]["code"], "unsupported_route", "{path}");
+        assert!(body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("gpt-image-2"));
+    }
 }
 
 #[tokio::test]
@@ -673,6 +885,16 @@ async fn integration_routes_audio_and_realtime_are_explicit_feature_gates() {
         ),
         ("/v1/audio/speech", "audio speech"),
         ("/api/provider/openai/v1/audio/speech", "audio speech"),
+        ("/v1/audio/transcriptions", "dictation transcription"),
+        (
+            "/api/provider/openai/v1/audio/transcriptions",
+            "dictation transcription",
+        ),
+        ("/v1/audio/translations", "dictation transcription"),
+        (
+            "/api/provider/openai/v1/audio/translations",
+            "dictation transcription",
+        ),
         ("/transcribe", "dictation transcription"),
     ] {
         let (status, body) = request_json(
@@ -681,12 +903,32 @@ async fn integration_routes_audio_and_realtime_are_explicit_feature_gates() {
             Some(serde_json::json!({ "model": "gpt-realtime-2" })),
         )
         .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}");
-        assert_eq!(body["error"]["type"], "unsupported_route", "{path}");
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{path}");
+        assert_eq!(body["error"]["type"], "invalid_request_error", "{path}");
+        assert_eq!(body["error"]["code"], "unsupported_feature", "{path}");
         assert!(
             body["error"]["message"].as_str().unwrap().contains(marker),
             "{path}: {body}"
         );
+    }
+}
+
+#[tokio::test]
+async fn integration_routes_public_file_routes_return_explicit_unsupported_error() {
+    for (method, path) in [
+        ("GET", "/v1/files"),
+        ("POST", "/v1/files"),
+        ("GET", "/v1/files/file_123"),
+        ("DELETE", "/v1/files/file_123"),
+        ("GET", "/api/provider/openai/v1/files"),
+        ("POST", "/api/provider/openai/v1/files"),
+        ("GET", "/api/provider/openai/v1/files/file_123"),
+        ("DELETE", "/api/provider/openai/v1/files/file_123"),
+    ] {
+        let (status, body) = request_json(method, path, None).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{method} {path}");
+        assert_eq!(body["error"]["type"], "invalid_request_error", "{path}");
+        assert_eq!(body["error"]["code"], "unsupported_route", "{path}");
     }
 }
 

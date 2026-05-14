@@ -9,6 +9,7 @@ use crate::{
         chat_completions_to_responses, responses_to_anthropic_messages,
     },
     model_alias::{resolve_model_required, Provider, ResolvedModel},
+    route::models::validate_codex_catalog_request,
     upstream, AppError, AppResult, AppState, UpstreamResponse,
 };
 
@@ -28,9 +29,14 @@ pub async fn chat_completions(
     let alias = state.resolve_model_for_format(model, "chat_completions")?;
     match chat_route_for_alias(model, &alias)? {
         ChatRoute::CodexResponses => {
-            let mut responses = chat_completions_to_responses(value)?;
-            responses["model"] = serde_json::Value::String(alias.upstream_model);
-            codex_response_bytes(upstream::codex::responses(&state, responses).await?)
+            let upstream_model = alias.upstream_model.clone();
+            let responses = chat_completions_to_responses(value)?;
+            let prepared =
+                upstream::codex::prepare_responses_body_with_resolver(responses, |model| {
+                    state.resolve_model_for_format(model, "chat_completions")
+                })?;
+            validate_codex_catalog_request(&state, &prepared, &upstream_model).await?;
+            codex_response_bytes(upstream::codex::responses_prepared(&state, prepared).await?)
         }
         ChatRoute::BedrockMessages => {
             let messages = responses_to_anthropic_messages(chat_completions_to_responses(value)?)?;

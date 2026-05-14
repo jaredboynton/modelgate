@@ -115,12 +115,40 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/v1/audio/speech", post(route::audio::audio_speech))
         .route(
+            "/api/provider/openai/v1/audio/transcriptions",
+            post(route::audio::transcribe),
+        )
+        .route(
+            "/api/provider/openai/v1/audio/translations",
+            post(route::audio::transcribe),
+        )
+        .route("/v1/audio/transcriptions", post(route::audio::transcribe))
+        .route("/v1/audio/translations", post(route::audio::transcribe))
+        .route(
             "/api/provider/openai/v1/images/generations",
+            post(route::images::unsupported_generation),
+        )
+        .route(
+            "/v1/images/generations",
             post(route::images::unsupported_generation),
         )
         .route(
             "/api/provider/openai/v1/images/edits",
             post(route::images::unsupported_edit),
+        )
+        .route("/v1/images/edits", post(route::images::unsupported_edit))
+        .route(
+            "/api/provider/openai/v1/files",
+            any(route::unsupported_public_openai_route),
+        )
+        .route(
+            "/api/provider/openai/v1/files/:file_id",
+            any(route::unsupported_public_openai_route),
+        )
+        .route("/v1/files", any(route::unsupported_public_openai_route))
+        .route(
+            "/v1/files/:file_id",
+            any(route::unsupported_public_openai_route),
         )
         .route(
             "/v1beta/models/*path",

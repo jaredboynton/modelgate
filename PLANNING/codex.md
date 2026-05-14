@@ -1,4 +1,4 @@
-# Codex Responses vs. Regular OpenAI Responses
+# Codex Responses vs. Public OpenAI Responses
 
 Reference notes for v2 adapter work. Captures every observed wire-level
 difference between the public `/v1/responses` endpoint and the
@@ -6,9 +6,17 @@ ChatGPT-internal `codex/responses` endpoint, based on the v1 codebase at
 `unified-model-proxy/src/lib/adapters/{openai-responses.ts,codex-responses.ts}`
 and verified against the published OpenAI docs + `codex-rs/core/client.rs`.
 
+In v2, the OpenAI-shaped routes are an OpenAI-compatible facade. They do not
+promise full public OpenAI API parity, and they do not send every OpenAI-shaped
+request to Codex. Route handlers first resolve the requested model and route
+format to an explicit provider disposition. Codex-backed GPT Responses/chat
+flows use Codex OAuth from `~/.codex/auth.json`; public OpenAI API-key
+transport is a future `public-openai` provider and must stay
+disabled-by-default rather than acting as a fallback.
+
 ## Endpoint URL
 
-| | Regular | Codex |
+| | Public OpenAI | Codex |
 |---|---|---|
 | WebSocket | `wss://api.openai.com/v1/responses` | `wss://chatgpt.com/backend-api/codex/responses` |
 | HTTP | `https://api.openai.com/v1/responses` | `https://chatgpt.com/backend-api/codex/responses` |
@@ -20,7 +28,7 @@ on the Codex path. The Codex compaction sibling is
 
 ## Authentication
 
-### Regular
+### Public OpenAI
 - Bearer token from `OPENAI_API_KEY` env (or platform key resolver).
 - Single header: `Authorization: Bearer sk-...`.
 
@@ -37,7 +45,7 @@ on the Codex path. The Codex compaction sibling is
 
 ## Request Headers
 
-Regular adapter:
+Public OpenAI adapter:
 
 ```
 Authorization: Bearer <key>
@@ -184,19 +192,35 @@ Known gotchas to handle in v2:
   25k tokens) so the UI doesn't show "0% context left" right after
   compaction.
 
+## Catalog and Route Disposition
+
+- `/api/provider/openai/v1/models` uses the live Codex catalog endpoint
+  `https://chatgpt.com/backend-api/codex/models` with Codex OAuth headers.
+- `/v1/models` is the aggregate catalog: local static allowlist plus
+  configured hot-route models.
+- `/api/provider/openai/v1/responses` and
+  `/api/provider/openai/v1/chat/completions` are OpenAI-shaped facade
+  entrypoints. Codex-backed GPT dispositions use Codex OAuth, while other
+  models remain governed by explicit route/provider rules.
+- `/v1/responses` and `/v1/chat/completions` are aggregate facade routes; they
+  may route to Codex, Bedrock, or Google depending on model disposition.
+- Public-only OpenAI features, including routes without Codex scopes or adapter
+  semantics, fail closed until they have an explicit provider and tests.
+
 ## Quick V2 Checklist
 
 When wiring the Codex adapter in v2:
 
-- [ ] Talk to `wss://chatgpt.com/backend-api/codex/responses`, not the
+- [x] Talk to `wss://chatgpt.com/backend-api/codex/responses`, not the
       public `api.openai.com` endpoint.
-- [ ] Send `ChatGPT-Account-Id` and `originator: codex_cli_rs` headers.
-- [ ] Implement OAuth file read + atomic write + 401 refresh-and-retry
+- [x] Send `ChatGPT-Account-Id` and `originator: codex_cli_rs` headers.
+- [x] Implement OAuth file read + atomic write + 401 refresh-and-retry
       loop. Two attempts max.
-- [ ] After `convertToResponsesAPI` + `prepareWsBody(_, isOAuth=true)`:
+- [x] After `convertToResponsesAPI` + `prepareWsBody(_, isOAuth=true)`:
   - inject `reasoning: { effort: "medium", summary: "auto" }` defaults
   - ensure `include` contains `reasoning.encrypted_content`
-- [ ] Confirm `store=false`, `max_output_tokens`/`max_tokens` removed.
-- [ ] Use the shared event parser; do not fork it for Codex.
+- [x] Confirm `store=false` and reject `max_output_tokens`/`max_tokens`
+      before Codex dispatch.
+- [x] Use the shared event parser; do not fork it for Codex.
 - [ ] Hook compaction to the Codex sibling route, not the public one,
       when running on Codex auth.

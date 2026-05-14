@@ -17,6 +17,7 @@ use tokio::sync::mpsc;
 use crate::{
     adapter::responses_sse::ResponsesSseParser,
     route::{
+        models::validate_codex_catalog_websocket_request,
         responses::{
             responses_route_for_alias, route_for_responses_model_with_resolver, ResponsesRoute,
         },
@@ -325,7 +326,7 @@ async fn dispatch_responses_client_event(
             return Ok(true);
         }
     };
-    let fingerprint = match resolve_bridge_route(state, request) {
+    let fingerprint = match resolve_bridge_route(state, request).await {
         Ok(fingerprint) => fingerprint,
         Err(error) => {
             send_ws_app_error(client, &error).await?;
@@ -338,7 +339,10 @@ async fn dispatch_responses_client_event(
     }
 }
 
-fn resolve_bridge_route(state: &AppState, request: &Value) -> AppResult<BridgeRouteFingerprint> {
+async fn resolve_bridge_route(
+    state: &AppState,
+    request: &Value,
+) -> AppResult<BridgeRouteFingerprint> {
     let model = required_model(request)?.to_string();
     let alias = state.resolve_model_for_format(&model, "responses")?;
     let route = responses_route_for_alias(&model, &alias)?;
@@ -364,6 +368,16 @@ async fn execute_bridge_response_create(
             return Ok(BridgeResponseOutcome::Continue);
         }
     };
+
+    if fingerprint.route == ResponsesRoute::CodexResponses {
+        if let Err(error) =
+            validate_codex_catalog_websocket_request(state, &request, &fingerprint.upstream_model)
+                .await
+        {
+            send_ws_app_error(client, &error).await?;
+            return Ok(BridgeResponseOutcome::Continue);
+        }
+    }
 
     if request.get("generate").and_then(Value::as_bool) == Some(false) {
         let response_id = format!("resp_ws_bridge_{}", uuid::Uuid::new_v4().simple());
@@ -763,7 +777,11 @@ async fn run_bridge_provider_task(
             Err(error) => {
                 let _ = send_bridge_frame(
                     &sender,
-                    websocket_request_error(error.status(), error.error_type(), error.to_string()),
+                    websocket_request_error(
+                        error.status(),
+                        error.code().unwrap_or(error.error_type()),
+                        error.to_string(),
+                    ),
                 )
                 .await;
                 return Err(error);
@@ -1251,7 +1269,11 @@ async fn send_ws_json(client: &mut WebSocket, value: Value) -> AppResult<()> {
 async fn send_ws_app_error(client: &mut WebSocket, error: &AppError) -> AppResult<()> {
     send_ws_json(
         client,
-        websocket_request_error(error.status(), error.error_type(), error.to_string()),
+        websocket_request_error(
+            error.status(),
+            error.code().unwrap_or(error.error_type()),
+            error.to_string(),
+        ),
     )
     .await
 }

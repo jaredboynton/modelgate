@@ -545,6 +545,42 @@ async fn responses_websocket_fails_closed_for_non_codex_responses_route_without_
 }
 
 #[tokio::test]
+async fn responses_websocket_catalog_rejections_use_model_not_supported_code() {
+    let (capture_tx, mut capture_rx) = mpsc::unbounded_channel();
+    let upstream = spawn_upstream(capture_tx, UpstreamBehavior::Complete).await;
+
+    let test_state = codex_test_state_with_route("ws-catalog-model");
+    test_state.state.codex_catalog.clear();
+    seed_codex_catalog(&test_state.state, &["gpt-5.4".to_string()]);
+    let mut state = test_state.state.clone();
+    state.runtime.codex_responses_wss_url =
+        format!("ws://{}/backend-api/codex/responses", upstream.addr);
+    let proxy = spawn_proxy(state).await;
+
+    let mut ws = connect_proxy_ws(&proxy, "/v1/responses").await;
+    ws.send_text(
+        json!({
+            "type": "response.create",
+            "response": {
+                "model": "ws-catalog-model",
+                "input": "catalog reject"
+            }
+        })
+        .to_string(),
+    )
+    .await
+    .unwrap();
+
+    let error = expect_json_frame(&mut ws).await;
+    assert_eq!(error["type"], "error");
+    assert_eq!(error["error"]["code"], "model_not_supported");
+    assert_no_upstream_frame(&mut capture_rx).await;
+
+    proxy.handle.abort();
+    upstream.handle.abort();
+}
+
+#[tokio::test]
 async fn responses_websocket_fails_closed_for_malformed_json_without_upstream() {
     let (capture_tx, mut capture_rx) = mpsc::unbounded_channel();
     let upstream = spawn_upstream(capture_tx, UpstreamBehavior::Complete).await;
@@ -836,6 +872,11 @@ fn codex_test_state_with_route_specs(routes: &[(&str, &str, &str)]) -> TestState
         .to_string(),
     )
     .unwrap();
+    let codex_models = routes
+        .iter()
+        .filter(|(_, provider, _)| *provider == "codex")
+        .map(|(_, _, target_model)| (*target_model).to_string())
+        .collect::<Vec<_>>();
     let routes = routes
         .iter()
         .map(|(source_model, provider, target_model)| {
@@ -858,11 +899,46 @@ fn codex_test_state_with_route_specs(routes: &[(&str, &str, &str)]) -> TestState
         codex_home.path().to_path_buf(),
         auth_home.path().to_path_buf(),
     );
+    if !codex_models.is_empty() {
+        seed_codex_catalog(&state, &codex_models);
+    }
     TestState {
         _codex_home: codex_home,
         _auth_home: auth_home,
         state,
     }
+}
+
+fn seed_codex_catalog(state: &AppState, models: &[String]) {
+    state
+        .codex_catalog
+        .store_validated(&json!({
+            "models": models
+                .iter()
+                .map(|slug| {
+                    json!({
+                        "slug": slug,
+                        "display_name": slug,
+                        "visibility": "list",
+                        "supported_in_api": true,
+                        "supported_reasoning_levels": [
+                            { "effort": "low", "description": "Low" },
+                            { "effort": "medium", "description": "Medium" },
+                            { "effort": "high", "description": "High" },
+                            { "effort": "xhigh", "description": "XHigh" }
+                        ],
+                        "service_tiers": [
+                            { "id": "auto", "name": "Auto", "description": "Default" }
+                        ],
+                        "support_verbosity": true,
+                        "truncation_policy": { "mode": "tokens", "limit": 12345 },
+                        "input_modalities": ["text", "image"],
+                        "output_modalities": ["text"]
+                    })
+                })
+                .collect::<Vec<_>>()
+        }))
+        .unwrap();
 }
 
 fn codex_test_state_without_route() -> TestState {

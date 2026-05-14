@@ -1,0 +1,98 @@
+name: CI scaffold
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_rust_checks:
+        description: "Run Rust checks on the GitHub runner only after specter is portable"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  dependency-portability-gate:
+    name: dependency portability gate
+    runs-on: ubuntu-latest
+    outputs:
+      rust_checks_enabled: ${{ steps.decision.outputs.rust_checks_enabled }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Explain current CI status
+        id: decision
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "rust_checks_enabled=${{ inputs.run_rust_checks }}" >> "$GITHUB_OUTPUT"
+          cat <<'MSG'
+          This workflow is intentionally manual while the crate depends on a local specter path.
+          It is CI scaffolding, not required green remote CI.
+          Do not mark remote CI as required until the specter dependency is portable.
+          No live provider credentials are used by these jobs.
+          MSG
+
+      - name: Detect clone-blocking local path dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RInE 'path *= *"/Users/|path *= *"/home/|path *= *"/[^"]+"' Cargo.toml Cargo.lock 2>/dev/null; then
+            cat <<'MSG'
+          Found an absolute local path in Cargo metadata.
+          Current known blocker: specter is local, so GitHub-hosted CI cannot be required yet.
+          This gate is report-only for scaffolding, but it must be resolved before required remote CI.
+          MSG
+          else
+            echo "No absolute local Cargo paths found by this lightweight gate."
+          fi
+
+  rust-checks:
+    name: intended Rust checks
+    runs-on: ubuntu-latest
+    needs: dependency-portability-gate
+    if: ${{ needs.dependency-portability-gate.outputs.rust_checks_enabled == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Check
+        run: cargo check
+
+      - name: Test
+        run: cargo test
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build
+        run: cargo build
+
+  rust-checks-pending:
+    name: rust checks pending portability
+    runs-on: ubuntu-latest
+    needs: dependency-portability-gate
+    if: ${{ needs.dependency-portability-gate.outputs.rust_checks_enabled != 'true' }}
+    steps:
+      - name: Pending by design
+        run: |
+          cat <<'MSG'
+          Rust fmt/check/test/clippy/build jobs are defined but skipped by default.
+          Enable run_rust_checks only after specter no longer points at a local absolute path.
+          MSG
