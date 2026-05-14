@@ -1,0 +1,9 @@
+{
+  "type": "response.create",
+  "response": {
+    "model": "facade-google-model",
+    "input": "warm this connection",
+    "stream": true,
+    "generate": false
+  }
+}

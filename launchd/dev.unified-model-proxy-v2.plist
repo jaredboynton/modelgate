@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>RUST_LOG</key>
+		<string>info</string>
+		<key>UMP_AMP_WORKSPACE_FILTER</key>
+		<string>always-show</string>
+		<key>UMP_V2_CODEX_TRANSPORT</key>
+		<string>wss</string>
+		<key>UMP_V2_LISTEN_ADDR</key>
+		<string>127.0.0.1:18743</string>
+	</dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>dev.unified-model-proxy-v2</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/jaredboynton/__devlocal/amp-research/unified-model-proxy-v2/target/release/unified-model-proxy-v2</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/jaredboynton/Library/Logs/unified-model-proxy-v2.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/jaredboynton/Library/Logs/unified-model-proxy-v2.log</string>
+	<key>WorkingDirectory</key>
+	<string>/Users/jaredboynton/__devlocal/amp-research/unified-model-proxy-v2</string>
+</dict>
+</plist>

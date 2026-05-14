@@ -1,0 +1,9 @@
+{
+  "type": "response.create",
+  "response": {
+    "model": "facade-google-model",
+    "input": [],
+    "stream": true,
+    "previous_response_id": "__REPLACE_RESPONSE_ID__"
+  }
+}

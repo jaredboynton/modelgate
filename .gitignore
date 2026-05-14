@@ -1,0 +1,35 @@
+# Rust build output
+/target/
+**/*.rs.bk
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+
+# Local agent/runtime state
+/.omx/
+
+# Logs, coverage, and profiling artifacts
+*.log
+*.log.*
+*.profraw
+/coverage/
+/tarpaulin-report.html
+/lcov.info
+
+# Editor and OS noise
+.DS_Store
+.AppleDouble
+.LSOverride
+*.swp
+*.swo
+*~
+/.idea/
+/.vscode/*
+!/.vscode/settings.json
+!/.vscode/extensions.json
+
+# Local shell environment overlays
+/.direnv/
+.envrc.local

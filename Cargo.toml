@@ -1,0 +1,35 @@
+[package]
+name = "unified-model-proxy-v2"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+aws-config = "1"
+aws-credential-types = "1"
+aws-sigv4 = "1"
+axum = { version = "0.7", features = ["macros", "ws"] }
+base64 = "0.22"
+bytes = "1"
+dirs = "5"
+fs2 = "0.4"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+futures = "0.3"
+http = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+specter = { package = "specters", path = "/Users/jaredboynton/__devlocal/specter" }
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+wiremock = "0.6"

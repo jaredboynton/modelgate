@@ -1,0 +1,208 @@
+# Unified Model Proxy v2
+
+Rust HTTP proxy for Amp listening on `127.0.0.1:18743`.
+
+v0.1 keeps three upstreams only: Bedrock Mantle for Claude/Anthropic-shaped
+traffic, Codex/ChatGPT OAuth, and Google Gemini direct. See `PLANNING/v2-plan.md`
+for the implementation contract.
+
+The proxy also serves Amp's local control-plane compatibility surface:
+thread/task/report storage, thread search/markdown, attachments, telemetry,
+GitHub/Bitbucket helper stubs, and startup account/plugin probes.
+
+## Run Locally
+
+Debug run:
+
+```sh
+cargo run
+```
+
+Release run:
+
+```sh
+cargo build --release
+./target/release/unified-model-proxy-v2
+```
+
+Amp smoke:
+
+```sh
+AMP_URL=http://127.0.0.1:18743 amp -x "say hi"
+```
+
+Health check:
+
+```sh
+curl -fsS http://127.0.0.1:18743/health
+```
+
+Config UI:
+
+```sh
+open http://127.0.0.1:18743/config
+```
+
+## Runtime Config
+
+- `UMP_V2_LISTEN_ADDR`, default `127.0.0.1:18743`
+- `UMP_V2_CODEX_TRANSPORT`, one of `wss`, `http`, `wss-then-http`; default `wss-then-http`
+- `UMP_V2_CODEX_RESPONSES_WSS_URL`, default `wss://chatgpt.com/backend-api/codex/responses`
+- `UMP_V2_CODEX_RESPONSES_HTTP_URL`, default `https://chatgpt.com/backend-api/codex/responses`
+- `UMP_V2_CODEX_WSS_CONNECT_TIMEOUT_MS`, default `5000`
+- `UMP_V2_CODEX_MAX_CONCURRENT`, default `20`
+- `UMP_V2_CODEX_HANDSHAKES_PER_MIN`, default `55`
+- `UMP_V2_BEDROCK_DISCOVERY_TIMEOUT_MS`, default `5000`
+- `UMP_V2_CODEX_HOME`, defaults to `~/.codex`
+- `UMP_V2_AUTH_HOME`, defaults to `~/.ump`
+- `UMP_V2_CONFIG`, defaults to `~/.ump/config.json`; re-read on every request
+- `UMP_AMP_THREAD_STORE`, defaults to `~/.unified-model-proxy/amp-threads`
+  for compatibility with the earlier Rust proxy's local thread store
+
+Do not put live secrets in committed files. Local `.env` files are for humans only.
+Provider secrets live in `~/.ump/auth.json`, except Codex OAuth which stays in
+the canonical `~/.codex/auth.json`.
+
+Auth file shape:
+
+```json
+{
+  "bedrock": {
+    "bearer": "ABSK...",
+    "profile": "optional-aws-profile"
+  },
+  "gemini": {
+    "api_key": "AIza..."
+  }
+}
+```
+
+Bedrock and Gemini prefer `~/.ump/auth.json`; environment variables remain
+fallbacks for manual runs. `google.api_key` is accepted as a compatibility alias
+for `gemini.api_key`.
+
+Hot routing config:
+
+```json
+{
+  "routes": [
+    {
+      "source": { "model": "gemini-3.1-flash-lite", "format": "responses" },
+      "target": { "provider": "codex", "model": "gpt-5.5", "format": "responses" }
+    }
+  ]
+}
+```
+
+Changing the JSON file affects the next request without restarting the proxy.
+
+Responses WebSocket passthrough:
+
+- `GET /v1/responses` and `GET /api/provider/openai/v1/responses` accept RFC 6455 upgrades.
+- The first client frame can be raw Responses JSON or a `response.create` event.
+- The proxy applies hot routing for `format: "responses"`, forwards only Codex-capable targets over WSS, injects Codex OAuth headers, then relays frames both ways.
+
+## Codex CLI
+
+Codex only accepts Responses API providers, so point `~/.codex/config.toml`
+at the proxy's `/v1` base URL. The `proxy` profile presents every listed text
+model as Responses WebSocket-capable. Native Codex/OpenAI models stay on
+upstream Responses WSS; Bedrock/Claude and Gemini models are bridged inside UMP
+and streamed back to Codex over the same downstream WSS contract. Plain HTTP
+Responses remains supported for non-Codex clients.
+
+```toml
+[model_providers.ump-v2]
+name = "Unified Model Proxy v2"
+base_url = "http://127.0.0.1:18743/v1"
+wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = true
+request_max_retries = 0
+stream_max_retries = 0
+stream_idle_timeout_ms = 120000
+websocket_connect_timeout_ms = 10000
+
+[profiles.proxy]
+model = "claude-sonnet-4-6"
+model_provider = "ump-v2"
+model_catalog_json = "/Users/jaredboynton/.codex/model-catalog-ump-v2.json"
+model_reasoning_effort = "high"
+```
+
+The old Codex-only WSS split profile can stay around as rollback, but normal
+Codex CLI use should go through `profiles.proxy` so OpenAI, Claude, and Gemini
+models all use downstream WSS:
+
+```toml
+[model_providers.ump-v2-codex-ws]
+name = "Unified Model Proxy v2 Codex WS"
+base_url = "http://127.0.0.1:18743/v1"
+wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = true
+request_max_retries = 0
+stream_max_retries = 0
+stream_idle_timeout_ms = 120000
+websocket_connect_timeout_ms = 10000
+
+[profiles.proxy-ws]
+model = "gpt-5.5"
+model_provider = "ump-v2-codex-ws"
+model_catalog_json = "/Users/jaredboynton/.codex/model-catalog-ump-v2-codex-ws.json"
+```
+
+`supports_websockets` is provider-wide in Codex CLI, so UMP owns the mixed
+provider facade. The downstream socket binds to the first route/model on that
+connection; route/model changes on the same socket are rejected unless they are
+valid `previous_response_id` continuations for the same route/model.
+
+Useful model choices:
+
+- `gpt-5.5` / `openai:gpt-5.5` routes to the Codex/ChatGPT OAuth endpoint.
+- `claude-sonnet-4-6` routes Responses requests through the Anthropic adapter
+  to Bedrock Runtime.
+- `claude-sonnet-4-6-max` uses the same Bedrock Runtime model with
+  proxy-forced Anthropic `max` adaptive thinking.
+- `gemini-3.1-flash-lite` routes Responses requests through the Google adapter
+  to Gemini `generateContent`.
+
+The long-term adapter matrix and missing cross-format edges live in
+`PLANNING/adapter-matrix.md`.
+
+## Signals
+
+- `SIGINT` or `SIGTERM`: graceful server shutdown.
+- `SIGHUP`: reset the Codex WebSocket failure latch while keeping the server running.
+
+## launchd
+
+The development plist is `launchd/dev.unified-model-proxy-v2.plist`. It points at
+the release binary in this checkout, so build first:
+
+```sh
+cargo build --release
+launchctl bootstrap gui/$(id -u) "$PWD/launchd/dev.unified-model-proxy-v2.plist"
+launchctl kickstart -k gui/$(id -u)/dev.unified-model-proxy-v2
+```
+
+For the installed user LaunchAgent, copy the plist to
+`~/Library/LaunchAgents/dev.unified-model-proxy-v2.plist` and bootstrap that
+path. The agent runs at load, keeps itself alive, and binds
+`127.0.0.1:18743`.
+
+Stop and unload:
+
+```sh
+launchctl bootout gui/$(id -u)/dev.unified-model-proxy-v2
+```
+
+Troubleshooting:
+
+```sh
+lsof -nP -iTCP:18743 -sTCP:LISTEN
+tail -f ~/Library/Logs/unified-model-proxy-v2.log
+```
+
+For active development, prefer `cargo run`; launchd is intended to exercise the
+same binary shape Amp will call in a local service setup.
