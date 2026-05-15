@@ -1,0 +1,7 @@
+Fri May 15 05:24:52 EDT 2026
+ralph session 71fc6c80-e377-431e-b021-6d02e9294fc4 start
+2026-05-15 lane 1 (parent): US-001 complete. .omx/research/cursor-phase0/client-profile-policy.md materialized (151 lines). All 4 Refuse codes present, telemetry contract complete, override aliases enumerated. Lanes 2-6 (Sonnet) running in parallel on US-002 through US-006.
+2026-05-15 lane 2: US-002 complete. src/upstream/cursor/client_profile.rs (304 lines). cargo check --tests clean.
+2026-05-15 lane 3: US-003 complete. tests/unit_cursor_client_profile_detection.rs (562 lines, 82 tests, all green).
+2026-05-15 lane 4: US-004 complete. profiles/mod.rs + generic_openai.rs (4669 bytes total). 12 relocated tests pass.
+2026-05-15 lane 5: US-005 complete. tests/unit_cursor_adapter_provider_error.rs (8 tests pass). Two divergence TODOs noted: (1) Responses adapter "before-started" error branch is dead code due to unconditional response.created emit; (2) cursor_request_id dropped by all 3 adapters (informational, not contract violation).

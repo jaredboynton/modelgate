@@ -1,0 +1,220 @@
+//! Droid profile renderer.
+//!
+//! Maps Cursor `ExecRequest` events into Factory Droid built-in tool calls.
+//! Droid built-ins per `.omx/research/cursor-phase0/client-tool-droid.md`:
+//! `Read`, `LS`, `Grep`, `Execute`, `FetchUrl`, plus MCP function names
+//! namespaced as `<server>___<tool>` with TRIPLE underscores.
+//!
+//! Synthesized defaults pinned by
+//! `.omx/research/cursor-phase0/client-profile-policy.md`:
+//! Droid `Execute` requires `riskLevel` + `riskLevelReason`. Cursor
+//! `Shell`/`ShellStream`/`BackgroundShellSpawn` carry neither, so the
+//! renderer fills `riskLevel = "medium"` /
+//! `riskLevelReason = "automated proxy invocation"` and emits
+//! `cursor.synthetic_default = "droid_execute_risk"` tracing on every
+//! Execute emission. Delete renders through `Execute` with the elevated
+//! `riskLevel = "high"` and a deletion-specific reason.
+//!
+//! Cells where Cursor's wire bytes do not satisfy Droid's required arg
+//! keys, or where Droid has no compatible tool, emit
+//! `RenderedToolCall::Refuse` with the canonical Refuse codes.
+
+use super::{refuse_code, RenderedToolCall};
+use crate::upstream::cursor::proto::{
+    decode_exec_public_tool_call, parse_proto_fields, ExecKind, ExecRequest,
+};
+use serde_json::json;
+
+pub fn render(exec: &ExecRequest) -> RenderedToolCall {
+    if matches!(exec.kind, ExecKind::Mcp) {
+        return render_mcp(exec);
+    }
+
+    match exec.kind {
+        ExecKind::Read => emit_read(exec),
+        ExecKind::Ls => emit_ls(exec),
+        ExecKind::Grep => emit_grep(exec),
+        ExecKind::Shell | ExecKind::ShellStream => emit_execute_shell(exec, false),
+        ExecKind::BackgroundShellSpawn => emit_execute_shell(exec, true),
+        ExecKind::WriteShellStdin => RenderedToolCall::Refuse {
+            exec_id: exec.exec_id.clone(),
+            reason: "Droid has no analog for WriteShellStdin; cannot address a running shell PID"
+                .into(),
+            code: refuse_code::CLIENT_CAPABILITY_UNSUPPORTED,
+        },
+        ExecKind::Write => RenderedToolCall::Refuse {
+            exec_id: exec.exec_id.clone(),
+            reason:
+                "Droid Create requires content; Cursor Write exec carries path only pending Live Phase 0 capture"
+                    .into(),
+            code: refuse_code::MISSING_REQUIRED_FIELD,
+        },
+        ExecKind::Delete => emit_execute_delete(exec),
+        ExecKind::Diagnostics => RenderedToolCall::Refuse {
+            exec_id: exec.exec_id.clone(),
+            reason: "Cursor Diagnostics exec args shape unknown pending Live Phase 0".into(),
+            code: refuse_code::SHAPE_UNKNOWN_PENDING_LIVE_PHASE0,
+        },
+        ExecKind::RequestContext => RenderedToolCall::Refuse {
+            exec_id: exec.exec_id.clone(),
+            reason: "RequestContext is proxy-internal and should not reach the renderer".into(),
+            code: refuse_code::CLIENT_CAPABILITY_UNSUPPORTED,
+        },
+        ExecKind::ListMcpResources => RenderedToolCall::Refuse {
+            exec_id: exec.exec_id.clone(),
+            reason: "Droid has no list_mcp_resources analog; MCP servers expose their own listing"
+                .into(),
+            code: refuse_code::CLIENT_CAPABILITY_UNSUPPORTED,
+        },
+        ExecKind::ReadMcpResource => RenderedToolCall::Refuse {
+            exec_id: exec.exec_id.clone(),
+            reason: "Droid has no read_mcp_resource analog; MCP servers expose their own resources"
+                .into(),
+            code: refuse_code::CLIENT_CAPABILITY_UNSUPPORTED,
+        },
+        ExecKind::Fetch => emit_fetch(exec),
+        ExecKind::RecordScreen | ExecKind::ComputerUse => RenderedToolCall::Refuse {
+            exec_id: exec.exec_id.clone(),
+            reason: format!(
+                "Cursor exec kind {:?} unsupported by Droid profile",
+                exec.kind
+            ),
+            code: refuse_code::UNSUPPORTED_EXEC_KIND,
+        },
+        ExecKind::Other(field) => RenderedToolCall::Refuse {
+            exec_id: exec.exec_id.clone(),
+            reason: format!("Cursor exec kind Other({field}) unsupported by Droid profile"),
+            code: refuse_code::UNSUPPORTED_EXEC_KIND,
+        },
+        ExecKind::Mcp => unreachable!(),
+    }
+}
+
+fn emit_read(exec: &ExecRequest) -> RenderedToolCall {
+    let path = read_string_field(&exec.args, 1).unwrap_or_default();
+    RenderedToolCall::Emit {
+        tool_name: "Read".into(),
+        arguments: json!({ "path": path }),
+        tool_call_id: exec.exec_id.clone(),
+    }
+}
+
+fn emit_ls(exec: &ExecRequest) -> RenderedToolCall {
+    let path = read_string_field(&exec.args, 1).unwrap_or_default();
+    RenderedToolCall::Emit {
+        tool_name: "LS".into(),
+        arguments: json!({ "path": path }),
+        tool_call_id: exec.exec_id.clone(),
+    }
+}
+
+fn emit_grep(exec: &ExecRequest) -> RenderedToolCall {
+    let pattern = read_string_field(&exec.args, 1).unwrap_or_default();
+    let path = read_string_field(&exec.args, 2).unwrap_or_default();
+    let output_mode = read_string_field(&exec.args, 3).unwrap_or_default();
+    let mut arguments = serde_json::Map::new();
+    arguments.insert("pattern".into(), json!(pattern));
+    arguments.insert("path".into(), json!(path));
+    if !output_mode.is_empty() {
+        arguments.insert("output_mode".into(), json!(output_mode));
+    }
+    RenderedToolCall::Emit {
+        tool_name: "Grep".into(),
+        arguments: serde_json::Value::Object(arguments),
+        tool_call_id: exec.exec_id.clone(),
+    }
+}
+
+fn emit_execute_shell(exec: &ExecRequest, background: bool) -> RenderedToolCall {
+    let command = read_string_field(&exec.args, 1).unwrap_or_default();
+    let mut arguments = serde_json::Map::new();
+    arguments.insert("command".into(), json!(command));
+    if background {
+        arguments.insert("background".into(), json!(true));
+    }
+    arguments.insert("riskLevel".into(), json!("medium"));
+    arguments.insert(
+        "riskLevelReason".into(),
+        json!("automated proxy invocation"),
+    );
+    tracing::debug!(
+        target: "cursor.profiles",
+        cursor.synthetic_default = "droid_execute_risk",
+        cursor.exec_kind = ?exec.kind,
+        cursor.tool_call_id = %exec.exec_id,
+        cursor.tool_name_emitted = "Execute",
+        "synthesized Droid Execute risk metadata",
+    );
+    RenderedToolCall::Emit {
+        tool_name: "Execute".into(),
+        arguments: serde_json::Value::Object(arguments),
+        tool_call_id: exec.exec_id.clone(),
+    }
+}
+
+fn emit_execute_delete(exec: &ExecRequest) -> RenderedToolCall {
+    let path = read_string_field(&exec.args, 1).unwrap_or_default();
+    let command = format!("rm {path}");
+    let arguments = json!({
+        "command": command,
+        "riskLevel": "high",
+        "riskLevelReason": "file deletion requested by Cursor exec",
+    });
+    tracing::debug!(
+        target: "cursor.profiles",
+        cursor.synthetic_default = "droid_execute_risk",
+        cursor.exec_kind = ?exec.kind,
+        cursor.tool_call_id = %exec.exec_id,
+        cursor.tool_name_emitted = "Execute",
+        "synthesized Droid Execute risk metadata for delete",
+    );
+    RenderedToolCall::Emit {
+        tool_name: "Execute".into(),
+        arguments,
+        tool_call_id: exec.exec_id.clone(),
+    }
+}
+
+fn emit_fetch(exec: &ExecRequest) -> RenderedToolCall {
+    let url = read_string_field(&exec.args, 1).unwrap_or_default();
+    RenderedToolCall::Emit {
+        tool_name: "FetchUrl".into(),
+        arguments: json!({ "url": url }),
+        tool_call_id: exec.exec_id.clone(),
+    }
+}
+
+fn render_mcp(exec: &ExecRequest) -> RenderedToolCall {
+    // `decode_exec_public_tool_call` returns (tool_name, tool_call_id, args)
+    // for MCP. The tool_name is the bare server tool name (McpArgs.tool,
+    // proto field 5). Droid namespaces MCP function calls as
+    // `<server>___<tool>` with TRIPLE underscores; the server is in
+    // McpArgs.server (field 4).
+    let (mcp_tool_name, tool_call_id, arguments) = decode_exec_public_tool_call(exec);
+    let server = read_string_field(&exec.args, 4).unwrap_or_default();
+    let namespaced = if server.is_empty() {
+        mcp_tool_name
+    } else {
+        format!("{server}___{mcp_tool_name}")
+    };
+    RenderedToolCall::Emit {
+        tool_name: namespaced,
+        arguments,
+        tool_call_id,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Local proto field reader.
+//
+// `proto::decode_string_field` is private to the proto module; this profile
+// reuses the public `parse_proto_fields` to read the same shape without
+// forcing a visibility change in proto.rs.
+// ---------------------------------------------------------------------------
+
+fn read_string_field(data: &[u8], field_number: u32) -> Option<String> {
+    parse_proto_fields(data)
+        .into_iter()
+        .find(|field| field.number == field_number && field.wire_type == 2)
+        .map(|field| String::from_utf8_lossy(&field.value).into_owned())
+}

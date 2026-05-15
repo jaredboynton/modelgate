@@ -4,9 +4,11 @@
 //! `GetUsableModels` discovery cache. Higher-level run/session/indexing logic
 //! lives in sibling modules owned by other lanes.
 
+pub mod client_profile;
 pub mod connect;
 pub mod indexing;
 pub mod models;
+pub mod profiles;
 pub mod proto;
 pub mod run;
 pub mod session;
