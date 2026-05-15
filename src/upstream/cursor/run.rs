@@ -33,8 +33,8 @@ use crate::{
         proto::{
             decode_agent_server_message, decode_exec_public_tool_call, decode_get_blob_args,
             decode_set_blob_args, encode_agent_run_request, encode_get_blob_result,
-            encode_request_context_result, encode_set_blob_result, InteractionEvent, KvKind,
-            Message,
+            encode_request_context_result, encode_set_blob_result, AgentRunRequestInput,
+            InteractionEvent, KvKind, Message,
         },
         session::ConversationState,
         transport::open_streaming_run,
@@ -85,16 +85,16 @@ pub async fn run(
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     let os_version = std::env::consts::OS.to_string();
 
-    let body = encode_agent_run_request(
-        &request.upstream_model,
-        &proto_messages,
-        &message_id,
-        Some(conversation_id_out.as_str()),
-        &os_version,
-        &workspace_path,
-        &shell,
-        &request.tools,
-    );
+    let body = encode_agent_run_request(AgentRunRequestInput {
+        model: &request.upstream_model,
+        messages: &proto_messages,
+        message_id: &message_id,
+        conversation_id: Some(conversation_id_out.as_str()),
+        os_version: &os_version,
+        workspace_path: &workspace_path,
+        shell: &shell,
+        tools: &request.tools,
+    });
 
     let cursor_sessions = state.cursor_sessions.clone();
     let continuation_key = request.continuation_key.clone();

@@ -433,6 +433,17 @@ pub struct Message {
     pub text: String,
 }
 
+pub struct AgentRunRequestInput<'a> {
+    pub model: &'a str,
+    pub messages: &'a [Message],
+    pub message_id: &'a str,
+    pub conversation_id: Option<&'a str>,
+    pub os_version: &'a str,
+    pub workspace_path: &'a str,
+    pub shell: &'a str,
+    pub tools: &'a [crate::cursor_agent::CursorTool],
+}
+
 /// Heartbeat encoder. Returns the framed `AgentClientMessage` body bytes
 /// (no Connect envelope).
 pub fn encode_client_heartbeat() -> Vec<u8> {
@@ -447,29 +458,20 @@ pub fn encode_client_heartbeat() -> Vec<u8> {
 /// `lib.rs:616-649` of `ump-adapter-cursor-bidisse`. Conversation state is
 /// emitted as an empty sub-message; richer state shapes are a Phase 1+
 /// follow-up.
-pub fn encode_agent_run_request(
-    model: &str,
-    messages: &[Message],
-    message_id: &str,
-    conversation_id: Option<&str>,
-    os_version: &str,
-    workspace_path: &str,
-    shell: &str,
-    tools: &[crate::cursor_agent::CursorTool],
-) -> Vec<u8> {
-    let prompt = messages_to_prompt(messages);
+pub fn encode_agent_run_request(input: AgentRunRequestInput<'_>) -> Vec<u8> {
+    let prompt = messages_to_prompt(input.messages);
     let user_message_bytes = concat_bytes(&[
         encode_string_field(user_message::TEXT, &prompt),
-        encode_string_field(user_message::MESSAGE_ID, message_id),
+        encode_string_field(user_message::MESSAGE_ID, input.message_id),
         encode_int32_field(user_message::MODE, 1),
     ]);
 
     // RequestContextEnv is wrapped under `RequestContext.env` (field 4).
     let env_body = concat_bytes(&[
-        encode_string_field(request_context_env::OS_VERSION, os_version),
-        encode_string_field(request_context_env::WORKSPACE_PATHS, workspace_path),
-        encode_string_field(request_context_env::SHELL, shell),
-        encode_string_field(request_context_env::PROJECT_FOLDER, workspace_path),
+        encode_string_field(request_context_env::OS_VERSION, input.os_version),
+        encode_string_field(request_context_env::WORKSPACE_PATHS, input.workspace_path),
+        encode_string_field(request_context_env::SHELL, input.shell),
+        encode_string_field(request_context_env::PROJECT_FOLDER, input.workspace_path),
     ]);
     let request_context = encode_message_field(request_context::ENV, &env_body);
 
@@ -479,8 +481,8 @@ pub fn encode_agent_run_request(
     ]);
     let conversation_action_bytes =
         encode_message_field(conversation_action::USER_MESSAGE_ACTION, &user_action);
-    let model_details_bytes = encode_string_field(model_details::MODEL_ID, model);
-    let mcp_tools = encode_mcp_tools(tools);
+    let model_details_bytes = encode_string_field(model_details::MODEL_ID, input.model);
+    let mcp_tools = encode_mcp_tools(input.tools);
 
     let mut run_parts = vec![
         encode_message_field(agent_run_request::CONVERSATION_STATE, &[]),
@@ -493,7 +495,7 @@ pub fn encode_agent_run_request(
             &mcp_tools,
         ));
     }
-    if let Some(id) = conversation_id {
+    if let Some(id) = input.conversation_id {
         run_parts.push(encode_string_field(agent_run_request::CONVERSATION_ID, id));
     }
     let run_request_bytes = concat_bytes(&run_parts);

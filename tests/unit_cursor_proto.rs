@@ -28,8 +28,8 @@ use unified_model_proxy_v2::upstream::cursor::{
         encode_int32_field, encode_int64_field, encode_message_field, encode_repeated_string_field,
         encode_request_context_result, encode_string_field, encode_varint,
         get_usable_models_response, interaction_update, model_details, parse_proto_fields,
-        request_context, request_context_env, user_message, user_message_action, ExecKind,
-        ExecRequest, InteractionEvent, KvKind, Message, ProtoField,
+        request_context, request_context_env, user_message, user_message_action,
+        AgentRunRequestInput, ExecKind, ExecRequest, InteractionEvent, KvKind, Message, ProtoField,
     },
 };
 
@@ -252,16 +252,16 @@ fn agent_run_request_basic_encodes_byte_stable_against_committed_fixture() {
         },
     ];
 
-    let encoded = encode_agent_run_request(
-        "composer-2-fast",
-        &messages,
-        "msg-fixture-0001",
-        Some("conv-fixture-0001"),
-        "darwin-24.6.0",
-        "/tmp/cursor-fixture-workspace",
-        "/bin/zsh",
-        &[],
-    );
+    let encoded = encode_agent_run_request(AgentRunRequestInput {
+        model: "composer-2-fast",
+        messages: &messages,
+        message_id: "msg-fixture-0001",
+        conversation_id: Some("conv-fixture-0001"),
+        os_version: "darwin-24.6.0",
+        workspace_path: "/tmp/cursor-fixture-workspace",
+        shell: "/bin/zsh",
+        tools: &[],
+    });
 
     // Wrap inside `AgentClientMessage` for the canonical fixture comparison.
     // `encode_agent_run_request` already returns the wrapped wire bytes
@@ -325,19 +325,20 @@ fn agent_run_request_encodes_workspace_env_and_model_field_paths() {
     // White-box check that the workspace path lands under
     // RequestContext.env.workspace_paths AND env.project_folder, and that
     // the model id round-trips via ModelDetails.
-    let encoded = encode_agent_run_request(
-        "composer-1.5",
-        &[Message {
-            role: "user".to_string(),
-            text: "ping".to_string(),
-        }],
-        "mid",
-        None,
-        "darwin-24.6.0",
-        "/tmp/workspace",
-        "/bin/zsh",
-        &[],
-    );
+    let messages = [Message {
+        role: "user".to_string(),
+        text: "ping".to_string(),
+    }];
+    let encoded = encode_agent_run_request(AgentRunRequestInput {
+        model: "composer-1.5",
+        messages: &messages,
+        message_id: "mid",
+        conversation_id: None,
+        os_version: "darwin-24.6.0",
+        workspace_path: "/tmp/workspace",
+        shell: "/bin/zsh",
+        tools: &[],
+    });
 
     let outer = parse_proto_fields(&encoded);
     let run_payload = outer
@@ -666,19 +667,20 @@ fn agent_run_request_includes_initial_mcp_tools() {
         }),
         kind: CursorToolKind::Function,
     }];
-    let encoded = encode_agent_run_request(
-        "composer-2-fast",
-        &[Message {
-            role: "user".to_string(),
-            text: "search".to_string(),
-        }],
-        "mid",
-        Some("conv"),
-        "Darwin",
-        "/tmp/workspace",
-        "zsh",
-        &tools,
-    );
+    let messages = [Message {
+        role: "user".to_string(),
+        text: "search".to_string(),
+    }];
+    let encoded = encode_agent_run_request(AgentRunRequestInput {
+        model: "composer-2-fast",
+        messages: &messages,
+        message_id: "mid",
+        conversation_id: Some("conv"),
+        os_version: "Darwin",
+        workspace_path: "/tmp/workspace",
+        shell: "zsh",
+        tools: &tools,
+    });
 
     let outer = parse_proto_fields(&encoded);
     let run_payload = outer
