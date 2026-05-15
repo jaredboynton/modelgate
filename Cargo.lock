@@ -2304,6 +2304,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
 dependencies = [
  "aws-lc-rs",
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -2974,6 +2975,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 name = "unified-model-proxy-v2"
 version = "0.1.0"
 dependencies = [
+ "aes",
  "aes-gcm-siv",
  "anyhow",
  "async-trait",
@@ -2983,15 +2985,20 @@ dependencies = [
  "axum",
  "base64",
  "bytes",
+ "ctr",
  "dirs",
  "flate2",
  "fs2",
  "futures",
+ "h2",
+ "hex",
  "hkdf",
  "hmac 0.12.1",
  "http 1.4.0",
  "rand_core 0.6.4",
  "reqwest",
+ "rustls",
+ "rustls-native-certs",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2999,6 +3006,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-rustls",
  "tower",
  "tower-http",
  "tracing",

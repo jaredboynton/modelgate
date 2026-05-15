@@ -828,6 +828,7 @@ fn parse_provider(provider: &str) -> Option<Provider> {
     match provider {
         "bedrock" => Some(Provider::Bedrock),
         "codex" => Some(Provider::Codex),
+        "cursor" => Some(Provider::Cursor),
         "google" => Some(Provider::Google),
         "unsupported" => Some(Provider::Unsupported),
         _ => None,
@@ -1183,6 +1184,7 @@ fn provider_slug(provider: Provider) -> &'static str {
     match provider {
         Provider::Bedrock => "bedrock",
         Provider::Codex => "codex",
+        Provider::Cursor => "cursor",
         Provider::Google => "google",
         Provider::Unsupported => "unsupported",
     }
@@ -1366,6 +1368,17 @@ fn catalog_route_supports_runtime(
                 "chat_completions",
                 Provider::Bedrock,
                 TargetFormat::AnthropicMessages
+            )
+            | ("responses", Provider::Cursor, TargetFormat::CursorAgent)
+            | (
+                "chat_completions",
+                Provider::Cursor,
+                TargetFormat::CursorAgent
+            )
+            | (
+                "anthropic_messages",
+                Provider::Cursor,
+                TargetFormat::CursorAgent
             )
     )
 }
@@ -1808,7 +1821,7 @@ mod tests {
     }
 
     #[test]
-    fn hot_config_graph_cursor_target_provider_remains_invalid() {
+    fn hot_config_graph_cursor_target_provider_is_valid() {
         let graph = build_config_graph(json!({
             "routes": [{
                 "source": { "model": "composer-2", "format": "responses" },
@@ -1817,15 +1830,16 @@ mod tests {
         }))
         .unwrap();
 
-        assert_eq!(graph.draft_status, DraftStatus::Invalid);
+        assert_eq!(graph.draft_status, DraftStatus::Valid);
         let card = graph
             .route_cards
             .iter()
             .find(|card| card.id == "config:0")
             .unwrap();
         assert_eq!(card.source.source_provider, SourceProvider::Cursor);
-        assert_eq!(card.target.provider, Provider::Unsupported);
-        assert!(graph.diagnostics_v2.iter().any(|diagnostic| {
+        assert_eq!(card.target.provider, Provider::Cursor);
+        assert_eq!(card.target.provider_format.as_deref(), Some("cursor_agent"));
+        assert!(!graph.diagnostics_v2.iter().any(|diagnostic| {
             diagnostic.code == "unsupported_target_provider"
                 && diagnostic.path.as_deref() == Some("$.routes[0].target.provider")
         }));

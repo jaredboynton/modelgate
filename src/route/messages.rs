@@ -3,9 +3,10 @@ use axum::{
     extract::State,
     http::{header, HeaderMap, HeaderValue, StatusCode},
 };
+use futures::StreamExt;
 
 use crate::{
-    adapter::anthropic_responses::anthropic_messages_to_responses,
+    adapter::{anthropic_responses::anthropic_messages_to_responses, cursor_messages},
     model_alias::{resolve_model_required, ResolvedTarget},
     route::dispatch::{
         plan_for_target, plan_with_resolver, plan_with_state, DispatchAction, DispatchEdge,
@@ -14,10 +15,11 @@ use crate::{
     upstream, AppError, AppResult, AppState, UpstreamResponse,
 };
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum MessagesRoute {
     BedrockMessages,
     CodexResponses,
+    CursorAgent { upstream_model: String },
 }
 
 pub async fn messages(
@@ -39,7 +41,64 @@ pub async fn messages(
         DispatchAction::GoogleGenerateContent => {
             Err(AppError::ModelNotSupported(plan.requested_model))
         }
+        DispatchAction::CursorAgent => {
+            execute_cursor_messages(&state, &headers, &plan, value).await
+        }
     }
+}
+
+async fn execute_cursor_messages(
+    state: &AppState,
+    headers: &HeaderMap,
+    plan: &crate::route::dispatch::DispatchPlan,
+    value: serde_json::Value,
+) -> AppResult<UpstreamResponse> {
+    let stream = value
+        .get("stream")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let mut request = cursor_messages::build_request(&value)?;
+    request.upstream_model = plan.target.upstream_model.clone();
+    upstream::cursor::workspace::attach_to_request(&mut request, headers).await;
+
+    upstream::cursor::ensure_credentials(state).await?;
+
+    if stream {
+        let events = upstream::cursor::run::run(state, request).await;
+        let mut ctx = cursor_messages::MessagesContext::new(&plan.requested_model);
+        let stream = events
+            .map(move |event| {
+                let mut bytes = Vec::new();
+                for frame in cursor_messages::emit_event(&event, &mut ctx) {
+                    bytes.extend_from_slice(frame.to_wire().as_bytes());
+                }
+                Ok::<Bytes, AppError>(Bytes::from(bytes))
+            })
+            .filter_map(|chunk| async move {
+                match chunk {
+                    Ok(bytes) if bytes.is_empty() => None,
+                    other => Some(other),
+                }
+            });
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/event-stream"),
+        );
+        return Ok(UpstreamResponse::stream(
+            "cursor",
+            StatusCode::OK,
+            headers,
+            stream,
+        ));
+    }
+
+    let events: Vec<_> = upstream::cursor::run::run(state, request)
+        .await
+        .collect()
+        .await;
+    let response = cursor_messages::collect_non_stream(&plan.requested_model, events)?;
+    UpstreamResponse::json("cursor", response).map_err(AppError::from)
 }
 
 pub async fn count_tokens(State(state): State<AppState>, body: Bytes) -> AppResult<Bytes> {
@@ -75,6 +134,9 @@ fn route_from_plan(plan: crate::route::dispatch::DispatchPlan) -> AppResult<Mess
             Ok(MessagesRoute::BedrockMessages)
         }
         DispatchEdge::AnthropicMessagesToResponsesCodex => Ok(MessagesRoute::CodexResponses),
+        DispatchEdge::AnthropicMessagesToCursorAgentCursor => Ok(MessagesRoute::CursorAgent {
+            upstream_model: plan.target.upstream_model,
+        }),
         _ => Err(AppError::ModelNotSupported(plan.requested_model)),
     }
 }

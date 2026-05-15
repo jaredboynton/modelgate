@@ -76,3 +76,60 @@ async fn shared_executor_rejects_opaque_compaction_before_provider_adapters() {
         "shared executor must fail before Anthropic adapter conversion: {error}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Cursor route arm coverage (Phase 1)
+//
+// Phase 1 lands the route enum variant + dispatch but stops short of the
+// real Cursor adapter (Lane G). The executor returns
+// Cursor composer models dispatch into the Cursor adapter. In isolated test
+// homes without real credentials the route fails at the upstream-owned
+// credential preflight, not at model resolution.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn shared_executor_returns_missing_cursor_credential_for_composer_without_auth() {
+    let homes = common::TestHomes::new();
+    let error = match execute_responses_request(
+        &homes.state,
+        HeaderMap::new(),
+        json!({
+            "model": "composer-2-fast",
+            "input": "hello"
+        }),
+        ExecuteResponsesOptions {
+            force_stream: false,
+        },
+    )
+    .await
+    {
+        Ok(_) => panic!("Cursor route should require credentials in isolated test homes"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status(), axum::http::StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        error.error_type(),
+        "missing_credential",
+        "Cursor composer models should reach the adapter path before auth preflight fails: {error}"
+    );
+}
+
+#[tokio::test]
+async fn http_responses_handler_returns_missing_cursor_credential_for_composer_without_auth() {
+    let homes = common::TestHomes::new();
+    let body = Bytes::from(
+        json!({
+            "model": "composer-2-fast",
+            "input": "hello"
+        })
+        .to_string(),
+    );
+    let error = match responses(axum::extract::State(homes.state), HeaderMap::new(), body).await {
+        Ok(_) => panic!("Cursor route should require credentials in isolated test homes"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status(), axum::http::StatusCode::UNAUTHORIZED);
+    assert_eq!(error.error_type(), "missing_credential");
+}

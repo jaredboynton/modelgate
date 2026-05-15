@@ -206,6 +206,7 @@ fn provider_name(provider: Provider) -> &'static str {
         Provider::Bedrock => "bedrock",
         Provider::Codex => "codex",
         Provider::Google => "google",
+        Provider::Cursor => "cursor",
         Provider::Unsupported => "unsupported",
     }
 }
@@ -370,6 +371,7 @@ mod tests {
                 Provider::Bedrock => "bedrock",
                 Provider::Codex => "codex",
                 Provider::Google => "google",
+                Provider::Cursor => "cursor",
                 Provider::Unsupported => "unsupported",
             }
             .into(),

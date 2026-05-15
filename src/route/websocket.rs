@@ -674,9 +674,9 @@ fn ensure_responses_websocket_capable(state: &AppState, value: &Value) -> AppRes
     let plan = plan_with_state(state, RequestFormat::Responses, request)?;
     match plan.action {
         DispatchAction::CodexResponses => Ok(()),
-        DispatchAction::BedrockAnthropicMessages | DispatchAction::GoogleGenerateContent => {
-            Err(AppError::ModelNotSupported(plan.requested_model))
-        }
+        DispatchAction::BedrockAnthropicMessages
+        | DispatchAction::GoogleGenerateContent
+        | DispatchAction::CursorAgent => Err(AppError::ModelNotSupported(plan.requested_model)),
     }
 }
 
@@ -689,7 +689,7 @@ fn responses_request_body(value: &Value) -> AppResult<&Value> {
 
 fn close_code_for_error(error: &AppError) -> u16 {
     match error {
-        AppError::BadRequest(_) => close_code::INVALID,
+        AppError::BadRequest(_) | AppError::BadRequestCode { .. } => close_code::INVALID,
         AppError::ModelNotSupported(_) | AppError::NotFound(_) => close_code::POLICY,
         AppError::MissingCredential(_)
         | AppError::Upstream(_)
@@ -831,6 +831,9 @@ async fn resolve_bridge_route(
         DispatchAction::GoogleGenerateContent => ResponsesRoute::GoogleGenerateContent {
             upstream_model: plan.target.upstream_model.clone(),
         },
+        DispatchAction::CursorAgent => {
+            return Err(AppError::ModelNotSupported(plan.requested_model))
+        }
     };
     let target_format = plan.target.target_format.as_str().to_string();
     Ok(BridgeRouteFingerprint {
@@ -955,6 +958,18 @@ async fn execute_bridge_response_create(
         ResponsesRoute::BedrockMessages | ResponsesRoute::GoogleGenerateContent { .. } => {
             run_bridge_provider_task(state.clone(), client, provider_request, request).await?
         }
+        ResponsesRoute::CursorAgent { .. } => {
+            send_ws_json(
+                client,
+                websocket_request_error(
+                    StatusCode::BAD_REQUEST,
+                    "unsupported_route",
+                    "cursor_agent route is not supported over the Responses WebSocket bridge",
+                ),
+            )
+            .await?;
+            return Ok(BridgeResponseOutcome::Continue);
+        }
     };
     let Some(result) = result else {
         return Ok(BridgeResponseOutcome::Closed);
@@ -1070,6 +1085,7 @@ fn bridge_route_lane(route: &ResponsesRoute) -> &'static str {
         ResponsesRoute::CodexResponses => "codex",
         ResponsesRoute::BedrockMessages => "bedrock",
         ResponsesRoute::GoogleGenerateContent { .. } => "google",
+        ResponsesRoute::CursorAgent { .. } => "cursor",
     }
 }
 
@@ -1903,6 +1919,7 @@ fn bridge_route_provider(route: &ResponsesRoute) -> &'static str {
         ResponsesRoute::CodexResponses => "codex",
         ResponsesRoute::BedrockMessages => "bedrock",
         ResponsesRoute::GoogleGenerateContent { .. } => "google",
+        ResponsesRoute::CursorAgent { .. } => "cursor",
     }
 }
 
@@ -1957,6 +1974,7 @@ fn bridge_route_provider_enum(route: &ResponsesRoute) -> Provider {
         ResponsesRoute::CodexResponses => Provider::Codex,
         ResponsesRoute::BedrockMessages => Provider::Bedrock,
         ResponsesRoute::GoogleGenerateContent { .. } => Provider::Google,
+        ResponsesRoute::CursorAgent { .. } => Provider::Cursor,
     }
 }
 

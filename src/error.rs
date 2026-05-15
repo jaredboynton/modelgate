@@ -15,6 +15,8 @@ pub enum AppError {
     ModelNotSupported(String),
     #[error("bad request: {0}")]
     BadRequest(String),
+    #[error("{message}")]
+    BadRequestCode { code: &'static str, message: String },
     #[error("not found: {0}")]
     NotFound(String),
     #[error("upstream error: {0}")]
@@ -98,7 +100,9 @@ impl AppError {
     pub fn status(&self) -> StatusCode {
         match self {
             Self::MissingCredential(_) => StatusCode::UNAUTHORIZED,
-            Self::ModelNotSupported(_) | Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::ModelNotSupported(_) | Self::BadRequest(_) | Self::BadRequestCode { .. } => {
+                StatusCode::BAD_REQUEST
+            }
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::Upstream(message) if is_upstream_forbidden(message) => StatusCode::FORBIDDEN,
             Self::Upstream(_) | Self::Io(_) | Self::Json(_) => StatusCode::BAD_GATEWAY,
@@ -116,7 +120,7 @@ impl AppError {
             Self::BadRequest(message) if is_codex_unsupported_request(message) => {
                 "invalid_request_error"
             }
-            Self::BadRequest(_) => "invalid_request",
+            Self::BadRequest(_) | Self::BadRequestCode { .. } => "invalid_request",
             Self::NotFound(_) => "not_found",
             Self::Upstream(message) if is_upstream_forbidden(message) => "permission_error",
             Self::Upstream(_) => "upstream_error",
@@ -134,6 +138,7 @@ impl AppError {
             Self::BadRequest(message) if is_codex_unsupported_request(message) => {
                 Some("unsupported_feature")
             }
+            Self::BadRequestCode { code, .. } => Some(code),
             Self::Upstream(message) if is_upstream_forbidden(message) => Some("upstream_forbidden"),
             Self::Compaction(error) => Some(error.code()),
             _ => None,

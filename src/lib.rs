@@ -4,6 +4,7 @@ pub mod auth;
 pub mod codex_catalog;
 pub mod compaction;
 pub mod config_graph;
+pub mod cursor_agent;
 pub mod error;
 pub mod failure_capture;
 pub mod hot_config;

@@ -28,6 +28,7 @@ pub fn default_policy_for_target(target: &ResolvedTarget) -> RemoteCompactionPol
     match (target.provider, target.target_format) {
         (Provider::Codex, TargetFormat::Responses) => RemoteCompactionPolicy::Native,
         (Provider::Bedrock | Provider::Google, _) => RemoteCompactionPolicy::Local,
+        (Provider::Cursor, _) => RemoteCompactionPolicy::Local,
         (Provider::Unsupported, _) => RemoteCompactionPolicy::Off,
         _ => RemoteCompactionPolicy::Local,
     }

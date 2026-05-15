@@ -123,7 +123,61 @@ fn rules() -> Vec<Rule> {
             rule: "route modules must not reach into auth internals directly",
             remediation: "route through upstream/state/model/error boundaries instead of loading provider credentials in handlers",
         },
+        Rule {
+            source_prefix: "src/cursor_agent",
+            forbidden_targets: &["route", "upstream", "adapter", "auth", "router", "state"],
+            rule: "src/cursor_agent.rs is the neutral DTO boundary between Cursor adapters and Cursor upstream and must not import any other crate-internal layer",
+            remediation: "keep src/cursor_agent.rs to plain data types; move provider logic into upstream/cursor and adapter logic into adapter/cursor_*",
+        },
     ]
+}
+
+#[test]
+fn state_holds_only_dependency_wiring() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state_path = manifest_dir.join("src/state.rs");
+    let source = fs::read_to_string(&state_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", state_path.display()));
+
+    // Strip comments and string literals before counting Cursor mentions.
+    // Doc comments and string literals frequently mention Cursor in ways that
+    // do not constitute provider-specific business logic. The grep guard's
+    // job is to flag actual Rust-level Cursor coupling: type references,
+    // function calls, etc.
+    let stripped = strip_comments_and_strings(&source);
+
+    let mut occurrences = Vec::new();
+    let mut remainder = stripped.as_str();
+    while let Some(index) = remainder.find("Cursor") {
+        let line_number = stripped[..(stripped.len() - remainder.len() + index)]
+            .matches('\n')
+            .count()
+            + 1;
+        occurrences.push(line_number);
+        remainder = &remainder[index + "Cursor".len()..];
+    }
+
+    // Per ralplan Section 4: AppState carries only `Arc<CursorSessionStore>`
+    // and equivalent dependency wiring. Allowlist:
+    //   - `use crate::upstream::cursor::session::CursorSessionStore;` (1 import)
+    //   - `pub cursor_sessions: Arc<CursorSessionStore>,` field declaration (1 type ref)
+    //   - `cursor_sessions: Arc::new(CursorSessionStore::new()),` initializer
+    //     in `from_env_with_config` (1 ref)
+    //   - same initializer in `for_tests` (1 ref)
+    //   - optional accessor (e.g. `pub fn cursor_sessions(...) -> ...`) (allow 1)
+    //
+    // 5 references covers a typical wiring without leaving room for any
+    // provider business logic to leak into state.rs. If the grep count
+    // climbs beyond 6, fail and force the offender to relocate the logic
+    // into `src/upstream/cursor/` per ralplan Section 4.
+    let allowlist_max = 6;
+    assert!(
+        occurrences.len() <= allowlist_max,
+        "src/state.rs holds too many Cursor references ({} > {} allowed); provider invariants belong in src/upstream/cursor/. Lines: {:?}",
+        occurrences.len(),
+        allowlist_max,
+        occurrences,
+    );
 }
 
 fn normalized_import_edges(source: &str) -> Vec<String> {

@@ -59,6 +59,19 @@ fn maps_known_aliases() {
     let alias = resolve_model("gpt-5.5").unwrap();
     assert_eq!(alias.provider, Provider::Codex);
     assert_eq!(alias.upstream_model, "gpt-5.5");
+
+    // Composer rows added in Phase 1: Cursor provider, upstream id == public id.
+    let alias = resolve_model("composer-1.5").unwrap();
+    assert_eq!(alias.provider, Provider::Cursor);
+    assert_eq!(alias.upstream_model, "composer-1.5");
+
+    let alias = resolve_model("composer-2").unwrap();
+    assert_eq!(alias.provider, Provider::Cursor);
+    assert_eq!(alias.upstream_model, "composer-2");
+
+    let alias = resolve_model("composer-2-fast").unwrap();
+    assert_eq!(alias.provider, Provider::Cursor);
+    assert_eq!(alias.upstream_model, "composer-2-fast");
 }
 
 #[test]
@@ -125,6 +138,10 @@ fn provider_defaults_select_expected_target_formats() {
         Provider::Google.default_target_format(),
         Some(TargetFormat::GoogleGenerateContent)
     );
+    assert_eq!(
+        Provider::Cursor.default_target_format(),
+        Some(TargetFormat::CursorAgent)
+    );
     assert_eq!(Provider::Unsupported.default_target_format(), None);
 }
 
@@ -160,6 +177,13 @@ fn chat_route_planner_allows_only_codex_gpt_and_bedrock_claude() {
             Err("model_not_supported"),
         ),
         (
+            Provider::Cursor,
+            "composer-2-fast",
+            Ok(ChatRoute::CursorAgent {
+                upstream_model: "composer-2-fast".to_string(),
+            }),
+        ),
+        (
             Provider::Unsupported,
             "gpt-image-2",
             Err("model_not_supported"),
@@ -190,6 +214,13 @@ fn messages_route_planner_allows_only_bedrock_and_codex_gpt() {
             Provider::Google,
             "gemini-3.1-flash-lite",
             Err("model_not_supported"),
+        ),
+        (
+            Provider::Cursor,
+            "composer-2",
+            Ok(MessagesRoute::CursorAgent {
+                upstream_model: "composer-2".to_string(),
+            }),
         ),
         (
             Provider::Unsupported,
@@ -224,6 +255,13 @@ fn responses_route_planner_allows_codex_bedrock_and_google_only() {
             "gemini-3.1-flash-lite",
             Ok(ResponsesRoute::GoogleGenerateContent {
                 upstream_model: "gemini-3.1-flash-lite".to_string(),
+            }),
+        ),
+        (
+            Provider::Cursor,
+            "composer-1.5",
+            Ok(ResponsesRoute::CursorAgent {
+                upstream_model: "composer-1.5".to_string(),
             }),
         ),
         (
@@ -345,7 +383,7 @@ fn known_model_catalog_exposes_provider_aware_remote_compaction_policy() {
             .unwrap_or_else(|| panic!("{} missing remote_compaction_policy", model.id));
         let expected = match model.provider {
             Provider::Codex => "native",
-            Provider::Bedrock | Provider::Google => "local",
+            Provider::Bedrock | Provider::Google | Provider::Cursor => "local",
             Provider::Unsupported => "off",
         };
 

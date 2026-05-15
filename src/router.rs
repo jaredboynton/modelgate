@@ -517,6 +517,7 @@ fn provider_for_request_path_and_model(path: &str, model: Option<&str>) -> Optio
             Provider::Bedrock => "bedrock",
             Provider::Codex => "codex",
             Provider::Google => "google",
+            Provider::Cursor => "cursor",
             Provider::Unsupported => "unsupported",
         });
     }

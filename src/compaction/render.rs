@@ -18,6 +18,7 @@ pub fn render_ump_pack_for_target(pack: &DecodedUmpPack, target: &ResolvedTarget
             })]
         }
         TargetFormat::OpenaiImages => Vec::new(),
+        TargetFormat::CursorAgent => Vec::new(),
     }
 }
 

@@ -52,15 +52,15 @@ pub async fn compact_responses(
         }
         RemoteCompactionPolicy::Native => match plan.action {
             DispatchAction::CodexResponses => compact_codex_responses(state, headers, value).await,
-            DispatchAction::BedrockAnthropicMessages | DispatchAction::GoogleGenerateContent => {
-                Err(CompactionHttpError::new(
-                    StatusCode::BAD_REQUEST,
-                    "unsupported_compaction_item_for_target",
-                    "invalid_request",
-                    "native compaction is not supported for the resolved target",
-                )
-                .into())
-            }
+            DispatchAction::BedrockAnthropicMessages
+            | DispatchAction::GoogleGenerateContent
+            | DispatchAction::CursorAgent => Err(CompactionHttpError::new(
+                StatusCode::BAD_REQUEST,
+                "unsupported_compaction_item_for_target",
+                "invalid_request",
+                "native compaction is not supported for the resolved target",
+            )
+            .into()),
         },
     }
 }

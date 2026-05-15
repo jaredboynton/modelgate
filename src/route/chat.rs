@@ -3,10 +3,12 @@ use axum::{
     extract::State,
     http::{header, HeaderMap, HeaderValue, StatusCode},
 };
+use futures::StreamExt;
 
 use crate::{
-    adapter::anthropic_responses::{
-        chat_completions_to_responses, responses_to_anthropic_messages,
+    adapter::{
+        anthropic_responses::{chat_completions_to_responses, responses_to_anthropic_messages},
+        cursor_chat,
     },
     model_alias::{resolve_model_required, ResolvedTarget},
     route::{
@@ -19,10 +21,11 @@ use crate::{
     upstream, AppError, AppResult, AppState, UpstreamResponse,
 };
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ChatRoute {
     CodexResponses,
     BedrockMessages,
+    CursorAgent { upstream_model: String },
 }
 
 pub async fn chat_completions(
@@ -55,7 +58,66 @@ pub async fn chat_completions(
         DispatchAction::GoogleGenerateContent => {
             Err(AppError::ModelNotSupported(plan.requested_model))
         }
+        DispatchAction::CursorAgent => execute_cursor_chat(&state, &headers, &plan, value).await,
     }
+}
+
+async fn execute_cursor_chat(
+    state: &AppState,
+    headers: &HeaderMap,
+    plan: &crate::route::dispatch::DispatchPlan,
+    value: serde_json::Value,
+) -> AppResult<UpstreamResponse> {
+    let stream = value
+        .get("stream")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let mut request = cursor_chat::build_request(&value)?;
+    request.upstream_model = plan.target.upstream_model.clone();
+    crate::upstream::cursor::workspace::attach_to_request(&mut request, headers).await;
+
+    upstream::cursor::ensure_credentials(state).await?;
+
+    if stream {
+        let events = upstream::cursor::run::run(state, request).await;
+        let mut ctx = cursor_chat::ChatContext::new(&plan.requested_model);
+        let stream = events
+            .map(move |event| {
+                let done = matches!(event, crate::cursor_agent::CursorAgentEvent::Done { .. });
+                let mut bytes = Vec::new();
+                for chunk in cursor_chat::emit_event(&event, &mut ctx) {
+                    bytes.extend_from_slice(format!("data: {chunk}\n\n").as_bytes());
+                }
+                if done {
+                    bytes.extend_from_slice(b"data: [DONE]\n\n");
+                }
+                Ok::<Bytes, AppError>(Bytes::from(bytes))
+            })
+            .filter_map(|chunk| async move {
+                match chunk {
+                    Ok(bytes) if bytes.is_empty() => None,
+                    other => Some(other),
+                }
+            });
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/event-stream"),
+        );
+        return Ok(UpstreamResponse::stream(
+            "cursor",
+            StatusCode::OK,
+            headers,
+            stream,
+        ));
+    }
+
+    let events: Vec<_> = upstream::cursor::run::run(state, request)
+        .await
+        .collect()
+        .await;
+    let response = cursor_chat::collect_non_stream(&plan.requested_model, events)?;
+    UpstreamResponse::json("cursor", response).map_err(AppError::from)
 }
 
 pub fn route_for_chat_model(value: &serde_json::Value) -> AppResult<ChatRoute> {
@@ -80,6 +142,9 @@ fn route_from_plan(plan: crate::route::dispatch::DispatchPlan) -> AppResult<Chat
     match plan.edge {
         DispatchEdge::ChatCompletionsToResponsesCodex => Ok(ChatRoute::CodexResponses),
         DispatchEdge::ChatCompletionsToAnthropicMessagesBedrock => Ok(ChatRoute::BedrockMessages),
+        DispatchEdge::ChatCompletionsToCursorAgentCursor => Ok(ChatRoute::CursorAgent {
+            upstream_model: plan.target.upstream_model,
+        }),
         _ => Err(AppError::ModelNotSupported(plan.requested_model)),
     }
 }

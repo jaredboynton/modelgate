@@ -7,6 +7,7 @@ use crate::{compaction::RemoteCompactionPolicy, AppError, AppResult};
 pub enum Provider {
     Bedrock,
     Codex,
+    Cursor,
     Google,
     Unsupported,
 }
@@ -40,6 +41,7 @@ pub enum TargetFormat {
     AnthropicMessages,
     GoogleGenerateContent,
     OpenaiImages,
+    CursorAgent,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize)]
@@ -72,6 +74,7 @@ impl Provider {
         match self {
             Provider::Bedrock => Some(TargetFormat::AnthropicMessages),
             Provider::Codex => Some(TargetFormat::Responses),
+            Provider::Cursor => Some(TargetFormat::CursorAgent),
             Provider::Google => Some(TargetFormat::GoogleGenerateContent),
             Provider::Unsupported => None,
         }
@@ -97,6 +100,7 @@ impl TargetFormat {
             Self::AnthropicMessages => "anthropic_messages",
             Self::GoogleGenerateContent => "google_generate_content",
             Self::OpenaiImages => "openai_images",
+            Self::CursorAgent => "cursor_agent",
         }
     }
 }
@@ -125,6 +129,7 @@ pub const fn default_remote_compaction_policy(
 ) -> RemoteCompactionPolicy {
     match (provider, target_format) {
         (Provider::Codex, TargetFormat::Responses) => RemoteCompactionPolicy::Native,
+        (Provider::Cursor, TargetFormat::CursorAgent) => RemoteCompactionPolicy::Local,
         (Provider::Unsupported, _) => RemoteCompactionPolicy::Off,
         _ => RemoteCompactionPolicy::Local,
     }
@@ -367,6 +372,24 @@ pub const KNOWN_MODELS: &[KnownModel] = &[
         id: "gemini-3-pro-image-preview",
         provider: Provider::Google,
         upstream_model: "gemini-3-pro-image-preview",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "composer-1.5",
+        provider: Provider::Cursor,
+        upstream_model: "composer-1.5",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "composer-2",
+        provider: Provider::Cursor,
+        upstream_model: "composer-2",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "composer-2-fast",
+        provider: Provider::Cursor,
+        upstream_model: "composer-2-fast",
         accepts_dated_snapshots: false,
     },
     KnownModel {

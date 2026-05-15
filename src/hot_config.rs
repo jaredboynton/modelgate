@@ -494,6 +494,7 @@ pub(crate) fn parse_target_format(format: &str) -> Option<TargetFormat> {
         "anthropic_messages" => Some(TargetFormat::AnthropicMessages),
         "google_generate_content" => Some(TargetFormat::GoogleGenerateContent),
         "openai_images" => Some(TargetFormat::OpenaiImages),
+        "cursor_agent" => Some(TargetFormat::CursorAgent),
         _ => None,
     }
 }

@@ -542,6 +542,66 @@ async fn integration_routes_models_route_returns_stable_known_models() {
     assert!(ids.contains(&"gemini-3.1-pro-preview"));
     assert!(ids.contains(&"openai:gpt-5.5"));
     assert!(ids.contains(&"gpt-image-2"));
+
+    // Composer rows added in Phase 1: `/v1/models` lists Cursor models with
+    // `owned_by: "cursor"` so downstream clients can distinguish provider.
+    for composer_id in ["composer-1.5", "composer-2", "composer-2-fast"] {
+        assert!(
+            ids.contains(&composer_id),
+            "/v1/models missing Composer row {composer_id}",
+        );
+        let row = body["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|model| model["id"] == composer_id)
+            .unwrap_or_else(|| panic!("composer row {composer_id} not present"));
+        assert_eq!(
+            row["owned_by"], "cursor",
+            "composer row {composer_id} owned_by should be cursor",
+        );
+    }
+}
+
+#[tokio::test]
+async fn integration_routes_openai_provider_models_does_not_expose_cursor_rows() {
+    // The Codex/OpenAI projection at `/api/provider/openai/v1/models` reads
+    // from the Codex catalog cache, not `KNOWN_MODELS`. Asserting the
+    // Composer rows stay absent guards against accidental pollution if the
+    // projection ever swaps to iterate `KNOWN_MODELS` directly.
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    let state = test_state(&codex_home, &auth_home);
+
+    let (status, _headers, body) = request_json_with_headers(
+        state,
+        "GET",
+        "/api/provider/openai/v1/models?client_version=26.506.31421",
+        &[],
+        None,
+    )
+    .await;
+
+    // The Codex projection requires Codex auth; if the body has a `data`
+    // array, assert no Composer rows. If it returns the missing-auth
+    // contract, the absence assertion is trivially satisfied.
+    if status == StatusCode::OK {
+        let ids: Vec<&str> = body["data"]
+            .as_array()
+            .map(|models| {
+                models
+                    .iter()
+                    .filter_map(|model| model["id"].as_str())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for composer_id in ["composer-1.5", "composer-2", "composer-2-fast"] {
+            assert!(
+                !ids.contains(&composer_id),
+                "/api/provider/openai/v1/models leaked Composer row {composer_id}",
+            );
+        }
+    }
 }
 
 #[tokio::test]
@@ -1797,8 +1857,56 @@ async fn integration_routes_config_graph_projects_composer_source_provider() {
 }
 
 #[tokio::test]
-async fn integration_routes_config_graph_projects_composer_source_provider_and_rejects_cursor_target(
+async fn integration_routes_config_graph_composer_source_routes_to_cursor_target() {
+    // Sibling test pinning `provider: "cursor"` so future dispatch lands
+    // Composer source models on the Cursor adapter rather than Codex.
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    let state = test_state(&codex_home, &auth_home);
+    let draft = serde_json::json!({
+        "routes": [{
+            "source": { "model": "composer-2-fast", "format": "responses" },
+            "target": { "provider": "cursor", "model": "composer-2-fast", "format": "cursor_agent" }
+        }]
+    });
+
+    let (status, _headers, body) = request_json_with_headers(
+        state,
+        "POST",
+        "/api/config/graph",
+        &[],
+        Some(&draft.to_string()),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_graph_v2_contract(&body);
+    assert_eq!(body["draft_status"], "valid");
+    assert!(body["effective_routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|route| route["source_model"] == "composer-2-fast"
+            && route["source_provider"] == "cursor"
+            && route["target_provider"] == "cursor"
+            && route["target_model"] == "composer-2-fast"));
+    assert!(body["route_cards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|card| card["source"]["model"] == "composer-2-fast"
+            && card["source"]["source_provider"] == "cursor"
+            && card["target"]["provider"] == "cursor"
+            && card["target"]["model"] == "composer-2-fast"));
+}
+
+#[tokio::test]
+async fn integration_routes_config_graph_projects_composer_source_provider_and_accepts_cursor_target(
 ) {
+    // Phase 1 flip: Cursor target rows are now valid. The old rejection
+    // assertion is gone; this test pins the positive shape so a regression
+    // would surface as either an `invalid` draft_status or a stray
+    // `unsupported_target_provider` diagnostic.
     let codex_home = tempfile::tempdir().unwrap();
     let auth_home = tempfile::tempdir().unwrap();
     let state = test_state(&codex_home, &auth_home);
@@ -1820,7 +1928,7 @@ async fn integration_routes_config_graph_projects_composer_source_provider_and_r
 
     assert_eq!(status, StatusCode::OK);
     assert_graph_v2_contract(&body);
-    assert_eq!(body["draft_status"], "invalid");
+    assert_eq!(body["draft_status"], "valid");
     let card = body["route_cards"]
         .as_array()
         .unwrap()
@@ -1828,15 +1936,25 @@ async fn integration_routes_config_graph_projects_composer_source_provider_and_r
         .find(|card| card["id"] == "config:0")
         .unwrap();
     assert_eq!(card["source"]["source_provider"], "cursor");
-    assert_eq!(card["target"]["provider"], "unsupported");
-    assert!(body["diagnostics_v2"]
+    assert_eq!(card["target"]["provider"], "cursor");
+    assert_eq!(card["target"]["model"], "composer-2-fast");
+    if let Some(diagnostics) = body["diagnostics_v2"].as_array() {
+        assert!(
+            !diagnostics.iter().any(|diagnostic| {
+                diagnostic["code"] == "unsupported_target_provider"
+                    && diagnostic["path"] == "$.routes[0].target.provider"
+            }),
+            "Cursor target should no longer produce unsupported_target_provider diagnostic: {body}",
+        );
+    }
+    assert!(body["effective_routes"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|diagnostic| {
-            diagnostic["code"] == "unsupported_target_provider"
-                && diagnostic["path"] == "$.routes[0].target.provider"
-        }));
+        .any(|route| route["source_model"] == "composer-2-fast"
+            && route["source_provider"] == "cursor"
+            && route["target_provider"] == "cursor"
+            && route["target_model"] == "composer-2-fast"));
 }
 
 #[tokio::test]

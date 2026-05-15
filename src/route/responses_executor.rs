@@ -2,7 +2,10 @@ use axum::{
     body::{to_bytes, Bytes},
     http::{header, HeaderMap, HeaderValue, StatusCode},
 };
+use std::collections::HashMap;
+
 use futures::StreamExt;
+use serde_json::{json, Value};
 
 use crate::{
     adapter::{
@@ -11,6 +14,7 @@ use crate::{
             responses_to_anthropic_messages_with_context, AnthropicSseStreamTranslator,
             ToolContext,
         },
+        cursor_responses,
         google_responses::{
             google_generate_content_to_responses_with_context, is_google_responses_stream_request,
             responses_to_google_generate_content_with_context, GoogleResponsesSseTranslator,
@@ -21,7 +25,8 @@ use crate::{
         validate_compaction_carriers, CompactionHttpError, CompactionLimits,
         RemoteCompactionPolicy,
     },
-    model_alias::{resolve_model_required, ResolvedTarget},
+    cursor_agent::{CursorContinuationKey, CursorRoute, CursorToolCall},
+    model_alias::{resolve_model_required, Provider, ResolvedTarget, TargetFormat},
     route::{
         dispatch::{
             plan_for_target, plan_with_resolver, plan_with_state, resolve_planned_model,
@@ -32,6 +37,7 @@ use crate::{
             is_v2_context_compaction_trigger, proxy_visible_context_compaction_item,
         },
     },
+    state::{NewResponseStateRecord, ResponseStateRecord},
     upstream, AppError, AppResult, AppState, UpstreamResponse,
 };
 
@@ -40,6 +46,7 @@ pub enum ResponsesRoute {
     CodexResponses,
     BedrockMessages,
     GoogleGenerateContent { upstream_model: String },
+    CursorAgent { upstream_model: String },
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
@@ -115,7 +122,318 @@ pub async fn execute_responses_request(
             )
             .await
         }
+        DispatchAction::CursorAgent => {
+            execute_cursor_responses(state, &headers, &plan, value).await
+        }
     }
+}
+
+async fn execute_cursor_responses(
+    state: &AppState,
+    headers: &HeaderMap,
+    plan: &crate::route::dispatch::DispatchPlan,
+    value: serde_json::Value,
+) -> AppResult<UpstreamResponse> {
+    let stream = value
+        .get("stream")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let store_public = value
+        .get("store")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true);
+    let raw_input_items = value
+        .get("input")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+
+    let mut request = cursor_responses::build_request(&value)?;
+    request.upstream_model = plan.target.upstream_model.clone();
+    request.continuation_key = cursor_continuation_key_for_request(state, plan, &value)?;
+    crate::upstream::cursor::workspace::attach_to_request(&mut request, headers).await;
+
+    crate::upstream::cursor::ensure_credentials(state).await?;
+    validate_cursor_tool_results(
+        state,
+        request.continuation_key.as_ref(),
+        &request.tool_results,
+    )?;
+
+    if stream {
+        let events = upstream::cursor::run::run(state, request).await;
+        let mut ctx = crate::adapter::cursor_events::ResponseContext::new(
+            &plan.requested_model,
+            format!("resp_{}", uuid::Uuid::new_v4().simple()),
+        );
+        let stream = events
+            .map(move |event| {
+                let mut bytes = Vec::new();
+                for frame in cursor_responses::emit_event(&event, &mut ctx) {
+                    bytes.extend_from_slice(frame.to_wire().as_bytes());
+                }
+                Ok::<Bytes, AppError>(Bytes::from(bytes))
+            })
+            .filter_map(|chunk| async move {
+                match chunk {
+                    Ok(bytes) if bytes.is_empty() => None,
+                    other => Some(other),
+                }
+            });
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/event-stream"),
+        );
+        return Ok(UpstreamResponse::stream(
+            "cursor",
+            StatusCode::OK,
+            headers,
+            stream,
+        ));
+    }
+
+    let events: Vec<_> = upstream::cursor::run::run(state, request)
+        .await
+        .collect()
+        .await;
+    let done = cursor_done_ids(&events);
+
+    let mut response = cursor_responses::collect_non_stream(events)?;
+    response["model"] = serde_json::Value::String(plan.requested_model.clone());
+    let response_id = response["id"].as_str().unwrap_or_default().to_string();
+    let conversation_id = done
+        .as_ref()
+        .map(|(_, conversation_id)| conversation_id.clone());
+    if let Some(conversation_id) = conversation_id.as_ref() {
+        let key = cursor_continuation_key(
+            CursorRoute::Responses,
+            plan,
+            &value,
+            &response_id,
+            conversation_id,
+        );
+        state.cursor_sessions.store_continuation(
+            &key,
+            crate::upstream::cursor::session::ConversationState {
+                checkpoint: None,
+                pending_tool_calls: cursor_pending_tool_calls(&response["output"]),
+                last_access: std::time::Instant::now(),
+                route: key.route,
+                provider: key.provider,
+                upstream_model: key.upstream_model.clone(),
+                target_format: key.target_format,
+                stable_field_hash: [0u8; 32],
+                response_id: response_id.clone(),
+                conversation_id: conversation_id.clone(),
+                blob_store: HashMap::new(),
+            },
+        );
+    }
+    let record = NewResponseStateRecord {
+        route: "responses".into(),
+        provider: "cursor".into(),
+        upstream_model: plan.target.upstream_model.clone(),
+        upstream_response_id: response_id.clone(),
+        adapter_response_id: response_id,
+        conversation_id,
+        raw_response: response.clone(),
+        raw_input_items,
+        upstream_codex_minted: false,
+    };
+    if store_public {
+        state.store_public_response(record);
+    } else {
+        state.remember_response_for_continuation(record);
+    }
+    UpstreamResponse::json("cursor", response).map_err(AppError::from)
+}
+
+fn cursor_continuation_key_for_request(
+    state: &AppState,
+    plan: &crate::route::dispatch::DispatchPlan,
+    value: &Value,
+) -> AppResult<Option<CursorContinuationKey>> {
+    let Some(previous) = value.get("previous_response_id") else {
+        return Ok(None);
+    };
+    if previous.is_null() {
+        return Ok(None);
+    }
+    let previous_response_id = previous.as_str().ok_or_else(|| AppError::BadRequestCode {
+        code: "previous_response_field_mismatch",
+        message: "previous_response_id must be a string".into(),
+    })?;
+    let prior = state
+        .continuation_response(previous_response_id)
+        .ok_or_else(|| AppError::BadRequestCode {
+            code: "unknown_previous_response_id",
+            message: "unknown previous_response_id".into(),
+        })?;
+    validate_cursor_prior_response(plan, &prior)?;
+    let conversation_id =
+        prior
+            .conversation_id
+            .as_deref()
+            .ok_or_else(|| AppError::BadRequestCode {
+                code: "unknown_previous_response_id",
+                message: "previous_response_id has no Cursor conversation state".into(),
+            })?;
+    let key = cursor_continuation_key(
+        CursorRoute::Responses,
+        plan,
+        value,
+        previous_response_id,
+        conversation_id,
+    );
+    if state.cursor_sessions.lookup_continuation(&key).is_none() {
+        return Err(AppError::BadRequestCode {
+            code: "unknown_previous_response_id",
+            message: "unknown Cursor continuation state".into(),
+        });
+    }
+    Ok(Some(key))
+}
+
+fn validate_cursor_prior_response(
+    plan: &crate::route::dispatch::DispatchPlan,
+    prior: &ResponseStateRecord,
+) -> AppResult<()> {
+    if prior.provider != "cursor" {
+        return Err(AppError::BadRequestCode {
+            code: "previous_response_target_format_mismatch",
+            message: format!(
+                "previous_response_id belongs to {}, not cursor",
+                prior.provider
+            ),
+        });
+    }
+    if prior.route != "responses" {
+        return Err(AppError::BadRequestCode {
+            code: "previous_response_route_mismatch",
+            message: format!(
+                "previous_response_id belongs to {}, not responses",
+                prior.route
+            ),
+        });
+    }
+    if prior.upstream_model != plan.target.upstream_model {
+        return Err(AppError::BadRequestCode {
+            code: "previous_response_model_mismatch",
+            message: format!(
+                "previous_response_id belongs to {}, not {}",
+                prior.upstream_model, plan.target.upstream_model
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn validate_cursor_tool_results(
+    state: &AppState,
+    key: Option<&CursorContinuationKey>,
+    tool_results: &[crate::cursor_agent::CursorToolResult],
+) -> AppResult<()> {
+    if tool_results.is_empty() {
+        return Ok(());
+    }
+    let Some(key) = key else {
+        return Err(AppError::BadRequestCode {
+            code: "unknown_previous_response_id",
+            message: "tool result requires previous_response_id".into(),
+        });
+    };
+    for result in tool_results {
+        if state
+            .cursor_sessions
+            .consume_pending_tool_call(key, &result.call_id)
+            .is_none()
+        {
+            return Err(AppError::BadRequestCode {
+                code: "previous_response_field_mismatch",
+                message: format!("tool result references unknown call_id {}", result.call_id),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn cursor_continuation_key(
+    route: CursorRoute,
+    plan: &crate::route::dispatch::DispatchPlan,
+    value: &Value,
+    response_id: &str,
+    conversation_id: &str,
+) -> CursorContinuationKey {
+    CursorContinuationKey {
+        route,
+        provider: Provider::Cursor,
+        upstream_model: plan.target.upstream_model.clone(),
+        target_format: TargetFormat::CursorAgent,
+        stable_request_fields: cursor_stable_fields(value),
+        response_id: response_id.to_string(),
+        conversation_id: conversation_id.to_string(),
+    }
+}
+
+fn cursor_stable_fields(value: &Value) -> Value {
+    let mut object = value.as_object().cloned().unwrap_or_default();
+    for key in [
+        "input",
+        "stream",
+        "previous_response_id",
+        "store",
+        "metadata",
+        "user",
+        "prompt_cache_key",
+        "prompt_cache_retention",
+    ] {
+        object.remove(key);
+    }
+    let mut entries: Vec<_> = object.into_iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut sorted = serde_json::Map::new();
+    for (key, value) in entries {
+        sorted.insert(key, value);
+    }
+    Value::Object(sorted)
+}
+
+fn cursor_done_ids(events: &[crate::cursor_agent::CursorAgentEvent]) -> Option<(String, String)> {
+    events.iter().rev().find_map(|event| match event {
+        crate::cursor_agent::CursorAgentEvent::Done {
+            response_id,
+            conversation_id,
+            ..
+        } => Some((response_id.clone(), conversation_id.clone())),
+        _ => None,
+    })
+}
+
+fn cursor_pending_tool_calls(output: &Value) -> Vec<CursorToolCall> {
+    output
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let item_type = item.get("type")?.as_str()?;
+            if item_type != "function_call" && item_type != "custom_tool_call" {
+                return None;
+            }
+            let call_id = item.get("call_id")?.as_str()?.to_string();
+            let name = item.get("name")?.as_str()?.to_string();
+            let raw_args = item
+                .get("arguments")
+                .or_else(|| item.get("input"))
+                .and_then(Value::as_str)
+                .unwrap_or("{}");
+            let arguments = serde_json::from_str(raw_args).unwrap_or_else(|_| json!(raw_args));
+            Some(CursorToolCall {
+                id: call_id,
+                name,
+                arguments,
+            })
+        })
+        .collect()
 }
 
 fn enforce_compaction_policy(
@@ -230,9 +548,11 @@ pub fn responses_route_for_alias(
 pub fn ensure_codex_model(value: &serde_json::Value) -> AppResult<()> {
     match route_for_responses_model(value)? {
         ResponsesRoute::CodexResponses => Ok(()),
-        ResponsesRoute::BedrockMessages | ResponsesRoute::GoogleGenerateContent { .. } => Err(
-            AppError::ModelNotSupported(required_model(value)?.to_string()),
-        ),
+        ResponsesRoute::BedrockMessages
+        | ResponsesRoute::GoogleGenerateContent { .. }
+        | ResponsesRoute::CursorAgent { .. } => Err(AppError::ModelNotSupported(
+            required_model(value)?.to_string(),
+        )),
     }
 }
 
@@ -245,6 +565,9 @@ fn route_from_plan(plan: crate::route::dispatch::DispatchPlan) -> AppResult<Resp
                 upstream_model: plan.target.upstream_model,
             })
         }
+        DispatchEdge::ResponsesToCursorAgentCursor => Ok(ResponsesRoute::CursorAgent {
+            upstream_model: plan.target.upstream_model,
+        }),
         _ => Err(AppError::ModelNotSupported(plan.requested_model)),
     }
 }

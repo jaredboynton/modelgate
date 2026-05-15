@@ -28,6 +28,7 @@ pub enum DispatchAction {
     CodexResponses,
     BedrockAnthropicMessages,
     GoogleGenerateContent,
+    CursorAgent,
 }
 
 impl DispatchAction {
@@ -36,6 +37,7 @@ impl DispatchAction {
             Self::CodexResponses => "responses/codex",
             Self::BedrockAnthropicMessages => "anthropic_messages/bedrock",
             Self::GoogleGenerateContent => "google_generate_content/google",
+            Self::CursorAgent => "cursor_agent/cursor",
         }
     }
 }
@@ -49,6 +51,9 @@ pub enum DispatchEdge {
     AnthropicMessagesToResponsesCodex,
     ChatCompletionsToResponsesCodex,
     ChatCompletionsToAnthropicMessagesBedrock,
+    ResponsesToCursorAgentCursor,
+    ChatCompletionsToCursorAgentCursor,
+    AnthropicMessagesToCursorAgentCursor,
 }
 
 impl DispatchEdge {
@@ -67,6 +72,9 @@ impl DispatchEdge {
             Self::ChatCompletionsToAnthropicMessagesBedrock => {
                 "chat_completions->anthropic_messages/Bedrock"
             }
+            Self::ResponsesToCursorAgentCursor => "responses->cursor_agent/Cursor",
+            Self::ChatCompletionsToCursorAgentCursor => "chat_completions->cursor_agent/Cursor",
+            Self::AnthropicMessagesToCursorAgentCursor => "anthropic_messages->cursor_agent/Cursor",
         }
     }
 }
@@ -189,6 +197,18 @@ pub fn plan_for_target_with_remote_compaction_policy(
                 DispatchAction::BedrockAnthropicMessages,
             )
         }
+        (RequestFormat::Responses, Provider::Cursor, TargetFormat::CursorAgent) => (
+            DispatchEdge::ResponsesToCursorAgentCursor,
+            DispatchAction::CursorAgent,
+        ),
+        (RequestFormat::ChatCompletions, Provider::Cursor, TargetFormat::CursorAgent) => (
+            DispatchEdge::ChatCompletionsToCursorAgentCursor,
+            DispatchAction::CursorAgent,
+        ),
+        (RequestFormat::AnthropicMessages, Provider::Cursor, TargetFormat::CursorAgent) => (
+            DispatchEdge::AnthropicMessagesToCursorAgentCursor,
+            DispatchAction::CursorAgent,
+        ),
         _ => return Err(AppError::ModelNotSupported(requested_model.to_string())),
     };
 
@@ -211,6 +231,9 @@ pub fn plan_for_target_with_remote_compaction_policy(
     anthropic_messages -> responses/Codex
     chat_completions -> responses/Codex
     chat_completions -> anthropic_messages/Bedrock
+    responses -> cursor_agent/Cursor
+    chat_completions -> cursor_agent/Cursor
+    anthropic_messages -> cursor_agent/Cursor
 */
 #[allow(dead_code)]
 fn _phase_one_matrix_reference() {
@@ -222,6 +245,9 @@ fn _phase_one_matrix_reference() {
         DispatchEdge::AnthropicMessagesToResponsesCodex,
         DispatchEdge::ChatCompletionsToResponsesCodex,
         DispatchEdge::ChatCompletionsToAnthropicMessagesBedrock,
+        DispatchEdge::ResponsesToCursorAgentCursor,
+        DispatchEdge::ChatCompletionsToCursorAgentCursor,
+        DispatchEdge::AnthropicMessagesToCursorAgentCursor,
     );
 }
 
@@ -334,6 +360,31 @@ mod tests {
                 ),
                 "chat_completions->anthropic_messages/Bedrock",
                 "anthropic_messages/bedrock",
+            ),
+            (
+                RequestFormat::Responses,
+                "composer-2",
+                target(Provider::Cursor, "composer-2", TargetFormat::CursorAgent),
+                "responses->cursor_agent/Cursor",
+                "cursor_agent/cursor",
+            ),
+            (
+                RequestFormat::ChatCompletions,
+                "composer-2-fast",
+                target(
+                    Provider::Cursor,
+                    "composer-2-fast",
+                    TargetFormat::CursorAgent,
+                ),
+                "chat_completions->cursor_agent/Cursor",
+                "cursor_agent/cursor",
+            ),
+            (
+                RequestFormat::AnthropicMessages,
+                "composer-1.5",
+                target(Provider::Cursor, "composer-1.5", TargetFormat::CursorAgent),
+                "anthropic_messages->cursor_agent/Cursor",
+                "cursor_agent/cursor",
             ),
         ];
 

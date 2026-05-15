@@ -64,6 +64,36 @@ pub async fn models(
             ),
         }));
     }
+    if let Ok(descriptors) = crate::upstream::cursor::fetch_usable_models_for_state(&state).await {
+        for descriptor in descriptors {
+            let discovery = match descriptor.discovery {
+                crate::upstream::cursor::models::DiscoverySource::Live => "live",
+                crate::upstream::cursor::models::DiscoverySource::Fallback => "fallback",
+            };
+            if let Some(existing) = data
+                .iter_mut()
+                .find(|model| model["id"].as_str() == Some(descriptor.id.as_str()))
+            {
+                existing["cursor_discovery"] = json!(discovery);
+                existing["context_window"] = json!(descriptor.context_window);
+                existing["max_output_tokens"] = json!(descriptor.max_output_tokens);
+                existing["supports_reasoning"] = json!(descriptor.supports_reasoning);
+                continue;
+            }
+            data.push(json!({
+                "id": descriptor.id,
+                "object": "model",
+                "owned_by": "cursor",
+                "remote_compaction_policy": remote_compaction_policy_name(
+                    RemoteCompactionPolicy::Local,
+                ),
+                "cursor_discovery": discovery,
+                "context_window": descriptor.context_window,
+                "max_output_tokens": descriptor.max_output_tokens,
+                "supports_reasoning": descriptor.supports_reasoning,
+            }));
+        }
+    }
 
     Ok(Json(json!({
         "object": "list",

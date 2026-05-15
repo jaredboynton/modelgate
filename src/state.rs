@@ -15,6 +15,7 @@ use crate::{
     codex_catalog::{CodexCatalogCache, CodexCatalogConfig},
     hot_config::HotRoutingConfig,
     model_alias::{resolve_target_required, ResolvedModel, ResolvedTarget},
+    upstream::cursor::session::CursorSessionStore,
     AppResult,
 };
 
@@ -36,6 +37,7 @@ pub struct AppState {
     pub runtime: RuntimeConfig,
     pub routing_config: HotRoutingConfig,
     pub codex_catalog: CodexCatalogCache,
+    pub cursor_sessions: Arc<CursorSessionStore>,
     response_storage: ResponseStorage,
     codex_wss_latched: Arc<AtomicBool>,
     codex_wss_failures: Arc<AtomicU32>,
@@ -152,6 +154,7 @@ impl AppState {
             runtime,
             routing_config,
             codex_catalog,
+            cursor_sessions: Arc::new(CursorSessionStore::new()),
             response_storage: ResponseStorage::default(),
             codex_wss_latched: Arc::new(AtomicBool::new(false)),
             codex_wss_failures: Arc::new(AtomicU32::new(0)),
@@ -176,6 +179,7 @@ impl AppState {
             runtime,
             routing_config,
             codex_catalog,
+            cursor_sessions: Arc::new(CursorSessionStore::new()),
             response_storage: ResponseStorage::default(),
             codex_wss_latched: Arc::new(AtomicBool::new(false)),
             codex_wss_failures: Arc::new(AtomicU32::new(0)),
