@@ -10,6 +10,7 @@ pub mod codex_cli;
 pub mod droid;
 pub mod generic_anthropic;
 pub mod generic_openai;
+mod proto_helpers;
 
 /// Per-profile rendering decision for one Cursor exec request.
 #[derive(Debug, Clone, PartialEq)]

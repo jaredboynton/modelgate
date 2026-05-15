@@ -2,10 +2,9 @@
 //!
 //! Maps Cursor exec requests to Codex CLI native tool calls.
 
+use super::proto_helpers::{read_string_field, read_u64_field};
 use super::{refuse_code, RenderedToolCall};
-use crate::upstream::cursor::proto::{
-    decode_exec_public_tool_call, decode_varint, parse_proto_fields, ExecKind, ExecRequest,
-};
+use crate::upstream::cursor::proto::{decode_exec_public_tool_call, ExecKind, ExecRequest};
 use serde_json::json;
 
 pub fn render(exec: &ExecRequest) -> RenderedToolCall {
@@ -180,18 +179,4 @@ fn render_mcp(exec: &ExecRequest) -> RenderedToolCall {
         arguments,
         tool_call_id,
     }
-}
-
-fn read_string_field(data: &[u8], field_number: u32) -> Option<String> {
-    parse_proto_fields(data)
-        .into_iter()
-        .find(|field| field.number == field_number && field.wire_type == 2)
-        .map(|field| String::from_utf8_lossy(&field.value).into_owned())
-}
-
-fn read_u64_field(data: &[u8], field_number: u32) -> Option<u64> {
-    let field = parse_proto_fields(data)
-        .into_iter()
-        .find(|field| field.number == field_number && field.wire_type == 0)?;
-    decode_varint(&field.value, 0).map(|(value, _)| value)
 }

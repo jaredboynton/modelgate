@@ -50,6 +50,7 @@ fn blank_request() -> CursorAgentRequest {
         workspace: None,
         stream: false,
         request_id: Uuid::nil(),
+        client_profile: Default::default(),
     }
 }
 

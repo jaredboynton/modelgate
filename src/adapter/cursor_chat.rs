@@ -111,6 +111,7 @@ pub fn build_request(public_json: &Value) -> AppResult<CursorAgentRequest> {
         workspace: None,
         stream,
         request_id: Uuid::new_v4(),
+        client_profile: Default::default(),
     })
 }
 

@@ -38,7 +38,7 @@ type Aes256Ctr128BE = ctr::Ctr128BE<Aes256>;
 
 use crate::upstream::cursor::proto::{
     concat_bytes, decode_varint, encode_bool_field, encode_int32_field, encode_message_field,
-    encode_string_field, encode_varint, parse_proto_fields, ProtoField,
+    encode_string_field, encode_varint, parse_proto_fields,
 };
 
 type HmacSha256 = Hmac<Sha256>;
@@ -847,13 +847,6 @@ impl ConnectErrorPayload {
             && self.message.to_lowercase().contains("codebase not found")
     }
 }
-
-// ---------------------------------------------------------------------------
-// Suppress unused-helper lint while AES integration is pending.
-// ---------------------------------------------------------------------------
-
-#[allow(dead_code)]
-fn _unused_proto_fields(_: ProtoField) {}
 
 #[cfg(test)]
 mod tests {

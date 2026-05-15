@@ -108,6 +108,7 @@ async fn cursor_codebase_search_tool_is_registered_when_workspace_present() {
         workspace: None,
         stream: false,
         request_id: uuid::Uuid::nil(),
+        client_profile: Default::default(),
     };
 
     workspace::attach_to_request(&mut request, &axum::http::HeaderMap::new()).await;

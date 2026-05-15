@@ -29,7 +29,9 @@ use crate::{
         CursorMessage, CursorToolKind,
     },
     upstream::cursor::{
+        client_profile::ClientProfile,
         connect::frame_connect_message,
+        profiles::{render_tool_call, RenderedToolCall},
         proto::{
             decode_agent_server_message, decode_exec_public_tool_call, decode_get_blob_args,
             decode_set_blob_args, encode_agent_run_request, encode_get_blob_result,
@@ -101,7 +103,14 @@ pub async fn run(
 
     tokio::spawn(async move {
         let response_id = format!("resp_{}", Uuid::new_v4().simple());
-        let pending_tool_calls: Vec<crate::cursor_agent::CursorToolCall> = Vec::new();
+        let mut pending_tool_calls: Vec<crate::cursor_agent::CursorToolCall> =
+            match continuation_key.as_ref() {
+                Some(key) => cursor_sessions
+                    .lookup_continuation(key)
+                    .map(|state| state.pending_tool_calls)
+                    .unwrap_or_default(),
+                None => Vec::new(),
+            };
         let mut finish_reason = CursorFinishReason::Stop;
         let content_index: u32 = 0;
         let mut blob_store: HashMap<String, Vec<u8>> = HashMap::new();
@@ -158,32 +167,17 @@ pub async fn run(
                 }
             }
 
-            if server_message.saw_checkpoint {
-                let checkpoint_id = server_message
-                    .checkpoint_update
-                    .as_ref()
-                    .map(|bytes| hex_lower(bytes))
-                    .unwrap_or_else(|| "empty-checkpoint".to_string());
-                if let Some(key) = continuation_key.as_ref() {
-                    let conv_state = ConversationState {
-                        checkpoint: Some(checkpoint_id.clone()),
-                        pending_tool_calls: pending_tool_calls.clone(),
-                        last_access: std::time::Instant::now(),
-                        route: key.route,
-                        provider: key.provider,
-                        upstream_model: key.upstream_model.clone(),
-                        target_format: key.target_format,
-                        stable_field_hash: [0u8; 32],
-                        response_id: response_id.clone(),
-                        conversation_id: conversation_id_out.clone(),
-                        blob_store: blob_store.clone(),
-                    };
-                    cursor_sessions.store_continuation(key, conv_state);
-                }
-                let _ = tx
-                    .send(CursorAgentEvent::Checkpoint { checkpoint_id })
-                    .await;
-            }
+            let pending_checkpoint_id = if server_message.saw_checkpoint {
+                Some(
+                    server_message
+                        .checkpoint_update
+                        .as_ref()
+                        .map(|bytes| hex_lower(bytes))
+                        .unwrap_or_else(|| "empty-checkpoint".to_string()),
+                )
+            } else {
+                None
+            };
 
             let mut emitted_public_tool_call = false;
             for exec in &server_message.exec_requests {
@@ -243,7 +237,14 @@ pub async fn run(
                         }
                         finish_reason = CursorFinishReason::ToolCalls;
                         emitted_public_tool_call = true;
-                        for event in public_tool_events_for_exec(exec) {
+                        if let Some(call) =
+                            pending_tool_call_for_exec(request.client_profile.into(), exec)
+                        {
+                            pending_tool_calls.push(call);
+                        }
+                        for event in
+                            public_tool_events_for_exec(request.client_profile.into(), exec)
+                        {
                             if tx.send(event).await.is_err() {
                                 let _ = transport_stream.close().await;
                                 return;
@@ -274,7 +275,45 @@ pub async fn run(
                     );
                 }
             }
+            if let Some(checkpoint_id) = pending_checkpoint_id {
+                if let Some(key) = continuation_key.as_ref() {
+                    let conv_state = ConversationState {
+                        checkpoint: Some(checkpoint_id.clone()),
+                        pending_tool_calls: pending_tool_calls.clone(),
+                        last_access: std::time::Instant::now(),
+                        route: key.route,
+                        provider: key.provider,
+                        upstream_model: key.upstream_model.clone(),
+                        target_format: key.target_format,
+                        stable_field_hash: [0u8; 32],
+                        response_id: response_id.clone(),
+                        conversation_id: conversation_id_out.clone(),
+                        blob_store: blob_store.clone(),
+                    };
+                    cursor_sessions.store_continuation(key, conv_state);
+                }
+                let _ = tx
+                    .send(CursorAgentEvent::Checkpoint { checkpoint_id })
+                    .await;
+            }
+
             if emitted_public_tool_call {
+                if let Some(key) = continuation_key.as_ref() {
+                    let conv_state = ConversationState {
+                        checkpoint: None,
+                        pending_tool_calls: pending_tool_calls.clone(),
+                        last_access: std::time::Instant::now(),
+                        route: key.route,
+                        provider: key.provider,
+                        upstream_model: key.upstream_model.clone(),
+                        target_format: key.target_format,
+                        stable_field_hash: [0u8; 32],
+                        response_id: response_id.clone(),
+                        conversation_id: conversation_id_out.clone(),
+                        blob_store: blob_store.clone(),
+                    };
+                    cursor_sessions.store_continuation(key, conv_state);
+                }
                 let _ = transport_stream.close().await;
                 let _ = tx
                     .send(CursorAgentEvent::Done {
@@ -382,32 +421,83 @@ fn handle_kv_request(
     }
 }
 
-fn public_tool_events_for_exec(
+/// Render a Cursor exec request as one or more neutral
+/// `CursorAgentEvent`s, dispatching through the per-profile renderer.
+///
+/// Emit decisions yield the standard 3-event tool-call sequence
+/// (`ToolCallStarted` / `ToolCallArgumentsDelta` / `ToolCallDone`). Refuse
+/// decisions yield a single `ProviderError` event with the refuse code as
+/// the error code and the human-readable reason as the message; the exec
+/// id surfaces via `cursor_request_id` so adapters can correlate the
+/// refusal with the originating exec.
+pub fn public_tool_events_for_exec(
+    profile: ClientProfile,
     exec: &crate::upstream::cursor::proto::ExecRequest,
-) -> [CursorAgentEvent; 3] {
-    let (tool_name, tool_call_id, arguments_json) = decode_exec_public_tool_call(exec);
-    let call_id = if tool_call_id.trim().is_empty() {
-        exec.exec_id.clone()
-    } else {
-        tool_call_id
-    };
-    let arguments = arguments_json.to_string();
-    [
-        CursorAgentEvent::ToolCallStarted {
-            call_id: call_id.clone(),
-            name: tool_name,
-            kind: CursorToolKind::Function,
-            argument_index: 0,
-        },
-        CursorAgentEvent::ToolCallArgumentsDelta {
-            call_id: call_id.clone(),
-            delta: arguments,
-        },
-        CursorAgentEvent::ToolCallDone {
-            call_id,
-            arguments: arguments_json,
-        },
-    ]
+) -> Vec<CursorAgentEvent> {
+    match render_tool_call(profile, exec) {
+        RenderedToolCall::Emit {
+            tool_name,
+            arguments,
+            tool_call_id,
+        } => {
+            let call_id = if tool_call_id.trim().is_empty() {
+                exec.exec_id.clone()
+            } else {
+                tool_call_id
+            };
+            let arguments_string = arguments.to_string();
+            vec![
+                CursorAgentEvent::ToolCallStarted {
+                    call_id: call_id.clone(),
+                    name: tool_name,
+                    kind: CursorToolKind::Function,
+                    argument_index: 0,
+                },
+                CursorAgentEvent::ToolCallArgumentsDelta {
+                    call_id: call_id.clone(),
+                    delta: arguments_string,
+                },
+                CursorAgentEvent::ToolCallDone { call_id, arguments },
+            ]
+        }
+        RenderedToolCall::Refuse {
+            exec_id,
+            reason,
+            code,
+        } => vec![CursorAgentEvent::ProviderError {
+            code: code.to_string(),
+            message: reason,
+            cursor_request_id: Some(exec_id),
+        }],
+    }
+}
+
+/// Build the `CursorToolCall` that mirrors a public tool-call emission for
+/// continuation-state tracking. Returns `None` when the profile refuses the
+/// exec, since refusals never round-trip via tool_results.
+pub fn pending_tool_call_for_exec(
+    profile: ClientProfile,
+    exec: &crate::upstream::cursor::proto::ExecRequest,
+) -> Option<crate::cursor_agent::CursorToolCall> {
+    match render_tool_call(profile, exec) {
+        RenderedToolCall::Emit {
+            tool_name,
+            arguments,
+            tool_call_id,
+        } => {
+            let id = if tool_call_id.trim().is_empty() {
+                exec.exec_id.clone()
+            } else {
+                tool_call_id
+            };
+            Some(crate::cursor_agent::CursorToolCall {
+                id,
+                name: tool_name,
+                arguments,
+            })
+        }
+        RenderedToolCall::Refuse { .. } => None,
+    }
 }
 
 async fn send_cursor_client_frame(
@@ -537,6 +627,7 @@ mod tests {
         CursorAgentEvent, CursorAgentRequest, CursorContentBlock, CursorMessage, CursorToolCall,
         CursorToolResult, CursorWorkspaceContext,
     };
+    use crate::upstream::cursor::client_profile::ClientProfile;
     use crate::upstream::cursor::proto::{
         encode_message_field, encode_string_field, exec_message, parse_proto_fields, ExecKind,
         ExecRequest,
@@ -570,6 +661,7 @@ mod tests {
             workspace: None,
             stream: false,
             request_id: Uuid::nil(),
+            client_profile: Default::default(),
         };
 
         let messages = build_proto_messages(&request);
@@ -604,8 +696,14 @@ mod tests {
         };
 
         let mut events = Vec::new();
-        events.extend(public_tool_events_for_exec(&grep));
-        events.extend(public_tool_events_for_exec(&read));
+        events.extend(public_tool_events_for_exec(
+            ClientProfile::GenericOpenAi,
+            &grep,
+        ));
+        events.extend(public_tool_events_for_exec(
+            ClientProfile::GenericOpenAi,
+            &read,
+        ));
 
         assert_eq!(events.len(), 6);
         match &events[0] {
@@ -685,6 +783,7 @@ mod tests {
             }),
             stream: false,
             request_id: Uuid::nil(),
+            client_profile: Default::default(),
         };
 
         let response = super::maybe_cursor_codebase_search_result(&exec, &request, "")

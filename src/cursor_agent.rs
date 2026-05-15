@@ -52,6 +52,30 @@ pub struct CursorAgentRequest {
     pub stream: bool,
     /// Per-request identifier; surfaces as `x-request-id` upstream.
     pub request_id: Uuid,
+    /// Detected client family used by the run engine to pick a per-profile
+    /// tool-call renderer. Defaults to `GenericOpenAi` so the public
+    /// lowercase tool-name baseline is preserved when a route does not
+    /// supply a detection result.
+    #[serde(default)]
+    pub client_profile: CursorClientProfile,
+}
+
+/// Local DTO mirror of `crate::upstream::cursor::client_profile::ClientProfile`.
+///
+/// Lives here because `src/cursor_agent.rs` is a pure DTO boundary and is
+/// forbidden from importing the upstream layer (see
+/// `tests/architecture_boundaries.rs`). Conversion `From` impls live next
+/// to the upstream enum so the upstream side owns the mapping. The variants
+/// must stay in lockstep with the upstream enum.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum CursorClientProfile {
+    CodexCli,
+    ClaudeCode,
+    Droid,
+    GenericAnthropic,
+    #[default]
+    GenericOpenAi,
 }
 
 /// Normalized conversation message.

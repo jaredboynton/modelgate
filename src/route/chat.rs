@@ -74,6 +74,8 @@ async fn execute_cursor_chat(
         .unwrap_or(false);
     let mut request = cursor_chat::build_request(&value)?;
     request.upstream_model = plan.target.upstream_model.clone();
+    let detection = crate::upstream::cursor::client_profile::detect_client_profile(headers);
+    request.client_profile = detection.profile.into();
     crate::upstream::cursor::workspace::attach_to_request(&mut request, headers).await;
 
     upstream::cursor::ensure_credentials(state).await?;

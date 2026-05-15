@@ -15,6 +15,30 @@ pub enum ClientProfile {
     GenericOpenAi,
 }
 
+impl From<ClientProfile> for crate::cursor_agent::CursorClientProfile {
+    fn from(value: ClientProfile) -> Self {
+        match value {
+            ClientProfile::CodexCli => Self::CodexCli,
+            ClientProfile::ClaudeCode => Self::ClaudeCode,
+            ClientProfile::Droid => Self::Droid,
+            ClientProfile::GenericAnthropic => Self::GenericAnthropic,
+            ClientProfile::GenericOpenAi => Self::GenericOpenAi,
+        }
+    }
+}
+
+impl From<crate::cursor_agent::CursorClientProfile> for ClientProfile {
+    fn from(value: crate::cursor_agent::CursorClientProfile) -> Self {
+        match value {
+            crate::cursor_agent::CursorClientProfile::CodexCli => Self::CodexCli,
+            crate::cursor_agent::CursorClientProfile::ClaudeCode => Self::ClaudeCode,
+            crate::cursor_agent::CursorClientProfile::Droid => Self::Droid,
+            crate::cursor_agent::CursorClientProfile::GenericAnthropic => Self::GenericAnthropic,
+            crate::cursor_agent::CursorClientProfile::GenericOpenAi => Self::GenericOpenAi,
+        }
+    }
+}
+
 impl ClientProfile {
     pub fn as_str(self) -> &'static str {
         match self {
