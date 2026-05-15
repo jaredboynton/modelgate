@@ -2,6 +2,7 @@ pub mod adapter;
 pub mod amp_compat;
 pub mod auth;
 pub mod codex_catalog;
+pub mod compaction;
 pub mod config_graph;
 pub mod error;
 pub mod failure_capture;

@@ -8,7 +8,11 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::{
-    model_alias::{Provider, ResolvedModel, ResolvedTarget, SourceFormat, TargetFormat},
+    compaction::{load_pack_keys_from_env, RemoteCompactionPolicy},
+    model_alias::{
+        default_remote_compaction_policy, Provider, ResolvedModel, ResolvedTarget, SourceFormat,
+        TargetFormat,
+    },
     AppError, AppResult,
 };
 
@@ -22,6 +26,8 @@ pub struct HotRoutingConfig {
 pub(crate) struct RoutingConfigFile {
     #[serde(default)]
     pub(crate) routes: Vec<ConfiguredRoute>,
+    #[serde(default)]
+    pub(crate) compaction: Option<CompactionConfigFile>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -31,6 +37,66 @@ pub(crate) struct ConfiguredRoute {
     pub(crate) target: ConfiguredTarget,
     #[serde(default = "default_enabled")]
     pub(crate) enabled: bool,
+    #[serde(default)]
+    pub(crate) remote_compaction_policy: Option<RemoteCompactionPolicy>,
+    #[serde(default)]
+    pub(crate) compaction: Option<RouteCompactionConfigFile>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CompactionConfigFile {
+    #[serde(default)]
+    pub(crate) default_policy: Option<RemoteCompactionPolicy>,
+    #[serde(default)]
+    pub(crate) allow_lossy_compaction_drop: Option<bool>,
+    #[serde(default)]
+    pub(crate) keys_env: Option<String>,
+    #[serde(default)]
+    pub(crate) summarizer_model_env: Option<String>,
+    #[serde(default)]
+    pub(crate) privacy_policy: Option<CompactionPrivacyPolicy>,
+    #[serde(default)]
+    pub(crate) allow_route_privacy_relaxation: Option<bool>,
+    #[serde(default)]
+    pub(crate) cross_provider_allowlist: Vec<Value>,
+    #[serde(default)]
+    pub(crate) max_encrypted_content_bytes: Option<usize>,
+    #[serde(default)]
+    pub(crate) max_decrypted_pack_bytes: Option<usize>,
+    #[serde(default)]
+    pub(crate) max_source_items: Option<usize>,
+    #[serde(default)]
+    pub(crate) max_rendered_tokens: Option<usize>,
+    #[serde(default)]
+    pub(crate) max_compactor_input_bytes: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RouteCompactionConfigFile {
+    #[serde(default)]
+    pub(crate) privacy_policy: Option<CompactionPrivacyPolicy>,
+    #[serde(default)]
+    pub(crate) cross_provider_allowlist: Vec<Value>,
+    #[serde(default)]
+    pub(crate) max_encrypted_content_bytes: Option<usize>,
+    #[serde(default)]
+    pub(crate) max_decrypted_pack_bytes: Option<usize>,
+    #[serde(default)]
+    pub(crate) max_source_items: Option<usize>,
+    #[serde(default)]
+    pub(crate) max_rendered_tokens: Option<usize>,
+    #[serde(default)]
+    pub(crate) max_compactor_input_bytes: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CompactionPrivacyPolicy {
+    SameProviderOnly,
+    ExplicitCrossProvider,
+    Off,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -54,6 +120,7 @@ pub(crate) struct ConfiguredTarget {
 pub struct ConfiguredModel {
     pub id: String,
     pub provider: Provider,
+    pub remote_compaction_policy: RemoteCompactionPolicy,
 }
 
 impl HotRoutingConfig {
@@ -119,17 +186,65 @@ impl HotRoutingConfig {
         }))
     }
 
+    pub fn remote_compaction_policy_for_format(
+        &self,
+        model: &str,
+        source_format: Option<&str>,
+        target: &ResolvedTarget,
+    ) -> AppResult<RemoteCompactionPolicy> {
+        let Some(config) = self.load()? else {
+            return Ok(target.default_remote_compaction_policy());
+        };
+        if let Some(route) = config.routes.into_iter().find(|route| {
+            route.enabled
+                && route.source.model == model
+                && source_format_matches(route.source.format.as_deref(), source_format)
+        }) {
+            if let Some(policy) = route.remote_compaction_policy {
+                return Ok(policy);
+            }
+        }
+        Ok(config
+            .compaction
+            .and_then(|compaction| compaction.default_policy)
+            .unwrap_or_else(|| {
+                default_remote_compaction_policy(target.provider, target.target_format)
+            }))
+    }
+
     pub fn configured_models(&self) -> AppResult<Vec<ConfiguredModel>> {
         let Some(config) = self.load()? else {
             return Ok(Vec::new());
         };
+        let default_policy = config
+            .compaction
+            .as_ref()
+            .and_then(|compaction| compaction.default_policy);
         Ok(config
             .routes
             .into_iter()
             .filter(|route| route.enabled)
-            .map(|route| ConfiguredModel {
-                id: route.source.model,
-                provider: route.target.provider,
+            .map(|route| {
+                let target_format = route
+                    .target
+                    .format
+                    .as_deref()
+                    .and_then(parse_target_format)
+                    .or_else(|| route.target.provider.default_target_format());
+                let remote_compaction_policy = route
+                    .remote_compaction_policy
+                    .or(default_policy)
+                    .or_else(|| {
+                        target_format.map(|target_format| {
+                            default_remote_compaction_policy(route.target.provider, target_format)
+                        })
+                    })
+                    .unwrap_or(RemoteCompactionPolicy::Local);
+                ConfiguredModel {
+                    id: route.source.model,
+                    provider: route.target.provider,
+                    remote_compaction_policy,
+                }
             })
             .collect())
     }
@@ -207,9 +322,16 @@ fn validate_config_value(value: &Value) -> AppResult<()> {
 }
 
 fn validate_config_file(config: &RoutingConfigFile) -> AppResult<()> {
-    for route in &config.routes {
+    if let Some(compaction) = &config.compaction {
+        touch_compaction_config(compaction);
+    }
+    validate_proxy_visible_prerequisites(config)?;
+    for route in config.routes.iter().filter(|route| route.enabled) {
         validate_source_format(route.source.format.as_deref())?;
         validate_target_format(route.target.format.as_deref())?;
+        if let Some(compaction) = &route.compaction {
+            touch_route_compaction_config(compaction);
+        }
         if route.target.provider == Provider::Unsupported {
             return Err(AppError::BadRequest(format!(
                 "invalid routing config: unsupported target provider for model {}",
@@ -218,6 +340,105 @@ fn validate_config_file(config: &RoutingConfigFile) -> AppResult<()> {
         }
     }
     Ok(())
+}
+
+fn validate_proxy_visible_prerequisites(config: &RoutingConfigFile) -> AppResult<()> {
+    let default_policy = config
+        .compaction
+        .as_ref()
+        .and_then(|compaction| compaction.default_policy);
+    if default_policy == Some(RemoteCompactionPolicy::ProxyVisibleSummary) {
+        validate_proxy_visible_runtime("compaction.default_policy")?;
+        validate_proxy_visible_privacy(
+            config
+                .compaction
+                .as_ref()
+                .and_then(|compaction| compaction.privacy_policy),
+            "compaction.privacy_policy",
+        )?;
+    }
+    for route in &config.routes {
+        let effective_policy = route.remote_compaction_policy.or(default_policy);
+        if effective_policy != Some(RemoteCompactionPolicy::ProxyVisibleSummary) {
+            continue;
+        }
+        validate_proxy_visible_runtime(&format!(
+            "route {} remote_compaction_policy",
+            route.source.model
+        ))?;
+        let effective_privacy = route
+            .compaction
+            .as_ref()
+            .and_then(|compaction| compaction.privacy_policy)
+            .or_else(|| {
+                config
+                    .compaction
+                    .as_ref()
+                    .and_then(|compaction| compaction.privacy_policy)
+            });
+        validate_proxy_visible_privacy(
+            effective_privacy,
+            &format!("route {} compaction.privacy_policy", route.source.model),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_proxy_visible_runtime(field: &str) -> AppResult<()> {
+    load_pack_keys_from_env().map_err(|error| {
+        AppError::BadRequest(format!(
+            "invalid routing config: {field} requires UMP_COMPACTION_KEYS_JSON: {error}"
+        ))
+    })?;
+    let has_instance_id = env::var_os("UMP_COMPACTION_INSTANCE_ID")
+        .and_then(|value| value.into_string().ok())
+        .is_some_and(|value| !value.trim().is_empty());
+    if !has_instance_id {
+        return Err(AppError::BadRequest(format!(
+            "invalid routing config: {field} requires UMP_COMPACTION_INSTANCE_ID"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_proxy_visible_privacy(
+    privacy_policy: Option<CompactionPrivacyPolicy>,
+    field: &str,
+) -> AppResult<()> {
+    if privacy_policy == Some(CompactionPrivacyPolicy::Off) {
+        return Err(AppError::BadRequest(format!(
+            "invalid routing config: {field} cannot be off when proxy_visible_summary is enabled"
+        )));
+    }
+    Ok(())
+}
+
+fn touch_compaction_config(config: &CompactionConfigFile) {
+    let _ = (
+        config.allow_lossy_compaction_drop,
+        config.keys_env.as_deref(),
+        config.summarizer_model_env.as_deref(),
+        config.privacy_policy,
+        config.allow_route_privacy_relaxation,
+        config.cross_provider_allowlist.len(),
+        config.max_encrypted_content_bytes,
+        config.max_decrypted_pack_bytes,
+        config.max_source_items,
+        config.max_rendered_tokens,
+        config.max_compactor_input_bytes,
+    );
+}
+
+fn touch_route_compaction_config(config: &RouteCompactionConfigFile) {
+    let _ = (
+        config.privacy_policy,
+        config.cross_provider_allowlist.len(),
+        config.max_encrypted_content_bytes,
+        config.max_decrypted_pack_bytes,
+        config.max_source_items,
+        config.max_rendered_tokens,
+        config.max_compactor_input_bytes,
+    );
 }
 
 pub(crate) fn source_format_matches(
@@ -325,7 +546,39 @@ fn is_forbidden_key(key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::{ffi::OsString, sync::Mutex};
+
     use super::*;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvRestore {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvRestore {
+        fn clear(key: &'static str) -> Self {
+            let previous = env::var_os(key);
+            env::remove_var(key);
+            Self { key, previous }
+        }
+
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = env::var_os(key);
+            env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => env::set_var(self.key, value),
+                None => env::remove_var(self.key),
+            }
+        }
+    }
 
     #[test]
     fn hot_config_reads_current_file_contents() {
@@ -624,5 +877,53 @@ mod tests {
             .unwrap();
         assert_eq!(resolved.provider, Provider::Codex);
         assert_eq!(resolved.upstream_model, "gpt-5.5");
+    }
+
+    #[test]
+    fn hot_config_rejects_proxy_visible_without_runtime_keys() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let _keys = EnvRestore::clear("UMP_COMPACTION_KEYS_JSON");
+        let _instance = EnvRestore::clear("UMP_COMPACTION_INSTANCE_ID");
+        let error = parse_config_value(serde_json::json!({
+            "routes": [{
+                "source": { "model": "compact", "format": "responses" },
+                "target": {
+                    "provider": "bedrock",
+                    "model": "anthropic.claude-opus-4-7",
+                    "format": "anthropic_messages"
+                },
+                "remote_compaction_policy": "proxy_visible_summary"
+            }]
+        }))
+        .unwrap_err();
+
+        assert!(error.to_string().contains("UMP_COMPACTION_KEYS_JSON"));
+    }
+
+    #[test]
+    fn hot_config_rejects_proxy_visible_with_privacy_off() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let _keys = EnvRestore::set(
+            "UMP_COMPACTION_KEYS_JSON",
+            r#"{"current":"fixture","keys":{"fixture":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}}"#,
+        );
+        let _instance = EnvRestore::set("UMP_COMPACTION_INSTANCE_ID", "hot-config-test");
+        let error = parse_config_value(serde_json::json!({
+            "compaction": {
+                "privacy_policy": "off"
+            },
+            "routes": [{
+                "source": { "model": "compact", "format": "responses" },
+                "target": {
+                    "provider": "bedrock",
+                    "model": "anthropic.claude-opus-4-7",
+                    "format": "anthropic_messages"
+                },
+                "remote_compaction_policy": "proxy_visible_summary"
+            }]
+        }))
+        .unwrap_err();
+
+        assert!(error.to_string().contains("cannot be off"));
     }
 }

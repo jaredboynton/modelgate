@@ -16,6 +16,7 @@ Out of scope:
 
 - changing Composer or Codex CLI config permanently;
 - validating Bedrock, Google, or public OpenAI parity;
+- enabling remote compaction for mixed-provider profiles;
 - collecting raw OAuth files, bearer tokens, cookies, prompts, workspace source,
   private file paths, or unredacted provider responses;
 - treating live provider success as a replacement for unit and integration tests.
@@ -59,6 +60,9 @@ Required gates:
 - Codex CLI OAuth state exists locally and is valid for the requested Codex
   route.
 - Any prompt, workspace, or fixture used by the run is sanitized or synthetic.
+- `enable_request_compression = true` remains enabled in Codex config.
+- `remote_compaction_v2 = false` is active for the mixed Composer/UMP profiles
+  under test; use `proxy-ws` only for Codex/OpenAI-only remote compaction.
 - `CODEX_CONFIG_BACKUP` points at a backup copy, or the harness can discover the
   latest `~/.codex/backups/composer-*/config.toml`.
 
@@ -89,6 +93,7 @@ Common blocked reasons:
 | `composer-catalog-unavailable` | The Codex model catalog or UMP `/v1/models` did not expose the Composer slugs. | Add or refresh `composer-2`, `composer-2-fast`, and `composer-1.5`, then retry. |
 | `config-backup-missing` | Config would be edited without a recorded backup. | Create and record backups first. |
 | `config-restore-unverified` | Original config restore was not proven. | Restore from backup and record hashes. |
+| `mixed-remote-compaction-enabled` | Mixed UMP/Composer profile would send opaque Codex compaction into non-Codex routes. | Set global or mixed-profile `remote_compaction_v2 = false`; keep request compression on. |
 | `codex-auth-missing` | Required Codex OAuth state was absent. | Authenticate Codex CLI locally, then retry. |
 | `codex-auth-expired` | OAuth refresh failed before the row could run. | Refresh Codex CLI auth outside the artifact path. |
 | `fixture-missing` | The selected prompt/workspace fixture was unavailable. | Install or point at a sanitized fixture. |
@@ -139,7 +144,9 @@ later scripts can compare runs without parsing prose.
   "gates": {
     "UMP_V2_LIVE_HARNESS": "present",
     "UMP_V2_LIVE_COMPOSER_CODEX_CLI": "present",
-    "UMP_V2_LIVE_ALLOW_CONTEXT_PROBE": "absent"
+    "UMP_V2_LIVE_ALLOW_CONTEXT_PROBE": "absent",
+    "remote_compaction_v2": "false-for-mixed-profile",
+    "enable_request_compression": "true"
   },
   "config": {
     "inputs": [
@@ -216,7 +223,11 @@ The artifact may add fields, but existing fields should keep their meaning.
 Prefer hashes and counts over raw values.
 Raw `stdout.jsonl` and `stderr.log` sidecars are local ignored debugging
 captures. Only summaries, redacted sidecars, hashes, counts, and sanitized
-error classes are eligible for durable docs or issue attachments.
+error classes are eligible for durable docs or issue attachments. Run the
+harness redaction scan before sharing artifacts; if it reports paths, tokens,
+OAuth material, cookies, raw prompts, or unredacted provider responses, mark the
+row `live-blocked` with `redaction-failed` and keep the capture in an ignored
+local run directory only.
 
 ## Redaction policy
 

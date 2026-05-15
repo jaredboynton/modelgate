@@ -470,7 +470,7 @@ fn validate_known_config_fields(value: &Value) -> AppResult<()> {
         ));
     };
     for key in root.keys() {
-        if key != "routes" {
+        if !matches!(key.as_str(), "routes" | "compaction") {
             return Err(unknown_field("$", key));
         }
     }
@@ -488,7 +488,10 @@ fn validate_known_config_fields(value: &Value) -> AppResult<()> {
             continue;
         };
         for key in route.keys() {
-            if !matches!(key.as_str(), "source" | "target" | "enabled") {
+            if !matches!(
+                key.as_str(),
+                "source" | "target" | "enabled" | "remote_compaction_policy" | "compaction"
+            ) {
                 return Err(unknown_field(&path, key));
             }
         }
@@ -582,12 +585,15 @@ fn project_draft_routes(value: &Value) -> DraftProjectionV2 {
                 format: route.target_provider_format.clone(),
             },
             enabled: route.enabled,
+            remote_compaction_policy: None,
+            compaction: None,
         })
         .collect();
 
     DraftProjectionV2 {
         config: RoutingConfigFile {
             routes: valid_routes,
+            compaction: None,
         },
         routes: draft_routes,
         diagnostics,

@@ -84,6 +84,10 @@ pub fn build_router(state: AppState) -> Router {
             post(route::responses::responses).get(route::websocket::responses_ws),
         )
         .route(
+            "/api/provider/openai/v1/responses/compact",
+            post(route::responses::compact_responses),
+        )
+        .route(
             "/api/provider/openai/v1/responses/:response_id",
             get(route::responses::retrieve_response),
         )
@@ -94,6 +98,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/responses",
             post(route::responses::responses).get(route::websocket::responses_ws),
+        )
+        .route(
+            "/v1/responses/compact",
+            post(route::responses::compact_responses),
         )
         .route(
             "/v1/responses/:response_id",

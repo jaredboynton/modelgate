@@ -10,6 +10,7 @@ use tower::ServiceExt;
 use unified_model_proxy_v2::{build_router, state::NewResponseStateRecord, AppState};
 
 static UPSTREAM_ENV_LOCK: Mutex<()> = Mutex::new(());
+static COMPACTION_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 struct EnvRestore {
     key: &'static str,
@@ -20,6 +21,12 @@ impl EnvRestore {
     fn clear(key: &'static str) -> Self {
         let previous = env::var_os(key);
         env::remove_var(key);
+        Self { key, previous }
+    }
+
+    fn set(key: &'static str, value: &str) -> Self {
+        let previous = env::var_os(key);
+        env::set_var(key, value);
         Self { key, previous }
     }
 }
@@ -129,6 +136,34 @@ async fn request_json_with_state(
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json = serde_json::from_slice(&bytes).unwrap();
+    (status, json)
+}
+
+async fn request_compact_with_state(
+    state: AppState,
+    path: &str,
+    body: Value,
+) -> (StatusCode, Value) {
+    let app = build_router(state);
+    let request = Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("host", "localhost")
+        .header("content-type", "application/json")
+        .header("session-id", "compact-session-route-test")
+        .header("thread-id", "compact-thread-route-test")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json = serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+        panic!(
+            "compact response was not json: {error}; status={status}; body={}",
+            String::from_utf8_lossy(&bytes)
+        )
+    });
     (status, json)
 }
 
@@ -755,6 +790,317 @@ async fn integration_routes_responses_accepts_zstd_encoded_json_body_before_auth
     .await;
 
     assert_missing_codex_auth_contract(status, &response);
+}
+
+#[tokio::test]
+async fn integration_routes_compact_paths_are_registered_and_validate_input_shape() {
+    for path in [
+        "/v1/responses/compact",
+        "/api/provider/openai/v1/responses/compact",
+    ] {
+        let codex_home = tempfile::tempdir().unwrap();
+        let auth_home = tempfile::tempdir().unwrap();
+        let state = test_state(&codex_home, &auth_home);
+        let (status, body) = request_compact_with_state(
+            state,
+            path,
+            serde_json::json!({
+                "model": "claude-opus-4-7"
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}: {body}");
+        assert_eq!(body["error"]["type"], "invalid_request", "{path}: {body}");
+        assert_eq!(
+            body["error"]["code"], "invalid_compaction_input",
+            "{path}: {body}"
+        );
+        assert!(body["error"]["message"].as_str().unwrap().contains("input"));
+    }
+}
+
+#[tokio::test]
+async fn integration_routes_proxy_visible_compact_returns_one_pack_item() {
+    let _guard = COMPACTION_ENV_LOCK.lock().await;
+    let _key_env = EnvRestore::set(
+        "UMP_COMPACTION_KEYS_JSON",
+        r#"{"current":"fixture","keys":{"fixture":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}}"#,
+    );
+    let _instance_env = EnvRestore::set("UMP_COMPACTION_INSTANCE_ID", "route-shape-test");
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    fs::write(
+        auth_home.path().join("config.json"),
+        serde_json::json!({
+            "compaction": {
+                "default_policy": "proxy_visible_summary"
+            },
+            "routes": [{
+                "source": { "model": "claude-opus-4-7", "format": "responses" },
+                "target": {
+                    "provider": "bedrock",
+                    "model": "anthropic.claude-opus-4-7",
+                    "format": "anthropic_messages"
+                },
+                "remote_compaction_policy": "proxy_visible_summary"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let (status, body) = request_compact_with_state(
+        test_state(&codex_home, &auth_home),
+        "/v1/responses/compact",
+        serde_json::json!({
+            "model": "claude-opus-4-7",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "keep this objective" }]
+            }]
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["object"], "response.compaction");
+    let output = body["output"].as_array().expect("compact output array");
+    assert_eq!(output.len(), 1, "{body}");
+    assert_eq!(output[0]["type"], "compaction");
+    assert!(output[0]["encrypted_content"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("ump.compaction.v1.")));
+    assert!(
+        !output.iter().any(|item| item["type"] == "message"),
+        "direct compact must not emit restored-context messages: {body}"
+    );
+}
+
+#[tokio::test]
+async fn integration_routes_proxy_visible_pack_can_be_consumed_by_http_response() {
+    let _guard = COMPACTION_ENV_LOCK.lock().await;
+    let _key_env = EnvRestore::set(
+        "UMP_COMPACTION_KEYS_JSON",
+        r#"{"current":"fixture","keys":{"fixture":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}}"#,
+    );
+    let _instance_env = EnvRestore::set("UMP_COMPACTION_INSTANCE_ID", "route-roundtrip-test");
+    let _bedrock_env = EnvRestore::clear("AWS_BEARER_TOKEN_BEDROCK");
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    fs::write(
+        auth_home.path().join("config.json"),
+        serde_json::json!({
+            "routes": [{
+                "source": { "model": "claude-opus-4-7", "format": "responses" },
+                "target": {
+                    "provider": "bedrock",
+                    "model": "anthropic.claude-opus-4-7",
+                    "format": "anthropic_messages"
+                },
+                "remote_compaction_policy": "proxy_visible_summary"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let state = test_state(&codex_home, &auth_home);
+    let (compact_status, compact_body) = request_compact_with_state(
+        state.clone(),
+        "/v1/responses/compact",
+        serde_json::json!({
+            "model": "claude-opus-4-7",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "keep this objective" }]
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(compact_status, StatusCode::OK, "{compact_body}");
+    let encrypted_content = compact_body["output"][0]["encrypted_content"]
+        .as_str()
+        .expect("compact response encrypted_content");
+
+    let (status, _, body) = request_json_with_headers(
+        state,
+        "POST",
+        "/v1/responses",
+        &[
+            ("session-id", "compact-session-route-test"),
+            ("thread-id", "compact-thread-route-test"),
+        ],
+        Some(
+            &serde_json::json!({
+                "model": "claude-opus-4-7",
+                "input": [{
+                    "type": "context_compaction",
+                    "encrypted_content": encrypted_content
+                }, {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{ "type": "input_text", "text": "continue" }]
+                }]
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert_eq!(body["error"]["type"], "missing_credential", "{body}");
+}
+
+#[tokio::test]
+async fn integration_routes_proxy_visible_responses_trigger_returns_context_compaction() {
+    let _guard = COMPACTION_ENV_LOCK.lock().await;
+    let _key_env = EnvRestore::set(
+        "UMP_COMPACTION_KEYS_JSON",
+        r#"{"current":"fixture","keys":{"fixture":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}}"#,
+    );
+    let _instance_env = EnvRestore::set("UMP_COMPACTION_INSTANCE_ID", "route-trigger-test");
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    fs::write(
+        auth_home.path().join("config.json"),
+        serde_json::json!({
+            "routes": [{
+                "source": { "model": "claude-opus-4-7", "format": "responses" },
+                "target": {
+                    "provider": "bedrock",
+                    "model": "anthropic.claude-opus-4-7",
+                    "format": "anthropic_messages"
+                },
+                "remote_compaction_policy": "proxy_visible_summary"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let (status, _, body) = request_json_with_headers(
+        test_state(&codex_home, &auth_home),
+        "POST",
+        "/v1/responses",
+        &[
+            ("session-id", "compact-session-route-test"),
+            ("thread-id", "compact-thread-route-test"),
+        ],
+        Some(
+            &serde_json::json!({
+                "model": "claude-opus-4-7",
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{ "type": "input_text", "text": "keep this objective" }]
+                    },
+                    { "type": "context_compaction" }
+                ]
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let output = body["output"].as_array().expect("response output array");
+    assert_eq!(output.len(), 1, "{body}");
+    assert_eq!(output[0]["type"], "context_compaction");
+    assert!(output[0]["encrypted_content"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("ump.compaction.v1.")));
+}
+
+#[tokio::test]
+async fn integration_routes_proxy_visible_requires_session_binding() {
+    let _guard = COMPACTION_ENV_LOCK.lock().await;
+    let _key_env = EnvRestore::set(
+        "UMP_COMPACTION_KEYS_JSON",
+        r#"{"current":"fixture","keys":{"fixture":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}}"#,
+    );
+    let _instance_env = EnvRestore::set("UMP_COMPACTION_INSTANCE_ID", "route-binding-test");
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    fs::write(
+        auth_home.path().join("config.json"),
+        serde_json::json!({
+            "routes": [{
+                "source": { "model": "claude-opus-4-7", "format": "responses" },
+                "target": {
+                    "provider": "bedrock",
+                    "model": "anthropic.claude-opus-4-7",
+                    "format": "anthropic_messages"
+                },
+                "remote_compaction_policy": "proxy_visible_summary"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let (status, _, body) = request_json_with_headers(
+        test_state(&codex_home, &auth_home),
+        "POST",
+        "/v1/responses",
+        &[],
+        Some(
+            &serde_json::json!({
+                "model": "claude-opus-4-7",
+                "input": [{ "type": "context_compaction" }]
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["code"], "compaction_binding_required");
+}
+
+#[tokio::test]
+async fn integration_routes_disabled_remote_compaction_returns_conflict() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    fs::write(
+        auth_home.path().join("config.json"),
+        serde_json::json!({
+            "routes": [{
+                "source": { "model": "compact-off-claude", "format": "responses" },
+                "target": {
+                    "provider": "bedrock",
+                    "model": "anthropic.claude-opus-4-7",
+                    "format": "anthropic_messages"
+                },
+                "remote_compaction_policy": "off"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let (status, _, body) = request_json_with_headers(
+        test_state(&codex_home, &auth_home),
+        "POST",
+        "/v1/responses",
+        &[
+            ("session-id", "compact-session-route-test"),
+            ("thread-id", "compact-thread-route-test"),
+        ],
+        Some(
+            &serde_json::json!({
+                "model": "compact-off-claude",
+                "input": [{ "type": "context_compaction" }]
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"]["code"], "compaction_disabled_for_target");
 }
 
 #[tokio::test]

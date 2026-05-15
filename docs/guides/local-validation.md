@@ -9,7 +9,7 @@ credentials.
 For docs-only changes:
 
 ```sh
-git diff --check -- AGENTS.md LAYERS.md docs/architecture/LAYERS.md docs/guides/distribution-readiness.md docs/guides/local-validation.md
+git diff --check -- AGENTS.md LAYERS.md README.md docs/architecture/LAYERS.md docs/guides/distribution-readiness.md docs/guides/local-validation.md docs/guides/live-composer-codex-cli-validation.md scripts/smoke-local.sh scripts/live/run-composer-codex-cli-validation.sh
 ```
 
 For Rust source changes:
@@ -29,6 +29,29 @@ Examples:
 - upstream behavior: `cargo test unit_upstreams integration_codex_transport integration_google_transport integration_bedrock_transport`
 - SSE behavior: `cargo test unit_sse integration_responses_sse`
 - WebSocket behavior: `cargo test integration_websocket_facade integration_websocket_passthrough`
+
+## Provider-aware compaction safety rail
+
+Until UMP implements provider-aware compaction, mixed-provider Codex profiles use
+transport compression without remote compaction. Local config validation should
+confirm:
+
+- `[features].enable_request_compression = true`;
+- `[features].remote_compaction_v2 = false` for mixed UMP profiles such as
+  `profiles.proxy`, `profiles.composer-2`, `profiles.composer-2-fast`, and
+  `profiles.composer-1-5`;
+- `name = "OpenAI"` under `model_providers.ump-v2` is only the compatibility
+  shim that lets Codex use OpenAI-shaped Responses transport and compression;
+- only Codex/OpenAI-only rollback profiles such as `profiles.proxy-ws` may
+  enable profile-scoped `remote_compaction_v2 = true`;
+- do not add `remote_compaction_provider_kind` to `~/.codex/config.toml` until
+  the installed Codex build parses that field.
+
+Use this non-secret check after config edits:
+
+```sh
+grep -nE 'enable_request_compression|remote_compaction_v2|\[profiles\.proxy-ws\.features\]|\[model_providers\.ump-v2\]|name = "OpenAI"' ~/.codex/config.toml
+```
 
 ## Credential policy
 

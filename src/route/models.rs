@@ -11,6 +11,7 @@ use crate::{
         codex_models_endpoint as shared_codex_models_endpoint, CodexCatalog, CodexCatalogRequest,
         CODEX_MODELS_URL, DEFAULT_CODEX_CLIENT_VERSION,
     },
+    compaction::RemoteCompactionPolicy,
     model_alias::KNOWN_MODELS,
     upstream::codex::codex_headers,
     AppError, AppResult, AppState,
@@ -41,6 +42,9 @@ pub async fn models(
                 "id": model.id,
                 "object": "model",
                 "owned_by": format!("{:?}", model.provider).to_lowercase(),
+                "remote_compaction_policy": remote_compaction_policy_name(
+                    model.default_remote_compaction_policy(),
+                ),
             })
         })
         .collect::<Vec<_>>();
@@ -55,6 +59,9 @@ pub async fn models(
             "id": configured.id,
             "object": "model",
             "owned_by": format!("{:?}", configured.provider).to_lowercase(),
+            "remote_compaction_policy": remote_compaction_policy_name(
+                configured.remote_compaction_policy,
+            ),
         }));
     }
 
@@ -87,7 +94,9 @@ pub async fn codex_openai_models_projection(
 ) -> AppResult<Value> {
     let client_version = required_client_version(Some(client_version))?;
     let catalog = codex_catalog_for_client_version(state, client_version).await?;
-    Ok(catalog.to_openai_models(include_hidden))
+    Ok(add_codex_remote_compaction_policy(
+        catalog.to_openai_models(include_hidden),
+    ))
 }
 
 pub async fn validate_codex_catalog_request(
@@ -164,7 +173,29 @@ pub fn codex_catalog_to_openai_models(
     include_hidden: bool,
 ) -> AppResult<Value> {
     let client_version = required_client_version(client_version)?;
-    Ok(CodexCatalog::parse(client_version, catalog)?.to_openai_models(include_hidden))
+    Ok(add_codex_remote_compaction_policy(
+        CodexCatalog::parse(client_version, catalog)?.to_openai_models(include_hidden),
+    ))
+}
+
+fn add_codex_remote_compaction_policy(mut value: Value) -> Value {
+    if let Some(models) = value.get_mut("data").and_then(Value::as_array_mut) {
+        for model in models {
+            if let Some(object) = model.as_object_mut() {
+                object.insert("remote_compaction_policy".into(), json!("native"));
+            }
+        }
+    }
+    value
+}
+
+fn remote_compaction_policy_name(policy: RemoteCompactionPolicy) -> &'static str {
+    match policy {
+        RemoteCompactionPolicy::Native => "native",
+        RemoteCompactionPolicy::ProxyVisibleSummary => "proxy_visible_summary",
+        RemoteCompactionPolicy::Local => "local",
+        RemoteCompactionPolicy::Off => "off",
+    }
 }
 
 fn required_client_version(client_version: Option<&str>) -> AppResult<&str> {

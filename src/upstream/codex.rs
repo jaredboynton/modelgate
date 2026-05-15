@@ -14,6 +14,7 @@ use crate::{
 
 pub const CODEX_RESPONSES_WSS_URL: &str = "wss://chatgpt.com/backend-api/codex/responses";
 pub const CODEX_RESPONSES_HTTP_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
+const CODEX_REMOTE_COMPACTION_V2_FEATURE: &str = "remote_compaction_v2";
 
 pub fn codex_headers(state: &AppState) -> AppResult<HeaderMap> {
     let auth = load_codex_auth(state)?;
@@ -26,12 +27,27 @@ pub fn codex_headers(state: &AppState) -> AppResult<HeaderMap> {
     );
     headers.insert("originator", CODEX_ORIGINATOR.parse().unwrap());
     headers.insert("OpenAI-Beta", CODEX_OPENAI_BETA.parse().unwrap());
+    headers.insert(
+        "x-codex-beta-features",
+        CODEX_REMOTE_COMPACTION_V2_FEATURE.parse().unwrap(),
+    );
     if let Some(account_id) = auth.account_id.filter(|value| !value.trim().is_empty()) {
         headers.insert(
             "ChatGPT-Account-Id",
             account_id
                 .parse()
                 .map_err(|_| AppError::BadRequest("invalid Codex account id".into()))?,
+        );
+    }
+    Ok(headers)
+}
+
+fn codex_headers_for_body(state: &AppState, body: &serde_json::Value) -> AppResult<HeaderMap> {
+    let mut headers = codex_headers(state)?;
+    if has_remote_compaction_v2_trigger(body) {
+        headers.insert(
+            "x-codex-beta-features",
+            CODEX_REMOTE_COMPACTION_V2_FEATURE.parse().unwrap(),
         );
     }
     Ok(headers)
@@ -371,7 +387,7 @@ async fn send_wss_with_refresh(
 }
 
 async fn send_wss(state: &AppState, wss_url: &str, body: &serde_json::Value) -> AppResult<Bytes> {
-    let mut ws = connect_responses_wss(state, wss_url).await?;
+    let mut ws = connect_responses_wss_for_body(state, wss_url, body).await?;
     ws.send_text(flat_response_create_event(body.clone()).to_string())
         .await
         .map_err(|err| AppError::Upstream(format!("Codex WSS send failed: {err}")))?;
@@ -408,10 +424,24 @@ pub async fn connect_responses_wss(
     state: &AppState,
     wss_url: &str,
 ) -> AppResult<specter::WebSocket> {
-    match connect_responses_wss_once(state, wss_url).await {
+    match connect_responses_wss_once(state, wss_url, None).await {
         Err(err) if maybe_auth_failure(&err) => {
             refresh_codex_auth(state).await?;
-            connect_responses_wss_once(state, wss_url).await
+            connect_responses_wss_once(state, wss_url, None).await
+        }
+        result => result,
+    }
+}
+
+async fn connect_responses_wss_for_body(
+    state: &AppState,
+    wss_url: &str,
+    body: &serde_json::Value,
+) -> AppResult<specter::WebSocket> {
+    match connect_responses_wss_once(state, wss_url, Some(body)).await {
+        Err(err) if maybe_auth_failure(&err) => {
+            refresh_codex_auth(state).await?;
+            connect_responses_wss_once(state, wss_url, Some(body)).await
         }
         result => result,
     }
@@ -420,9 +450,13 @@ pub async fn connect_responses_wss(
 async fn connect_responses_wss_once(
     state: &AppState,
     wss_url: &str,
+    body: Option<&serde_json::Value>,
 ) -> AppResult<specter::WebSocket> {
     rate_limit::parse_codex_ws_protocol(Some("rfc6455")).map_err(AppError::BadRequest)?;
-    let headers = codex_headers(state)?;
+    let headers = match body {
+        Some(body) => codex_headers_for_body(state, body)?,
+        None => codex_headers(state)?,
+    };
     let mut builder = state
         .specter
         .websocket(wss_url)
@@ -460,7 +494,7 @@ async fn send_http(
     http_url: &str,
     body: &serde_json::Value,
 ) -> AppResult<CodexHttpResponse> {
-    let headers = codex_headers(state)?;
+    let headers = codex_headers_for_body(state, body)?;
     let response = state
         .specter
         .post(http_url)
@@ -472,6 +506,21 @@ async fn send_http(
     let status = response.status();
     let bytes = response.into_body();
     Ok(CodexHttpResponse { status, bytes })
+}
+
+fn has_remote_compaction_v2_trigger(value: &serde_json::Value) -> bool {
+    match value {
+        Value::Object(object) => {
+            if object.get("type").and_then(Value::as_str) == Some("context_compaction")
+                && object.get("encrypted_content").is_none_or(Value::is_null)
+            {
+                return true;
+            }
+            object.values().any(has_remote_compaction_v2_trigger)
+        }
+        Value::Array(values) => values.iter().any(has_remote_compaction_v2_trigger),
+        _ => false,
+    }
 }
 
 struct CodexHttpResponse {

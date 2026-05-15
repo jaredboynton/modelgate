@@ -43,3 +43,36 @@ async fn shared_executor_is_callable_for_http_backed_facade_mode() {
 
     assert!(error.to_string().contains("missing input"));
 }
+
+#[tokio::test]
+async fn shared_executor_rejects_opaque_compaction_before_provider_adapters() {
+    let homes = common::TestHomes::new();
+    let error = match execute_responses_request(
+        &homes.state,
+        HeaderMap::new(),
+        json!({
+            "model": "claude-opus-4-7",
+            "input": [{
+                "type": "compaction",
+                "encrypted_content": "openai-native-opaque"
+            }]
+        }),
+        ExecuteResponsesOptions {
+            force_stream: false,
+        },
+    )
+    .await
+    {
+        Ok(_) => panic!("opaque OpenAI compaction must fail for Bedrock targets"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status(), axum::http::StatusCode::BAD_REQUEST);
+    assert_eq!(error.code(), Some("unsupported_compaction_item_for_target"));
+    assert!(
+        !error
+            .to_string()
+            .contains("unsupported Responses input item"),
+        "shared executor must fail before Anthropic adapter conversion: {error}"
+    );
+}

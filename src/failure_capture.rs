@@ -223,6 +223,10 @@ fn should_redact_key(key: &str, parent_key: Option<&str>) -> bool {
         return true;
     }
 
+    if parent_normalized.as_deref() == Some("content") && normalized == "text" {
+        return true;
+    }
+
     matches!(
         normalized.as_str(),
         "access_token"
@@ -247,6 +251,7 @@ fn should_redact_key(key: &str, parent_key: Option<&str>) -> bool {
             | "audio_data"
             | "input_audio"
             | "input_audio_buffer"
+            | "encrypted_content"
             | "multipart"
             | "multipart_body"
             | "multipart_text"

@@ -75,6 +75,34 @@ async fn codex_wss_failure_uses_http_fallback_and_normalizes_sse() {
     assert!(text.contains(r#""output":[{"id":"call_1","type":"function_call"}]"#));
 }
 
+#[test]
+fn codex_headers_advertise_remote_compaction_beta_without_dropping_websocket_beta() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        codex_home.path().join("auth.json"),
+        serde_json::json!({
+            "access_token": "access-token",
+            "account_id": "account-123"
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let state = AppState::for_tests(
+        codex_home.path().to_path_buf(),
+        auth_home.path().to_path_buf(),
+    );
+
+    let headers = codex::codex_headers(&state).unwrap();
+    assert_eq!(headers["OpenAI-Beta"], "responses_websockets=2026-02-06");
+    assert!(headers
+        .get("x-codex-beta-features")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value
+            .split(',')
+            .any(|feature| feature.trim() == "remote_compaction_v2")));
+}
+
 async fn rejecting_ws_server() -> (String, Arc<AtomicUsize>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr: SocketAddr = listener.local_addr().unwrap();

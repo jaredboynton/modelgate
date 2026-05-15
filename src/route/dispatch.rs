@@ -1,6 +1,7 @@
 use serde_json::Value;
 
 use crate::{
+    compaction::RemoteCompactionPolicy,
     model_alias::{Provider, ResolvedModel, ResolvedTarget, TargetFormat},
     AppError, AppResult, AppState,
 };
@@ -75,6 +76,7 @@ pub struct DispatchPlan {
     pub source_format: RequestFormat,
     pub requested_model: String,
     pub target: ResolvedTarget,
+    pub remote_compaction_policy: RemoteCompactionPolicy,
     pub edge: DispatchEdge,
     pub action: DispatchAction,
 }
@@ -86,7 +88,17 @@ pub fn plan_with_state(
 ) -> AppResult<DispatchPlan> {
     let model = required_model(value)?;
     let target = state.resolve_target_for_format(model, source_format.as_str())?;
-    plan_for_target(source_format, model, target)
+    let remote_compaction_policy = state.routing_config.remote_compaction_policy_for_format(
+        model,
+        Some(source_format.as_str()),
+        &target,
+    )?;
+    plan_for_target_with_remote_compaction_policy(
+        source_format,
+        model,
+        target,
+        remote_compaction_policy,
+    )
 }
 
 pub fn plan_with_resolver<F>(
@@ -99,10 +111,12 @@ where
 {
     let model = required_model(value)?;
     let target = resolve(model)?;
-    plan_for_target(
+    let target = ResolvedTarget::from_resolved_model(target, model)?;
+    plan_for_target_with_remote_compaction_policy(
         source_format,
         model,
-        ResolvedTarget::from_resolved_model(target, model)?,
+        target.clone(),
+        target.default_remote_compaction_policy(),
     )
 }
 
@@ -110,6 +124,21 @@ pub fn plan_for_target(
     source_format: RequestFormat,
     requested_model: &str,
     target: ResolvedTarget,
+) -> AppResult<DispatchPlan> {
+    let remote_compaction_policy = target.default_remote_compaction_policy();
+    plan_for_target_with_remote_compaction_policy(
+        source_format,
+        requested_model,
+        target,
+        remote_compaction_policy,
+    )
+}
+
+pub fn plan_for_target_with_remote_compaction_policy(
+    source_format: RequestFormat,
+    requested_model: &str,
+    target: ResolvedTarget,
+    remote_compaction_policy: RemoteCompactionPolicy,
 ) -> AppResult<DispatchPlan> {
     let (edge, action) = match (source_format, target.provider, target.target_format) {
         (RequestFormat::Responses, Provider::Codex, TargetFormat::Responses)
@@ -167,6 +196,7 @@ pub fn plan_for_target(
         source_format,
         requested_model: requested_model.to_string(),
         target,
+        remote_compaction_policy,
         edge,
         action,
     })

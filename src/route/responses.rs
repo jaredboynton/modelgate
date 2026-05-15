@@ -1,11 +1,12 @@
 use axum::{
-    body::Bytes,
+    body::{Body, Bytes},
     extract::{Path, State},
-    http::HeaderMap,
+    http::{HeaderMap, Response},
     Json,
 };
 
 use crate::{
+    route::responses_compaction,
     route::responses_executor::{execute_responses_request, ExecuteResponsesOptions},
     AppError, AppResult, AppState, UpstreamResponse,
 };
@@ -22,6 +23,15 @@ pub async fn responses(
 ) -> AppResult<UpstreamResponse> {
     let value = serde_json::from_slice(&body)?;
     execute_responses_request(&state, headers, value, ExecuteResponsesOptions::default()).await
+}
+
+pub async fn compact_responses(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> AppResult<Response<Body>> {
+    let value = serde_json::from_slice(&body)?;
+    responses_compaction::compact_responses(&state, headers, value).await
 }
 
 pub async fn retrieve_response(

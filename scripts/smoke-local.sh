@@ -31,6 +31,35 @@ scan_for_secret_leaks() {
   done
 }
 
+
+check_codex_compaction_safety() {
+  local config="${CODEX_CONFIG:-$HOME/.codex/config.toml}"
+  if [ ! -f "$config" ]; then
+    return 0
+  fi
+
+  local request_compression remote_compaction
+  request_compression="$(awk '
+    /^\[features\]$/ { in_features = 1; next }
+    /^\[/ { in_features = 0 }
+    in_features && $1 == "enable_request_compression" { print $3; exit }
+  ' "$config")"
+  remote_compaction="$(awk '
+    /^\[features\]$/ { in_features = 1; next }
+    /^\[/ { in_features = 0 }
+    in_features && $1 == "remote_compaction_v2" { print $3; exit }
+  ' "$config")"
+
+  if [ "$request_compression" != "true" ]; then
+    printf 'smoke failed: Codex config must keep [features].enable_request_compression = true for UMP transport compression\n' >&2
+    return 1
+  fi
+  if [ "$remote_compaction" = "true" ]; then
+    printf 'smoke failed: Codex mixed UMP config must keep [features].remote_compaction_v2 = false until provider-aware compaction lands; use proxy-ws for Codex-only compaction\n' >&2
+    return 1
+  fi
+}
+
 request() {
   local method="$1"
   local path="$2"
@@ -40,6 +69,8 @@ request() {
   scan_for_secret_leaks "$output"
   printf '%s' "$status"
 }
+
+check_codex_compaction_safety
 
 health_body="$tmpdir/health.json"
 health_status="$(request GET /health "$health_body")"

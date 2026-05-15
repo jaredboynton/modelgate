@@ -16,6 +16,7 @@ This file is the short entrypoint. The canonical contract lives in
 src/main.rs       process setup and bind/serve
 src/router.rs     route table, middleware, request observation
 src/route/        HTTP and WebSocket API handlers
+src/compaction/   provider-aware compaction policy, carrier inspection, pack seams
 src/upstream/     provider transports and provider request execution
 src/adapter/      cross-format request/response translation
 src/auth/         provider credential loading, refresh, and signing
@@ -26,6 +27,11 @@ src/state.rs      environment-derived AppState and test-state guardrails
 Handlers stay thin, provider behavior stays in `src/upstream/`, credential logic
 stays in `src/auth/`, and translation code stays near `src/adapter/` or the
 owning route until there is a second real caller.
+
+Compaction is a semantic boundary, not transport compression. `src/compaction/`
+owns provider-aware carrier detection, UMP marker recognition, pack limits, and
+visible-context rendering seams. Routes may call it before adapter conversion;
+adapters keep their unknown-item rejection as defense in depth.
 
 ## Current distribution gate
 

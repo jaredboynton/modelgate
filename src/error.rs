@@ -23,6 +23,75 @@ pub enum AppError {
     Io(#[from] std::io::Error),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("{0}")]
+    Compaction(#[from] CompactionHttpError),
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("{message}")]
+pub struct CompactionHttpError {
+    status: StatusCode,
+    code: &'static str,
+    error_type: &'static str,
+    message: String,
+}
+
+impl CompactionHttpError {
+    pub fn new(
+        status: StatusCode,
+        code: &'static str,
+        error_type: &'static str,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            status,
+            code,
+            error_type,
+            message: message.into(),
+        }
+    }
+
+    pub fn unsupported_item_for_target(target: &crate::model_alias::ResolvedTarget) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "unsupported_compaction_item_for_target",
+            "invalid_request",
+            format!(
+                "provider-native compaction item is not supported for {:?} {:?}; switch back to a compatible target or use local fallback",
+                target.provider, target.target_format
+            ),
+        )
+    }
+
+    pub fn invalid_pack(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_ump_compaction_pack",
+            "invalid_request",
+            message,
+        )
+    }
+
+    pub fn unsupported_schema() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "unsupported_ump_compaction_schema",
+            "invalid_request",
+            "unsupported UMP compaction pack schema",
+        )
+    }
+
+    pub fn status(&self) -> StatusCode {
+        self.status
+    }
+
+    pub fn error_type(&self) -> &'static str {
+        self.error_type
+    }
+
+    pub fn code(&self) -> &'static str {
+        self.code
+    }
 }
 
 impl AppError {
@@ -33,6 +102,7 @@ impl AppError {
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::Upstream(message) if is_upstream_forbidden(message) => StatusCode::FORBIDDEN,
             Self::Upstream(_) | Self::Io(_) | Self::Json(_) => StatusCode::BAD_GATEWAY,
+            Self::Compaction(error) => error.status(),
         }
     }
 
@@ -51,6 +121,7 @@ impl AppError {
             Self::Upstream(message) if is_upstream_forbidden(message) => "permission_error",
             Self::Upstream(_) => "upstream_error",
             Self::Io(_) | Self::Json(_) => "proxy_error",
+            Self::Compaction(error) => error.error_type(),
         }
     }
 
@@ -64,6 +135,7 @@ impl AppError {
                 Some("unsupported_feature")
             }
             Self::Upstream(message) if is_upstream_forbidden(message) => Some("upstream_forbidden"),
+            Self::Compaction(error) => Some(error.code()),
             _ => None,
         }
     }
@@ -149,5 +221,21 @@ mod tests {
         assert_eq!(body["error"]["type"], "permission_error");
         assert_eq!(body["error"]["code"], "upstream_forbidden");
         assert!(body["error"]["param"].is_null());
+    }
+
+    #[tokio::test]
+    async fn compaction_error_returns_embedded_shape() {
+        let (status, body) = response_body(AppError::Compaction(CompactionHttpError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "compaction_pack_too_large",
+            "invalid_request",
+            "too large",
+        )))
+        .await;
+
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(body["error"]["type"], "invalid_request");
+        assert_eq!(body["error"]["code"], "compaction_pack_too_large");
+        assert_eq!(body["error"]["message"], "too large");
     }
 }

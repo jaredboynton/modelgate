@@ -9,6 +9,7 @@ pub mod internal;
 pub mod messages;
 pub mod models;
 pub mod responses;
+pub mod responses_compaction;
 pub mod responses_executor;
 pub mod websocket;
 

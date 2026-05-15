@@ -16,6 +16,11 @@ use crate::{
             responses_to_google_generate_content_with_context, GoogleResponsesSseTranslator,
         },
     },
+    compaction::{
+        find_compaction_carriers, pack_context_from_headers, prepare_responses_input_for_target,
+        validate_compaction_carriers, CompactionHttpError, CompactionLimits,
+        RemoteCompactionPolicy,
+    },
     model_alias::{resolve_model_required, ResolvedTarget},
     route::{
         dispatch::{
@@ -23,6 +28,9 @@ use crate::{
             DispatchAction, DispatchEdge, RequestFormat,
         },
         models::validate_codex_catalog_request,
+        responses_compaction::{
+            is_v2_context_compaction_trigger, proxy_visible_context_compaction_item,
+        },
     },
     upstream, AppError, AppResult, AppState, UpstreamResponse,
 };
@@ -46,6 +54,9 @@ pub async fn execute_responses_request(
     options: ExecuteResponsesOptions,
 ) -> AppResult<UpstreamResponse> {
     let plan = plan_with_state(state, RequestFormat::Responses, &value)?;
+    if let Some(response) = enforce_compaction_policy(&plan, &headers, &mut value)? {
+        return Ok(response);
+    }
     match plan.action {
         DispatchAction::CodexResponses => {
             let upstream_model = plan.target.upstream_model.clone();
@@ -103,6 +114,86 @@ pub async fn execute_responses_request(
                 tool_context,
             )
             .await
+        }
+    }
+}
+
+fn enforce_compaction_policy(
+    plan: &crate::route::dispatch::DispatchPlan,
+    headers: &HeaderMap,
+    value: &mut serde_json::Value,
+) -> AppResult<Option<UpstreamResponse>> {
+    let carriers = value
+        .get("input")
+        .map(find_compaction_carriers)
+        .unwrap_or_default();
+    CompactionLimits::default().check_carrier_count(carriers.len())?;
+    let is_v2_trigger = is_v2_context_compaction_trigger(value)?;
+    if !is_v2_trigger {
+        if let Some(input) = value.get("input") {
+            validate_compaction_carriers(input, &plan.target, CompactionLimits::default())?;
+        }
+        let pack_context = if carriers.iter().any(|carrier| carrier.is_ump_pack) {
+            Some(pack_context_from_headers(
+                headers,
+                "POST /v1/responses",
+                &plan.target,
+            )?)
+        } else {
+            None
+        };
+        prepare_responses_input_for_target(
+            value,
+            &plan.target,
+            CompactionLimits::default(),
+            pack_context.as_ref(),
+        )?;
+        return Ok(None);
+    }
+    if plan.action == DispatchAction::CodexResponses {
+        return Ok(None);
+    }
+
+    match plan.remote_compaction_policy {
+        RemoteCompactionPolicy::Off => Err(CompactionHttpError::new(
+            StatusCode::CONFLICT,
+            "compaction_disabled_for_target",
+            "invalid_request",
+            "remote compaction is disabled for target",
+        )
+        .into()),
+        RemoteCompactionPolicy::Local => Err(CompactionHttpError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "proxy_compaction_unavailable",
+            "server_error",
+            "remote compaction unavailable for target; use local compaction",
+        )
+        .into()),
+        RemoteCompactionPolicy::ProxyVisibleSummary => {
+            let context = pack_context_from_headers(headers, "POST /v1/responses", &plan.target)?;
+            let item = proxy_visible_context_compaction_item(value, &context)?;
+            UpstreamResponse::json(
+                "ump",
+                serde_json::json!({
+                    "id": format!("resp_compact_{}", uuid::Uuid::new_v4().simple()),
+                    "object": "response",
+                    "status": "completed",
+                    "model": plan.requested_model,
+                    "output": [item],
+                    "usage": {
+                        "input_tokens": 0,
+                        "input_tokens_details": null,
+                        "output_tokens": 0,
+                        "output_tokens_details": null,
+                        "total_tokens": 0
+                    }
+                }),
+            )
+            .map(Some)
+            .map_err(AppError::from)
+        }
+        RemoteCompactionPolicy::Native => {
+            Err(CompactionHttpError::unsupported_item_for_target(&plan.target).into())
         }
     }
 }

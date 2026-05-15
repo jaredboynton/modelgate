@@ -335,6 +335,24 @@ fn responses_route_helper_selects_supported_provider_routes() {
     assert!(route_for_responses_model(&unknown).is_err());
 }
 
+#[test]
+fn known_model_catalog_exposes_provider_aware_remote_compaction_policy() {
+    for model in KNOWN_MODELS {
+        let value = serde_json::to_value(model).unwrap();
+        let policy = value
+            .get("remote_compaction_policy")
+            .and_then(|value| value.as_str())
+            .unwrap_or_else(|| panic!("{} missing remote_compaction_policy", model.id));
+        let expected = match model.provider {
+            Provider::Codex => "native",
+            Provider::Bedrock | Provider::Google => "local",
+            Provider::Unsupported => "off",
+        };
+
+        assert_eq!(policy, expected, "{}", model.id);
+    }
+}
+
 fn resolved(provider: Provider, upstream_model: &str) -> ResolvedModel {
     ResolvedModel {
         provider,

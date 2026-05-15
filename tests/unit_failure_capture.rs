@@ -131,6 +131,44 @@ fn serialized_failure_json_does_not_leak_live_sensitive_payload_classes() {
 }
 
 #[test]
+fn compact_failure_capture_keeps_policy_but_redacts_prompt_and_pack_contents() {
+    let homes = common::TestHomes::new();
+    let raw_prompt = "raw compact prompt lane 4 must not leak";
+    let raw_pack = "ump.compaction.v1.protected.nonce.ciphertext-lane-4";
+    let path = write_failure_json(
+        &homes.state,
+        "req-compact-redaction",
+        "responses-compact",
+        serde_json::json!({
+            "provider": "bedrock",
+            "model": "anthropic.claude-opus-4-7",
+            "compaction_policy": "proxy_visible_summary",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": raw_prompt }]
+            }],
+            "output": [{
+                "type": "compaction",
+                "encrypted_content": raw_pack
+            }]
+        }),
+    )
+    .unwrap();
+
+    let serialized = fs::read_to_string(path).unwrap();
+    assert!(serialized.contains(r#""compaction_policy": "proxy_visible_summary""#));
+    assert!(
+        !serialized.contains(raw_prompt),
+        "compact logs must not include raw source prompt: {serialized}"
+    );
+    assert!(
+        !serialized.contains(raw_pack),
+        "compact logs must not include encrypted pack contents: {serialized}"
+    );
+}
+
+#[test]
 fn common_live_assertions_catch_fake_sensitive_sentinels() {
     let output = "status=500 fake-access-token-lane-5";
 

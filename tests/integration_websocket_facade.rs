@@ -1,4 +1,4 @@
-use std::{fs, net::SocketAddr, time::Duration};
+use std::{env, ffi::OsString, fs, net::SocketAddr, time::Duration};
 
 use serde_json::{json, Value};
 use specter::Message as SpecterMessage;
@@ -15,6 +15,30 @@ struct TestState {
 struct SpawnedServer {
     addr: SocketAddr,
     handle: JoinHandle<()>,
+}
+
+static COMPACTION_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+struct EnvRestore {
+    key: &'static str,
+    previous: Option<OsString>,
+}
+
+impl EnvRestore {
+    fn set(key: &'static str, value: &str) -> Self {
+        let previous = env::var_os(key);
+        env::set_var(key, value);
+        Self { key, previous }
+    }
+}
+
+impl Drop for EnvRestore {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => env::set_var(self.key, value),
+            None => env::remove_var(self.key),
+        }
+    }
 }
 
 #[tokio::test]
@@ -175,8 +199,11 @@ async fn websocket_facade_rejects_malformed_previous_response_id_and_recovers() 
     let mut ws = connect_proxy_ws(&proxy).await;
 
     ws.send_text(
-        response_create_with_previous_response_id_value("facade-google-model", Value::Null)
-            .to_string(),
+        response_create_with_previous_response_id_value(
+            "facade-google-model",
+            json!({ "id": "not-a-string" }),
+        )
+        .to_string(),
     )
     .await
     .unwrap();
@@ -347,6 +374,97 @@ async fn websocket_facade_invalid_target_format_edge_fails_before_credentials() 
     proxy.handle.abort();
 }
 
+#[tokio::test]
+async fn websocket_facade_emulates_context_compaction_for_non_codex_target() {
+    let _guard = COMPACTION_ENV_LOCK.lock().await;
+    let _key_env = EnvRestore::set(
+        "UMP_COMPACTION_KEYS_JSON",
+        r#"{"current":"fixture","keys":{"fixture":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}}"#,
+    );
+    let _instance_env = EnvRestore::set("UMP_COMPACTION_INSTANCE_ID", "ws-facade-test");
+    let test_state = http_backed_mixed_proxy_compaction_state();
+    let proxy = spawn_proxy(test_state.state.clone()).await;
+    let mut ws = connect_proxy_ws(&proxy).await;
+
+    ws.send_text(response_create_context_compaction("facade-bedrock-model").to_string())
+        .await
+        .unwrap();
+
+    let created = expect_json_frame(&mut ws).await;
+    assert_eq!(created["type"], "response.created");
+    let added = expect_json_frame(&mut ws).await;
+    assert_eq!(added["type"], "response.output_item.added");
+    assert_eq!(added["item"]["type"], "context_compaction");
+    let done = expect_json_frame(&mut ws).await;
+    assert_eq!(done["type"], "response.output_item.done");
+    assert_eq!(done["item"]["type"], "context_compaction");
+    let encrypted_content = done["item"]["encrypted_content"].as_str().unwrap();
+    assert!(encrypted_content.starts_with("ump.compaction.v1."));
+    let completed = expect_json_frame(&mut ws).await;
+    assert_eq!(completed["type"], "response.completed");
+    assert_no_raw_sse(&created);
+    assert_no_raw_sse(&added);
+    assert_no_raw_sse(&done);
+    assert_no_raw_sse(&completed);
+
+    ws.send_text(
+        response_create_generate_false_with_input(
+            "facade-bedrock-model",
+            json!([{
+                "type": "context_compaction",
+                "encrypted_content": encrypted_content
+            }]),
+        )
+        .to_string(),
+    )
+    .await
+    .unwrap();
+
+    let roundtrip_created = expect_json_frame(&mut ws).await;
+    assert_eq!(roundtrip_created["type"], "response.created");
+    let roundtrip_completed = expect_json_frame(&mut ws).await;
+    assert_eq!(roundtrip_completed["type"], "response.completed");
+    assert_no_raw_sse(&roundtrip_created);
+    assert_no_raw_sse(&roundtrip_completed);
+
+    proxy.handle.abort();
+}
+
+#[tokio::test]
+async fn websocket_facade_rejects_v2_context_compaction_with_input_encrypted_content() {
+    let test_state = http_backed_mixed_state();
+    let proxy = spawn_proxy(test_state.state.clone()).await;
+    let mut ws = connect_proxy_ws(&proxy).await;
+
+    ws.send_text(
+        json!({
+            "type": "response.create",
+            "response": {
+                "model": "facade-bedrock-model",
+                "input": [{
+                    "type": "context_compaction",
+                    "encrypted_content": "client-must-not-send-this"
+                }],
+                "stream": true
+            }
+        })
+        .to_string(),
+    )
+    .await
+    .unwrap();
+
+    let error = expect_json_frame(&mut ws).await;
+    assert_eq!(error["type"], "error");
+    assert_eq!(error["status"], 400);
+    assert_eq!(
+        error["error"]["code"],
+        "unsupported_compaction_item_for_target"
+    );
+    assert_no_raw_sse(&error);
+
+    proxy.handle.abort();
+}
+
 fn http_backed_google_state() -> TestState {
     http_backed_state(vec![(
         "facade-google-model",
@@ -369,6 +487,25 @@ fn http_backed_mixed_state() -> TestState {
             "anthropic.claude-haiku-4-5",
         ),
     ])
+}
+
+fn http_backed_mixed_proxy_compaction_state() -> TestState {
+    http_backed_state_with_policy(
+        vec![
+            ("facade-google-model", "google", "gemini-3.1-flash-lite"),
+            (
+                "facade-google-alt-model",
+                "google",
+                "gemini-3.1-flash-lite-alt",
+            ),
+            (
+                "facade-bedrock-model",
+                "bedrock",
+                "anthropic.claude-haiku-4-5",
+            ),
+        ],
+        Some("proxy_visible_summary"),
+    )
 }
 
 fn invalid_google_target_format_state() -> TestState {
@@ -401,6 +538,13 @@ fn invalid_google_target_format_state() -> TestState {
 }
 
 fn http_backed_state(routes: Vec<(&str, &str, &str)>) -> TestState {
+    http_backed_state_with_policy(routes, None)
+}
+
+fn http_backed_state_with_policy(
+    routes: Vec<(&str, &str, &str)>,
+    remote_compaction_policy: Option<&str>,
+) -> TestState {
     let codex_home = TempDir::new().unwrap();
     let auth_home = TempDir::new().unwrap();
     let routes = routes
@@ -412,14 +556,21 @@ fn http_backed_state(routes: Vec<(&str, &str, &str)>) -> TestState {
                 "google" => "google_generate_content",
                 _ => "responses",
             };
-            json!({
+            let mut route = json!({
                 "source": { "model": source_model, "format": "responses" },
                 "target": {
                     "provider": provider,
                     "model": target_model,
                     "format": target_format
                 }
-            })
+            });
+            if let Some(remote_compaction_policy) = remote_compaction_policy {
+                route.as_object_mut().expect("route object").insert(
+                    "remote_compaction_policy".into(),
+                    json!(remote_compaction_policy),
+                );
+            }
+            route
         })
         .collect::<Vec<_>>();
     std::fs::write(
@@ -450,13 +601,30 @@ fn response_create(model: &str, input: &str) -> Value {
 }
 
 fn response_create_generate_false(model: &str) -> Value {
+    response_create_generate_false_with_input(model, json!("warm this connection"))
+}
+
+fn response_create_generate_false_with_input(model: &str, input: Value) -> Value {
     json!({
         "type": "response.create",
         "response": {
             "model": model,
-            "input": "warm this connection",
+            "input": input,
             "stream": true,
             "generate": false
+        }
+    })
+}
+
+fn response_create_context_compaction(model: &str) -> Value {
+    json!({
+        "type": "response.create",
+        "response": {
+            "model": model,
+            "input": [{
+                "type": "context_compaction"
+            }],
+            "stream": true
         }
     })
 }

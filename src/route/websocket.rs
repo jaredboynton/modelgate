@@ -16,10 +16,19 @@ use tokio::{sync::mpsc, time::Instant};
 
 use crate::{
     adapter::responses_sse::ResponsesSseParser,
+    compaction::{
+        find_compaction_carriers, prepare_responses_input_for_target, CompactionHttpError,
+        CompactionLimits, CompactionPackContext, RemoteCompactionPolicy,
+    },
+    model_alias::{Provider, ResolvedTarget, TargetFormat},
     route::{
         dispatch::{plan_with_state, DispatchAction, RequestFormat},
         models::validate_codex_catalog_websocket_request,
         responses::ResponsesRoute,
+        responses_compaction::{
+            context_compaction_unavailable_frame, is_v2_context_compaction_trigger,
+            proxy_visible_context_compaction_item,
+        },
         responses_executor::{execute_responses_request, ExecuteResponsesOptions},
     },
     upstream, AppError, AppResult, AppState, UpstreamResponse,
@@ -685,7 +694,8 @@ fn close_code_for_error(error: &AppError) -> u16 {
         AppError::MissingCredential(_)
         | AppError::Upstream(_)
         | AppError::Io(_)
-        | AppError::Json(_) => close_code::ERROR,
+        | AppError::Json(_)
+        | AppError::Compaction(_) => close_code::ERROR,
     }
 }
 
@@ -697,11 +707,21 @@ struct BridgeRouteFingerprint {
     model: String,
     upstream_model: String,
     target_format: String,
+    remote_compaction_policy: RemoteCompactionPolicy,
 }
 
-#[derive(Default)]
 struct BridgeSessionState {
     responses: VecDeque<BridgeResponseState>,
+    compaction_session_binding: String,
+}
+
+impl Default for BridgeSessionState {
+    fn default() -> Self {
+        Self {
+            responses: VecDeque::new(),
+            compaction_session_binding: format!("ws:{}", uuid::Uuid::new_v4().simple()),
+        }
+    }
 }
 
 impl BridgeSessionState {
@@ -818,6 +838,7 @@ async fn resolve_bridge_route(
         model: plan.requested_model,
         upstream_model: plan.target.upstream_model,
         target_format,
+        remote_compaction_policy: plan.remote_compaction_policy,
     })
 }
 
@@ -829,13 +850,70 @@ async fn execute_bridge_response_create(
     session: &mut BridgeSessionState,
 ) -> AppResult<BridgeResponseOutcome> {
     let mut request = responses_request_body_owned(value)?;
-    let request = match prepare_bridge_request(request.take(), &fingerprint, session) {
+    let mut request = match prepare_bridge_request(request.take(), &fingerprint, session) {
         Ok(request) => request,
         Err(error) => {
             send_ws_json(client, error.frame()).await?;
             return Ok(BridgeResponseOutcome::Continue);
         }
     };
+
+    match is_v2_context_compaction_trigger(&request) {
+        Err(error) => {
+            send_ws_app_error(client, &error).await?;
+            return Ok(BridgeResponseOutcome::Continue);
+        }
+        Ok(false) => {}
+        Ok(true) if fingerprint.route == ResponsesRoute::CodexResponses => {
+            // Native Codex Responses can handle the v2 trigger through the existing path.
+        }
+        Ok(true) => {
+            match fingerprint.remote_compaction_policy {
+                RemoteCompactionPolicy::ProxyVisibleSummary => {
+                    let context = bridge_compaction_context(session, &fingerprint)?;
+                    let result =
+                        send_synthetic_context_compaction_lifecycle(client, &request, &context)
+                            .await?;
+                    session.record(BridgeResponseState {
+                        fingerprint,
+                        response_id: result.response_id,
+                        full_request: result.full_request,
+                        output_item_done_items: result.output_item_done_items,
+                    });
+                }
+                RemoteCompactionPolicy::Off => {
+                    send_ws_json(
+                        client,
+                        websocket_request_error(
+                            StatusCode::CONFLICT,
+                            "compaction_disabled_for_target",
+                            "remote compaction is disabled for target",
+                        ),
+                    )
+                    .await?;
+                }
+                RemoteCompactionPolicy::Native => {
+                    send_ws_json(
+                        client,
+                        websocket_request_error(
+                            StatusCode::BAD_REQUEST,
+                            "unsupported_compaction_item_for_target",
+                            "native compaction is not supported for the resolved target",
+                        ),
+                    )
+                    .await?;
+                }
+                RemoteCompactionPolicy::Local => {
+                    send_ws_json(
+                        client,
+                        context_compaction_unavailable_frame(StatusCode::SERVICE_UNAVAILABLE),
+                    )
+                    .await?;
+                }
+            }
+            return Ok(BridgeResponseOutcome::Continue);
+        }
+    }
 
     if fingerprint.route == ResponsesRoute::CodexResponses {
         if let Err(error) =
@@ -845,6 +923,10 @@ async fn execute_bridge_response_create(
             send_ws_app_error(client, &error).await?;
             return Ok(BridgeResponseOutcome::Continue);
         }
+    }
+    if let Err(error) = prepare_bridge_compaction_carriers(&mut request, session, &fingerprint) {
+        send_ws_app_error(client, &error).await?;
+        return Ok(BridgeResponseOutcome::Continue);
     }
 
     if request.get("generate").and_then(Value::as_bool) == Some(false) {
@@ -898,6 +980,16 @@ fn prepare_bridge_request(
     fingerprint: &BridgeRouteFingerprint,
     session: &BridgeSessionState,
 ) -> Result<Value, BridgePolicyError> {
+    if matches!(request.get("previous_response_id"), Some(Value::Null)) {
+        let Some(object) = request.as_object_mut() else {
+            return Err(BridgePolicyError::new(
+                "previous_response_field_mismatch",
+                "Responses request must be a JSON object",
+            ));
+        };
+        object.remove("previous_response_id");
+        return Ok(request);
+    }
     let previous_response_id = match request.get("previous_response_id") {
         None => return Ok(request),
         Some(Value::String(value)) => value.clone(),
@@ -1722,6 +1814,152 @@ async fn send_synthetic_lifecycle(client: &mut WebSocket, response_id: &str) -> 
     .await
 }
 
+async fn send_synthetic_context_compaction_lifecycle(
+    client: &mut WebSocket,
+    full_request: &Value,
+    context: &CompactionPackContext,
+) -> AppResult<BridgeExecutionResult> {
+    let response_id = format!("resp_ws_compact_{}", uuid::Uuid::new_v4().simple());
+    let item = proxy_visible_context_compaction_item(full_request, context)?;
+    send_ws_json(
+        client,
+        json!({
+            "type": "response.created",
+            "response": {
+                "id": response_id,
+                "status": "in_progress"
+            }
+        }),
+    )
+    .await?;
+    send_ws_json(
+        client,
+        json!({
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": output_item_added_shape(&item),
+        }),
+    )
+    .await?;
+    send_ws_json(
+        client,
+        json!({
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": item,
+        }),
+    )
+    .await?;
+    send_ws_json(
+        client,
+        json!({
+            "type": "response.completed",
+            "response": {
+                "id": response_id,
+                "status": "completed",
+                "output": [item],
+                "usage": {
+                    "input_tokens": 0,
+                    "input_tokens_details": Value::Null,
+                    "output_tokens": 0,
+                    "output_tokens_details": Value::Null,
+                    "total_tokens": 0
+                }
+            }
+        }),
+    )
+    .await?;
+    Ok(BridgeExecutionResult {
+        response_id,
+        full_request: full_request.clone(),
+        output_item_done_items: vec![item],
+    })
+}
+
+fn bridge_compaction_context(
+    session: &BridgeSessionState,
+    fingerprint: &BridgeRouteFingerprint,
+) -> AppResult<CompactionPackContext> {
+    let instance_id = std::env::var("UMP_COMPACTION_INSTANCE_ID").map_err(|_| {
+        CompactionHttpError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "proxy_compaction_unavailable",
+            "server_error",
+            "UMP_COMPACTION_INSTANCE_ID is required for proxy-visible compaction",
+        )
+    })?;
+    Ok(CompactionPackContext {
+        auth_subject: format!("local-no-auth:{instance_id}"),
+        session_binding: session.compaction_session_binding.clone(),
+        route_binding: "WS /v1/responses".into(),
+        target_provider: bridge_route_provider(&fingerprint.route).to_string(),
+        target_format: fingerprint.target_format.clone(),
+        target_model: fingerprint.upstream_model.clone(),
+    })
+}
+
+fn bridge_route_provider(route: &ResponsesRoute) -> &'static str {
+    match route {
+        ResponsesRoute::CodexResponses => "codex",
+        ResponsesRoute::BedrockMessages => "bedrock",
+        ResponsesRoute::GoogleGenerateContent { .. } => "google",
+    }
+}
+
+fn prepare_bridge_compaction_carriers(
+    request: &mut Value,
+    session: &BridgeSessionState,
+    fingerprint: &BridgeRouteFingerprint,
+) -> AppResult<()> {
+    let carriers = request
+        .get("input")
+        .map(find_compaction_carriers)
+        .unwrap_or_default();
+    if carriers.is_empty() {
+        return Ok(());
+    }
+    let target = bridge_resolved_target(fingerprint)?;
+    let context = if carriers.iter().any(|carrier| carrier.is_ump_pack) {
+        Some(bridge_compaction_context(session, fingerprint)?)
+    } else {
+        None
+    };
+    prepare_responses_input_for_target(
+        request,
+        &target,
+        CompactionLimits::default(),
+        context.as_ref(),
+    )
+    .map(|_| ())
+}
+
+fn bridge_resolved_target(fingerprint: &BridgeRouteFingerprint) -> AppResult<ResolvedTarget> {
+    let target_format = match fingerprint.target_format.as_str() {
+        "responses" => TargetFormat::Responses,
+        "anthropic_messages" => TargetFormat::AnthropicMessages,
+        "google_generate_content" => TargetFormat::GoogleGenerateContent,
+        "openai_images" => TargetFormat::OpenaiImages,
+        other => {
+            return Err(AppError::BadRequest(format!(
+                "unsupported target format {other}"
+            )))
+        }
+    };
+    Ok(ResolvedTarget {
+        provider: bridge_route_provider_enum(&fingerprint.route),
+        upstream_model: fingerprint.upstream_model.clone(),
+        target_format,
+    })
+}
+
+fn bridge_route_provider_enum(route: &ResponsesRoute) -> Provider {
+    match route {
+        ResponsesRoute::CodexResponses => Provider::Codex,
+        ResponsesRoute::BedrockMessages => Provider::Bedrock,
+        ResponsesRoute::GoogleGenerateContent { .. } => Provider::Google,
+    }
+}
+
 async fn send_ws_json(client: &mut WebSocket, value: Value) -> AppResult<()> {
     client
         .send(Message::Text(value.to_string()))
@@ -2008,6 +2246,7 @@ mod tests {
                 model: "claude-opus-4-7".into(),
                 upstream_model: "anthropic.claude-opus-4-7".into(),
                 target_format: "responses".into(),
+                remote_compaction_policy: RemoteCompactionPolicy::Local,
             },
             response_id: "resp_prior".into(),
             full_request: json!({
@@ -2025,6 +2264,7 @@ mod tests {
             model: "gpt-5.5".into(),
             upstream_model: "gpt-5.5".into(),
             target_format: "responses".into(),
+            remote_compaction_policy: RemoteCompactionPolicy::Local,
         };
 
         let prepared = prepare_bridge_request(request, &fingerprint, &session).unwrap();
@@ -2034,11 +2274,11 @@ mod tests {
     }
 
     #[test]
-    fn bridge_rejects_null_previous_response_id() {
+    fn bridge_allows_null_previous_response_id_as_fresh_chain() {
         let session = BridgeSessionState::default();
         let request = json!({
             "model": "gpt-5.5",
-            "input": "bad continuation",
+            "input": "fresh chain",
             "previous_response_id": null
         });
         let fingerprint = BridgeRouteFingerprint {
@@ -2046,11 +2286,13 @@ mod tests {
             model: "gpt-5.5".into(),
             upstream_model: "gpt-5.5".into(),
             target_format: "responses".into(),
+            remote_compaction_policy: RemoteCompactionPolicy::Local,
         };
 
-        let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
+        let prepared = prepare_bridge_request(request, &fingerprint, &session).unwrap();
 
-        assert_eq!(error.code, "previous_response_field_mismatch");
+        assert!(prepared.get("previous_response_id").is_none());
+        assert_eq!(prepared["input"], "fresh chain");
     }
 
     #[test]
@@ -2066,6 +2308,7 @@ mod tests {
             model: "gpt-5.5".into(),
             upstream_model: "gpt-5.5".into(),
             target_format: "responses".into(),
+            remote_compaction_policy: RemoteCompactionPolicy::Local,
         };
 
         let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
@@ -2086,6 +2329,7 @@ mod tests {
             model: "gpt-5.5".into(),
             upstream_model: "gpt-5.5".into(),
             target_format: "responses".into(),
+            remote_compaction_policy: RemoteCompactionPolicy::Local,
         };
 
         let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
@@ -2102,6 +2346,7 @@ mod tests {
                 model: "claude-opus-4-7".into(),
                 upstream_model: "anthropic.claude-opus-4-7".into(),
                 target_format: "responses".into(),
+                remote_compaction_policy: RemoteCompactionPolicy::Local,
             },
             response_id: "resp_prewarm".into(),
             full_request: json!({
@@ -2120,6 +2365,7 @@ mod tests {
             model: "claude-sonnet-4-7".into(),
             upstream_model: "anthropic.claude-sonnet-4-7".into(),
             target_format: "responses".into(),
+            remote_compaction_policy: RemoteCompactionPolicy::Local,
         };
 
         let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
@@ -2136,6 +2382,7 @@ mod tests {
                 model: "claude-opus-4-7".into(),
                 upstream_model: "anthropic.claude-opus-4-7".into(),
                 target_format: "responses".into(),
+                remote_compaction_policy: RemoteCompactionPolicy::Local,
             },
             response_id: "resp_prewarm".into(),
             full_request: json!({
@@ -2155,6 +2402,7 @@ mod tests {
             model: "gpt-5.5".into(),
             upstream_model: "gpt-5.5".into(),
             target_format: "responses".into(),
+            remote_compaction_policy: RemoteCompactionPolicy::Local,
         };
 
         let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
@@ -2173,6 +2421,7 @@ mod tests {
                 model: "facade-google-model".into(),
                 upstream_model: "gemini-3.1-flash-lite".into(),
                 target_format: "responses".into(),
+                remote_compaction_policy: RemoteCompactionPolicy::Local,
             },
             response_id: "resp_prewarm".into(),
             full_request: json!({
@@ -2194,6 +2443,7 @@ mod tests {
             model: "facade-google-model".into(),
             upstream_model: "gemini-3.1-flash-lite".into(),
             target_format: "google_generate_content".into(),
+            remote_compaction_policy: RemoteCompactionPolicy::Local,
         };
 
         let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
@@ -2209,6 +2459,7 @@ mod tests {
             model: "gpt-5.5".into(),
             upstream_model: "gpt-5.5".into(),
             target_format: "responses".into(),
+            remote_compaction_policy: RemoteCompactionPolicy::Local,
         };
         for index in 0..=BRIDGE_RESPONSE_STATE_LIMIT {
             session.record(BridgeResponseState {

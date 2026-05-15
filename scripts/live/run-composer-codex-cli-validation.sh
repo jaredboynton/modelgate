@@ -209,7 +209,7 @@ record_redaction_scan() {
 
   local scan_files=()
   shopt -s nullglob
-  scan_files=("$row_dir"/*.redacted.* "$row_dir/command.txt")
+  scan_files=("$row_dir"/stdout.jsonl "$row_dir"/stderr.log "$row_dir"/*.redacted.* "$row_dir"/attempt-*/*.redacted.* "$row_dir/command.txt")
   shopt -u nullglob
   if (( ${#scan_files[@]} == 0 )); then
     return 0
@@ -258,13 +258,58 @@ status_rank_update() {
   esac
 }
 
+read_features_value() {
+  local config="$1" key="$2"
+  awk -v target_key="$key" '
+    /^\[features\]$/ { in_features = 1; next }
+    /^\[/ { in_features = 0 }
+    in_features && $1 == target_key { print $3; exit }
+  ' "$config"
+}
+
+read_profile_feature_value() {
+  local config="$1" profile="$2" key="$3"
+  awk -v profile="$profile" -v target_key="$key" '
+    BEGIN {
+      unquoted = "[profiles." profile ".features]"
+      quoted = "[profiles.\"" profile "\".features]"
+    }
+    $0 == unquoted || $0 == quoted { in_profile_features = 1; next }
+    /^\[/ { in_profile_features = 0 }
+    in_profile_features && $1 == target_key { print $3; exit }
+  ' "$config"
+}
+
+check_compaction_safety() {
+  local config="$1"
+  local request_compression
+  request_compression="$(read_features_value "$config" enable_request_compression)"
+
+  if [[ "$request_compression" != "true" ]]; then
+    mark_blocked "request-compression-disabled: set [features].enable_request_compression = true for UMP transport compression"
+  fi
+  local profile remote_compaction
+  for profile in "$PROFILE" "$FAST_PROFILE" "$LEGACY_PROFILE"; do
+    remote_compaction="$(read_profile_feature_value "$config" "$profile" remote_compaction_v2)"
+    if [[ "$remote_compaction" != "false" ]]; then
+      mark_blocked "mixed-profile-remote-compaction-not-disabled: set [profiles.$profile.features].remote_compaction_v2 = false; use proxy-ws for Codex-only compaction"
+    fi
+  done
+}
+
 write_command() {
   local row_dir="$1"
   shift
   : > "$row_dir/command.txt"
+  local arg_index=0 arg_count="$#"
   local arg
   for arg in "$@"; do
-    printf '%q ' "$(sanitize_text "$arg")" >> "$row_dir/command.txt"
+    arg_index=$((arg_index + 1))
+    if (( arg_index == arg_count )); then
+      printf '%q ' "[REDACTED-PROMPT $(sha256_text "$arg")]" >> "$row_dir/command.txt"
+    else
+      printf '%q ' "$(sanitize_text "$arg")" >> "$row_dir/command.txt"
+    fi
   done
   printf '\n' >> "$row_dir/command.txt"
 }
@@ -293,38 +338,55 @@ run_with_retry() {
   local max_attempts=3
   local code=0
   local start end latency
+  local raw_root raw_stdout raw_stderr
+  raw_root="$(mktemp -d "${TMPDIR:-/tmp}/ump-live-harness.XXXXXX")" || return 1
+  raw_stdout="$raw_root/stdout.jsonl"
+  raw_stderr="$raw_root/stderr.log"
   mkdir -p "$row_dir"
-  : > "$row_dir/stdout.jsonl"
-  : > "$row_dir/stderr.log"
+  : > "$raw_stdout"
+  : > "$raw_stderr"
   : > "$row_dir/timing.txt"
 
   while (( attempt <= max_attempts )); do
-    local attempt_dir="$row_dir/attempt-$attempt"
-    mkdir -p "$attempt_dir"
+    local raw_attempt_dir="$raw_root/attempt-$attempt"
+    local artifact_attempt_dir="$row_dir/attempt-$attempt"
+    mkdir -p "$raw_attempt_dir" "$artifact_attempt_dir"
     start=$(date +%s)
-    "$@" > "$attempt_dir/stdout.jsonl" 2> "$attempt_dir/stderr.log"
+    "$@" > "$raw_attempt_dir/stdout.jsonl" 2> "$raw_attempt_dir/stderr.log"
     code=$?
     end=$(date +%s)
     latency=$(( (end - start) * 1000 ))
-    cat "$attempt_dir/stdout.jsonl" >> "$row_dir/stdout.jsonl"
-    cat "$attempt_dir/stderr.log" >> "$row_dir/stderr.log"
+    cat "$raw_attempt_dir/stdout.jsonl" >> "$raw_stdout"
+    cat "$raw_attempt_dir/stderr.log" >> "$raw_stderr"
+    redact_file "$raw_attempt_dir/stdout.jsonl" "$artifact_attempt_dir/stdout.redacted.jsonl"
+    redact_file "$raw_attempt_dir/stderr.log" "$artifact_attempt_dir/stderr.redacted.log"
     printf 'attempt=%s exit_code=%s latency_ms=%s\n' "$attempt" "$code" "$latency" >> "$row_dir/timing.txt"
 
     if [[ $code -eq 0 ]]; then
       printf '%s' "$attempt" > "$row_dir/attempts.txt"
+      redact_file "$raw_stdout" "$row_dir/stdout.jsonl"
+      redact_file "$raw_stderr" "$row_dir/stderr.log"
+      rm -rf "$raw_root"
       return 0
     fi
 
-    cat "$attempt_dir/stdout.jsonl" "$attempt_dir/stderr.log" > "$attempt_dir/combined.log"
-    if (( attempt < max_attempts )) && looks_retryable "$attempt_dir/combined.log"; then
+    cat "$raw_attempt_dir/stdout.jsonl" "$raw_attempt_dir/stderr.log" > "$raw_attempt_dir/combined.log"
+    redact_file "$raw_attempt_dir/combined.log" "$artifact_attempt_dir/combined.redacted.log"
+    if (( attempt < max_attempts )) && looks_retryable "$raw_attempt_dir/combined.log"; then
       sleep "${RETRY_DELAYS[$((attempt - 1))]}"
       attempt=$((attempt + 1))
       continue
     fi
 
     printf '%s' "$attempt" > "$row_dir/attempts.txt"
+    redact_file "$raw_stdout" "$row_dir/stdout.jsonl"
+    redact_file "$raw_stderr" "$row_dir/stderr.log"
+    rm -rf "$raw_root"
     return "$code"
   done
+  redact_file "$raw_stdout" "$row_dir/stdout.jsonl"
+  redact_file "$raw_stderr" "$row_dir/stderr.log"
+  rm -rf "$raw_root"
 }
 
 classify_cli_output() {
@@ -478,9 +540,26 @@ run_continuation_row() {
   {
     printf 'step1: '
     local arg
-    for arg in "${cmd1[@]}"; do printf '%q ' "$(sanitize_text "$arg")"; done
+    local arg_index=0 arg_count="${#cmd1[@]}"
+    for arg in "${cmd1[@]}"; do
+      arg_index=$((arg_index + 1))
+      if (( arg_index == arg_count )); then
+        printf '%q ' "[REDACTED-PROMPT $(sha256_text "$arg")]"
+      else
+        printf '%q ' "$(sanitize_text "$arg")"
+      fi
+    done
     printf '\nstep2: '
-    for arg in "${cmd2[@]}"; do printf '%q ' "$(sanitize_text "$arg")"; done
+    arg_index=0
+    arg_count="${#cmd2[@]}"
+    for arg in "${cmd2[@]}"; do
+      arg_index=$((arg_index + 1))
+      if (( arg_index == arg_count )); then
+        printf '%q ' "[REDACTED-PROMPT $(sha256_text "$arg")]"
+      else
+        printf '%q ' "$(sanitize_text "$arg")"
+      fi
+    done
     printf '\n'
   } > "$row_dir/command.txt"
   run_with_retry "$row_dir/step1" "${cmd1[@]}"
@@ -664,6 +743,7 @@ check_prerequisites() {
         mark_blocked "missing Codex profile: $profile in basename=$(basename "$CODEX_CONFIG") path_hash=$(path_hash "$CODEX_CONFIG")"
       fi
     done
+    check_compaction_safety "$CODEX_CONFIG"
   fi
   if [[ -z "$UMP_BASE_URL" ]]; then
     mark_blocked "missing UMP_BASE_URL; start an explicit proxy and pass its bound address, preferably from UMP_V2_LISTEN_ADDR=127.0.0.1:0"
@@ -739,7 +819,7 @@ write_overall_summary() {
     printf '  "model": "%s",\n' "$(json_escape "$MODEL")"
     printf '  "ump_base_url": "%s",\n' "$(json_escape "$UMP_BASE_URL")"
     printf '  "negative_auth_base_url": "%s",\n' "$(json_escape "$NEGATIVE_AUTH_BASE_URL")"
-    printf '  "gates": {"UMP_V2_LIVE_HARNESS": "%s", "UMP_V2_LIVE_COMPOSER_CODEX_CLI": "%s", "UMP_V2_ALLOW_LIVE_TESTS_IN_CI": "%s"},\n' "$(json_escape "${UMP_V2_LIVE_HARNESS:-absent}")" "$(json_escape "${UMP_V2_LIVE_COMPOSER_CODEX_CLI:-absent}")" "$(json_escape "${UMP_V2_ALLOW_LIVE_TESTS_IN_CI:-absent}")"
+    printf '  "gates": {"UMP_V2_LIVE_HARNESS": "%s", "UMP_V2_LIVE_COMPOSER_CODEX_CLI": "%s", "UMP_V2_ALLOW_LIVE_TESTS_IN_CI": "%s", "enable_request_compression": "%s", "%s_remote_compaction_v2": "%s", "%s_remote_compaction_v2": "%s", "%s_remote_compaction_v2": "%s"},\n' "$(json_escape "${UMP_V2_LIVE_HARNESS:-absent}")" "$(json_escape "${UMP_V2_LIVE_COMPOSER_CODEX_CLI:-absent}")" "$(json_escape "${UMP_V2_ALLOW_LIVE_TESTS_IN_CI:-absent}")" "$(json_escape "$(read_features_value "$CODEX_CONFIG" enable_request_compression 2>/dev/null || printf absent)")" "$(json_escape "$PROFILE")" "$(json_escape "$(read_profile_feature_value "$CODEX_CONFIG" "$PROFILE" remote_compaction_v2 2>/dev/null || printf absent)")" "$(json_escape "$FAST_PROFILE")" "$(json_escape "$(read_profile_feature_value "$CODEX_CONFIG" "$FAST_PROFILE" remote_compaction_v2 2>/dev/null || printf absent)")" "$(json_escape "$LEGACY_PROFILE")" "$(json_escape "$(read_profile_feature_value "$CODEX_CONFIG" "$LEGACY_PROFILE" remote_compaction_v2 2>/dev/null || printf absent)")"
     printf '  "config": {"codex_config": {"basename": "%s", "path_hash": "%s", "content_hash": "%s"}, "backup": {"basename": "%s", "path_hash": "%s", "content_hash": "%s"}},\n' "$(json_escape "$(basename "$CODEX_CONFIG")")" "$(path_hash "$CODEX_CONFIG")" "$(sha256_file "$CODEX_CONFIG")" "$(json_escape "$(basename "${CODEX_CONFIG_BACKUP:-missing}")")" "$(path_hash "${CODEX_CONFIG_BACKUP:-missing}")" "$(sha256_file "${CODEX_CONFIG_BACKUP:-}")"
     printf '  "retry_policy": {"max_attempts": 3, "backoff_seconds": [10, 30]},\n'
     printf '  "blockers": ['
@@ -794,6 +874,12 @@ main() {
     printf 'codex_config_basename=%s\n' "$(basename "$CODEX_CONFIG")"
     printf 'codex_config_path_hash=%s\n' "$(path_hash "$CODEX_CONFIG")"
     printf 'codex_config_sha256=%s\n' "$(sha256_file "$CODEX_CONFIG")"
+    if [[ -f "$CODEX_CONFIG" ]]; then
+      printf 'codex_feature_enable_request_compression=%s\n' "$(read_features_value "$CODEX_CONFIG" enable_request_compression)"
+      printf 'codex_profile_%s_remote_compaction_v2=%s\n' "$PROFILE" "$(read_profile_feature_value "$CODEX_CONFIG" "$PROFILE" remote_compaction_v2)"
+      printf 'codex_profile_%s_remote_compaction_v2=%s\n' "$FAST_PROFILE" "$(read_profile_feature_value "$CODEX_CONFIG" "$FAST_PROFILE" remote_compaction_v2)"
+      printf 'codex_profile_%s_remote_compaction_v2=%s\n' "$LEGACY_PROFILE" "$(read_profile_feature_value "$CODEX_CONFIG" "$LEGACY_PROFILE" remote_compaction_v2)"
+    fi
     if [[ -z "$CODEX_CONFIG_BACKUP" ]]; then
       CODEX_CONFIG_BACKUP="$(latest_config_backup)"
     fi

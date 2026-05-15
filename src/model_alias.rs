@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeStruct, Deserialize, Serialize};
 
-use crate::{AppError, AppResult};
+use crate::{compaction::RemoteCompactionPolicy, AppError, AppResult};
 
 #[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -113,9 +113,24 @@ impl ResolvedTarget {
             target_format,
         })
     }
+
+    pub fn default_remote_compaction_policy(&self) -> RemoteCompactionPolicy {
+        default_remote_compaction_policy(self.provider, self.target_format)
+    }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
+pub const fn default_remote_compaction_policy(
+    provider: Provider,
+    target_format: TargetFormat,
+) -> RemoteCompactionPolicy {
+    match (provider, target_format) {
+        (Provider::Codex, TargetFormat::Responses) => RemoteCompactionPolicy::Native,
+        (Provider::Unsupported, _) => RemoteCompactionPolicy::Off,
+        _ => RemoteCompactionPolicy::Local,
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct KnownModel {
     pub id: &'static str,
     pub provider: Provider,
@@ -123,6 +138,42 @@ pub struct KnownModel {
     /// When true, `resolve_model` also accepts inputs of the form `<id>-YYYYMMDD`
     /// (Anthropic-style dated snapshot aliases) and routes them to this row.
     pub accepts_dated_snapshots: bool,
+}
+
+impl Serialize for KnownModel {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("KnownModel", 5)?;
+        state.serialize_field("id", self.id)?;
+        state.serialize_field("provider", &self.provider)?;
+        state.serialize_field("upstream_model", self.upstream_model)?;
+        state.serialize_field("accepts_dated_snapshots", &self.accepts_dated_snapshots)?;
+        state.serialize_field(
+            "remote_compaction_policy",
+            &remote_compaction_policy_name(self.default_remote_compaction_policy()),
+        )?;
+        state.end()
+    }
+}
+
+fn remote_compaction_policy_name(policy: RemoteCompactionPolicy) -> &'static str {
+    match policy {
+        RemoteCompactionPolicy::Native => "native",
+        RemoteCompactionPolicy::ProxyVisibleSummary => "proxy_visible_summary",
+        RemoteCompactionPolicy::Local => "local",
+        RemoteCompactionPolicy::Off => "off",
+    }
+}
+
+impl KnownModel {
+    pub fn default_remote_compaction_policy(&self) -> RemoteCompactionPolicy {
+        self.provider
+            .default_target_format()
+            .map(|target_format| default_remote_compaction_policy(self.provider, target_format))
+            .unwrap_or(RemoteCompactionPolicy::Off)
+    }
 }
 
 pub const KNOWN_MODELS: &[KnownModel] = &[

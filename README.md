@@ -169,15 +169,26 @@ OpenAI-compatible facade disposition:
 ## Codex CLI
 
 Codex only accepts Responses API providers, so point `~/.codex/config.toml`
-at the proxy's `/v1` base URL. The `proxy` profile presents every listed text
-model as Responses WebSocket-capable. Native Codex/OpenAI models stay on
+at the proxy's `/v1` base URL. The mixed `proxy` profile presents every listed
+text model as Responses WebSocket-capable. Native Codex/OpenAI models stay on
 upstream Responses WSS; Bedrock/Claude and Gemini models are bridged inside UMP
 and streamed back to Codex over the same downstream WSS contract. Plain HTTP
 Responses remains supported for non-Codex clients.
 
+Keep request compression enabled for the proxy, but keep remote compaction off
+for mixed-provider profiles until UMP owns provider-aware compaction.
+`name = "OpenAI"` is a Codex compatibility shim for OpenAI-shaped transport
+behavior such as zstd request compression. It is not proof that every UMP-routed
+model accepts OpenAI/Codex opaque compaction items.
+
 ```toml
+[features]
+enable_request_compression = true
+remote_compaction_v2 = false
+
 [model_providers.ump-v2]
-name = "Unified Model Proxy v2"
+# Compatibility shim: keep OpenAI-shaped transport behavior for Codex.
+name = "OpenAI"
 base_url = "http://127.0.0.1:18743/v1"
 wire_api = "responses"
 requires_openai_auth = false
@@ -194,13 +205,14 @@ model_catalog_json = "/Users/jaredboynton/.codex/model-catalog-ump-v2.json"
 model_reasoning_effort = "high"
 ```
 
-The old Codex-only WSS split profile can stay around as rollback, but normal
-Codex CLI use should go through `profiles.proxy` so OpenAI, Claude, and Gemini
-models all use downstream WSS:
+The Codex-only WSS split profile can stay around as the remote-compaction
+exception. Use it only for Codex/OpenAI-native models where opaque native
+compaction may safely round-trip to the same provider family:
 
 ```toml
 [model_providers.ump-v2-codex-ws]
-name = "Unified Model Proxy v2 Codex WS"
+# Compatibility shim for native Codex/OpenAI Responses over UMP.
+name = "OpenAI"
 base_url = "http://127.0.0.1:18743/v1"
 wire_api = "responses"
 requires_openai_auth = false
@@ -214,6 +226,9 @@ websocket_connect_timeout_ms = 10000
 model = "gpt-5.5"
 model_provider = "ump-v2-codex-ws"
 model_catalog_json = "/Users/jaredboynton/.codex/model-catalog-ump-v2-codex-ws.json"
+
+[profiles.proxy-ws.features]
+remote_compaction_v2 = true
 ```
 
 `supports_websockets` is provider-wide in Codex CLI, so UMP owns the mixed

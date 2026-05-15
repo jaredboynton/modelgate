@@ -11,6 +11,7 @@ auth modules own credentials, and state wires environment-derived dependencies.
 | Entrypoint | `src/main.rs` | tracing, config load, bind/serve lifecycle | provider translation or credential policy |
 | Router | `src/router.rs` | route table, middleware, request observation | provider-specific request execution |
 | Route | `src/route/**` | HTTP/WebSocket handlers, request parsing, model/provider validation, `AppError` responses | provider credentials internals or reusable transport clients |
+| Compaction | `src/compaction/**` | provider-aware compaction policy, carrier inspection, UMP pack bounds/marker handling, visible-context render seams | route registration, provider transport, credential lookup, or adapter-specific request execution |
 | Upstream | `src/upstream/**` | provider-specific forwarding, response normalization, transport calls through configured clients | route tables, middleware, or user-facing route policy |
 | Adapter | `src/adapter/**` | OpenAI/Anthropic/Google/Responses shape conversion and SSE event mapping | provider auth, route registration, global state |
 | Auth | `src/auth/**` | credential discovery, OAuth refresh, signing helpers | route dispatch, upstream retries, adapter behavior |
@@ -26,6 +27,8 @@ auth modules own credentials, and state wires environment-derived dependencies.
 main -> router -> route -> upstream -> auth / adapter / sse / state / model_alias
 router -> model_alias for request-observation logging only
 route -> adapter / sse / state / model_alias / error
+route -> compaction before provider adapter conversion
+compaction -> model_alias / error
 upstream -> auth / adapter / sse / state / model_alias / error
 adapter -> model_alias / error / sse helpers when needed
 auth -> state / error / provider SDK or HTTP client
@@ -40,6 +43,7 @@ local and tested. Promote helpers only after a second real caller exists.
 - `src/adapter/**` must not import route, upstream, auth, router, or mutable app state.
 - `src/upstream/**` must not import route handlers or `src/router.rs`.
 - `src/route/**` must not reach into auth internals directly; routes go through upstream/state/model/error boundaries.
+- `src/compaction/**` must not register routes, call provider transports, load provider credentials, or bypass route-layer model/provider resolution.
 - `src/router.rs` wires routes and middleware. It may consult the model catalog for request-observation logging, but must not grow provider request execution, adapter translation, or credential lookup logic.
 - Tests must not read or write real `$HOME`, Codex OAuth state, or live provider credentials unless the test is explicitly ignored/live.
 
@@ -52,6 +56,7 @@ lowest neutral layer over adding a new abstraction.
 - Codex OAuth and refresh belong in `src/auth/codex.rs`; Codex HTTP/WSS behavior belongs in `src/upstream/codex.rs`.
 - Google credential discovery belongs in `src/auth/google.rs`; Google GenerateContent/Responses translation belongs in `src/adapter/google_*.rs`.
 - Codex WebSocket failures must emit wrapped top-level error events with `type = "error"`, numeric `status`, and `error.code`; do not rely on close-frame-only failures.
+- Compaction runs before provider adapters. Unknown provider-native `compaction` or `context_compaction` items for non-Codex targets fail as compaction errors instead of reaching adapter unknown-item errors. UMP-owned packs are recognized only by the `ump.compaction.v1.` marker and rendered as visible context by `src/compaction/`.
 
 ## Distribution boundary
 

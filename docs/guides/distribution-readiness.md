@@ -9,6 +9,8 @@ It describes the current blocker state; it does not change runtime behavior.
 - Remote clone portability is blocked by the local `specter` path dependency in `Cargo.toml`.
 - Hosted CI is manual/pending or dependency-gated until `specter` is portable.
 - Runtime secrets, `.env`, `.omx/`, `target/`, logs, and live captures must stay untracked.
+- Mixed UMP Codex profiles keep `enable_request_compression = true` and
+  `remote_compaction_v2 = false` until provider-aware compaction is implemented.
 
 ## Pre-remote blocker
 
@@ -40,6 +42,10 @@ Before remote creation:
 - `cargo build --locked` works from a clean clone.
 - License, visibility, package naming, and release target are decided.
 - README can be updated after active provider/WSS work lands.
+- Codex config examples describe `name = "OpenAI"` as a compatibility shim, not
+  provider-native compaction support for Bedrock or Google routes.
+- Smoke and live-harness artifacts pass redaction scans before any summary is
+  copied into tracked docs or issues.
 
 Before distribution:
 
