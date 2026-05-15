@@ -36,6 +36,14 @@ pub type ContinuationHash = [u8; 32];
 /// pending tool call is emitted. The continuation key fingerprint is checked
 /// on every lookup; a mismatch on any field causes the lookup to return
 /// `None` so callers cannot accidentally merge state across drift.
+///
+/// Entries are subject to two silent eviction paths: LRU eviction on insert
+/// when `CursorSessionConfig::max_active` (default 1000) is exceeded, and
+/// TTL expiry enforced by a background sweep every `cleanup_interval`
+/// (default 60 s) against `last_access + ttl` (default 1 h). Once an entry
+/// is evicted, both `consume_pending_tool_call` and `lookup_continuation`
+/// return `None` indistinguishably from a missing/invalid call_id or key
+/// mismatch.
 #[derive(Clone, Debug)]
 pub struct ConversationState {
     pub checkpoint: Option<String>,
@@ -207,8 +215,10 @@ impl CursorSessionStore {
 
     /// Look up a continuation by key. Verifies route, provider, upstream
     /// model, target format, stable field hash, response ID, and
-    /// conversation ID. Any mismatch returns `None` per ralplan Section 4
-    /// plan item 12.
+    /// conversation ID. Any mismatch returns `None`. An evicted entry (LRU
+    /// on insert overflow, or TTL background sweep) is also indistinguishable
+    /// from a missing one in this `Option` shape; see `ConversationState`
+    /// for the eviction contract.
     pub fn lookup_continuation(&self, key: &CursorContinuationKey) -> Option<ConversationState> {
         let hash = continuation_hash(key);
         let expected_stable = stable_field_hash(key);
@@ -224,8 +234,9 @@ impl CursorSessionStore {
     }
 
     /// Remove a pending tool call, returning it once and only once. Returns
-    /// `None` if the call is missing, already consumed, or the entry's
-    /// continuation key no longer matches.
+    /// `None` if the call_id is missing, already consumed, the continuation
+    /// key no longer matches, OR the entry has been evicted by LRU/TTL
+    /// pressure since the prior turn (see `ConversationState`).
     pub fn consume_pending_tool_call(
         &self,
         key: &CursorContinuationKey,

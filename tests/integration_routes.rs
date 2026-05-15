@@ -1,4 +1,4 @@
-use std::{env, ffi::OsString, fs, sync::Mutex};
+use std::{env, ffi::OsString, fs};
 
 use axum::{
     body::{to_bytes, Body},
@@ -9,7 +9,7 @@ use tempfile::TempDir;
 use tower::ServiceExt;
 use unified_model_proxy_v2::{build_router, state::NewResponseStateRecord, AppState};
 
-static UPSTREAM_ENV_LOCK: Mutex<()> = Mutex::new(());
+static UPSTREAM_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 struct EnvRestore {
     key: &'static str,
@@ -82,16 +82,18 @@ fn request_json_without_env_vars(
     body: Option<Value>,
     keys: &[&'static str],
 ) -> (StatusCode, Value) {
-    let _guard = UPSTREAM_ENV_LOCK.lock().unwrap();
-    let _restores = keys
-        .iter()
-        .map(|key| EnvRestore::clear(key))
-        .collect::<Vec<_>>();
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap()
-        .block_on(request_json(method, path, body))
+        .block_on(async {
+            let _guard = UPSTREAM_ENV_LOCK.lock().await;
+            let _restores = keys
+                .iter()
+                .map(|key| EnvRestore::clear(key))
+                .collect::<Vec<_>>();
+            request_json(method, path, body).await
+        })
 }
 
 fn request_json_with_state_without_env_vars(
@@ -101,16 +103,18 @@ fn request_json_with_state_without_env_vars(
     body: Option<Value>,
     keys: &[&'static str],
 ) -> (StatusCode, Value) {
-    let _guard = UPSTREAM_ENV_LOCK.lock().unwrap();
-    let _restores = keys
-        .iter()
-        .map(|key| EnvRestore::clear(key))
-        .collect::<Vec<_>>();
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap()
-        .block_on(request_json_with_state(state, method, path, body))
+        .block_on(async {
+            let _guard = UPSTREAM_ENV_LOCK.lock().await;
+            let _restores = keys
+                .iter()
+                .map(|key| EnvRestore::clear(key))
+                .collect::<Vec<_>>();
+            request_json_with_state(state, method, path, body).await
+        })
 }
 
 async fn request_json_with_state(
@@ -879,12 +883,9 @@ async fn integration_routes_compact_paths_are_registered_and_validate_input_shap
     }
 }
 
-// Held briefly across `.await`s solely to serialize process-global env mutation
-// across sync and async test helpers (single-threaded test runtime).
-#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn integration_routes_proxy_visible_compact_returns_one_pack_item() {
-    let _guard = UPSTREAM_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = UPSTREAM_ENV_LOCK.lock().await;
     let _key_env = EnvRestore::set(
         "UMP_COMPACTION_KEYS_JSON",
         r#"{"current":"fixture","keys":{"fixture":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}}"#,
@@ -940,10 +941,9 @@ async fn integration_routes_proxy_visible_compact_returns_one_pack_item() {
     );
 }
 
-#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn integration_routes_proxy_visible_pack_can_be_consumed_by_http_response() {
-    let _guard = UPSTREAM_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = UPSTREAM_ENV_LOCK.lock().await;
     let _key_env = EnvRestore::set(
         "UMP_COMPACTION_KEYS_JSON",
         r#"{"current":"fixture","keys":{"fixture":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}}"#,
@@ -1016,10 +1016,9 @@ async fn integration_routes_proxy_visible_pack_can_be_consumed_by_http_response(
     assert_eq!(body["error"]["type"], "missing_credential", "{body}");
 }
 
-#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn integration_routes_proxy_visible_responses_trigger_returns_context_compaction() {
-    let _guard = UPSTREAM_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = UPSTREAM_ENV_LOCK.lock().await;
     let _key_env = EnvRestore::set(
         "UMP_COMPACTION_KEYS_JSON",
         r#"{"current":"fixture","keys":{"fixture":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}}"#,
@@ -1078,10 +1077,9 @@ async fn integration_routes_proxy_visible_responses_trigger_returns_context_comp
         .is_some_and(|value| value.starts_with("ump.compaction.v1.")));
 }
 
-#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn integration_routes_proxy_visible_requires_session_binding() {
-    let _guard = UPSTREAM_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = UPSTREAM_ENV_LOCK.lock().await;
     let _key_env = EnvRestore::set(
         "UMP_COMPACTION_KEYS_JSON",
         r#"{"current":"fixture","keys":{"fixture":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}}"#,
