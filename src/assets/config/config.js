@@ -254,7 +254,7 @@
         state.currentConfig = responses[0] || { routes: [] };
         state.draftConfig = cloneConfig(state.currentConfig);
         state.currentGraph = responses[1] || {};
-        state.selectedRouteId = firstRouteId(state.currentGraph);
+        state.selectedRouteId = null;
         state.selectedEdgeId = edgeIdForRoute(state.currentGraph, state.selectedRouteId);
         state.selectedDraftRouteIndex = selectedIndexFromRouteId(state.currentGraph, state.selectedRouteId);
         state.draftNeedsValidation = false;
@@ -293,7 +293,7 @@
     })
       .then(function (graph) {
         state.currentGraph = graph || {};
-        state.selectedRouteId = firstRouteId(graph);
+        state.selectedRouteId = null;
         state.selectedEdgeId = edgeIdForRoute(graph, state.selectedRouteId);
         state.selectedDraftRouteIndex = selectedIndexFromRouteId(graph, state.selectedRouteId);
         state.draftNeedsValidation = false;
@@ -857,6 +857,9 @@
     var button = document.createElement("button");
     button.type = "button";
     button.className = "route-model-button";
+    if (isHotRoute(route)) {
+      button.classList.add("route-model-button--adapter");
+    }
     button.dataset.routeSelect = routeId;
     button.setAttribute("aria-current", String(routeId === state.selectedRouteId));
     button.appendChild(strong(sourceModelName(route) + " → " + targetModelName(route)));
@@ -884,6 +887,12 @@
 
     var groups = Array.from(providerGroups.values());
     groups.forEach(function (group) {
+      group.endpoints.forEach(function (endpointGroup) {
+        endpointGroup.entries.sort(function (a, b) {
+          return Number(isHotRoute(a.route)) - Number(isHotRoute(b.route)) ||
+            sourceModelName(a.route).localeCompare(sourceModelName(b.route));
+        });
+      });
       group.endpoints.sort(function (a, b) {
         return endpointOrder(a.format) - endpointOrder(b.format) || a.format.localeCompare(b.format);
       });
@@ -900,7 +909,14 @@
     var flags = [];
     endpointGroup.entries.forEach(function (entry) {
       routeChips(entry.route).forEach(function (routeChip) {
-        if (routeChip.kind !== "format" && !flags.some(function (flag) { return flag.kind === routeChip.kind; })) {
+        if (
+          routeChip.kind !== "format" &&
+          routeChip.kind !== "catalog" &&
+          routeChip.kind !== "hot" &&
+          routeChip.kind !== "override" &&
+          routeChip.kind !== "count" &&
+          !flags.some(function (flag) { return flag.kind === routeChip.kind; })
+        ) {
           flags.push(routeChip);
         }
       });
@@ -1310,12 +1326,12 @@
   function renderInspector(route) {
     clearElement(elements.inspector);
     if (!route) {
-      elements.inspector.appendChild(paragraph("muted", "Select a route row or map edge to inspect server-provided details."));
+      elements.inspector.appendChild(paragraph("muted", "Select a model under an endpoint to inspect details."));
       return;
     }
 
     var heading = document.createElement("h3");
-    heading.textContent = sourceModelName(route) + " → " + targetProviderName(route);
+    heading.textContent = sourceModelName(route) + " → " + endpointLabel(runtimeFormat(route));
     elements.inspector.appendChild(heading);
 
     var chipRow = document.createElement("div");
@@ -1327,6 +1343,7 @@
 
     var list = document.createElement("dl");
     list.className = "definition-list";
+    addDefinition(list, "Origin", isHotRoute(route) ? "User-defined adapter" : "Catalog route");
     addDefinition(list, "Route ID", routeIdentity(route, 0));
     addDefinition(list, "Source model", sourceModelName(route));
     addDefinition(list, "Runtime format", runtimeFormat(route));
@@ -1378,13 +1395,13 @@
     clampSelectedDraftIndex();
 
     if (!routes.length) {
-      elements.typedRouteList.appendChild(paragraph("muted", "No draft routes. Create one to add a hot override."));
+      elements.typedRouteList.appendChild(paragraph("muted", "No draft source mappings. Create one to add an adapter."));
     }
 
     routes.forEach(function (route, index) {
       var button = document.createElement("button");
       button.type = "button";
-      button.className = "route-card";
+      button.className = "route-list-item";
       button.dataset.draftRouteIndex = String(index);
       button.setAttribute("role", "option");
       button.setAttribute("aria-selected", String(index === state.selectedDraftRouteIndex));
@@ -1394,7 +1411,7 @@
       button.appendChild(span("subtle", (route.source.format || "*") + " → " + route.target.provider + " / " + (route.target.model || "New target")));
       var chipRow = document.createElement("span");
       chipRow.className = "chip-row";
-      chipRow.appendChild(chip(route.enabled === false ? "disabled" : "enabled", route.enabled === false ? "disabled" : "hot"));
+      chipRow.appendChild(chip(route.enabled === false ? "disabled" : "enabled", route.enabled === false ? "disabled" : "count"));
       button.appendChild(chipRow);
       elements.typedRouteList.appendChild(button);
     });
@@ -1545,12 +1562,7 @@
   function selectedRoute(routes) {
     return routes.find(function (route, index) {
       return routeIdentity(route, index) === state.selectedRouteId;
-    }) || routes[0] || null;
-  }
-
-  function firstRouteId(graph) {
-    var routes = focalRoutes(graph || {});
-    return routes.length ? routeIdentity(routes[0], 0) : null;
+    }) || null;
   }
 
   function edgeIdForRoute(graph, routeId) {
@@ -1616,7 +1628,11 @@
 
   function targetFormat(route) {
     return stringValue(
-      nestedValue(route, ["target", "format"], route.target_provider_format || route.target_format || route.targetFormat),
+      nestedValue(
+        route,
+        ["target", "format"],
+        nestedValue(route, ["target", "provider_format"], route.target_provider_format || route.target_format || route.targetFormat)
+      ),
       "provider default"
     );
   }
@@ -1627,7 +1643,7 @@
 
   function sourceKind(route) {
     if (isHotRoute(route)) {
-      return "hot override";
+      return "adapter";
     }
     return "catalog";
   }
@@ -1639,7 +1655,7 @@
 
   function routeChips(route) {
     var chips = [];
-    chips.push(isHotRoute(route) ? { label: "hot override", kind: "hot" } : { label: "catalog", kind: "catalog" });
+    chips.push(isHotRoute(route) ? { label: "adapter", kind: "count" } : { label: "catalog", kind: "catalog" });
 
     if (route.enabled === false || route.disabled === true) {
       chips.push({ label: "disabled", kind: "disabled" });
