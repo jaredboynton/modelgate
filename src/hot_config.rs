@@ -357,7 +357,7 @@ fn validate_proxy_visible_prerequisites(config: &RoutingConfigFile) -> AppResult
             "compaction.privacy_policy",
         )?;
     }
-    for route in &config.routes {
+    for route in config.routes.iter().filter(|route| route.enabled) {
         let effective_policy = route.remote_compaction_policy.or(default_policy);
         if effective_policy != Some(RemoteCompactionPolicy::ProxyVisibleSummary) {
             continue;
@@ -925,5 +925,28 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("cannot be off"));
+    }
+
+    #[test]
+    fn hot_config_disabled_proxy_visible_route_does_not_force_env_validation() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let _keys = EnvRestore::clear("UMP_COMPACTION_KEYS_JSON");
+        let _instance = EnvRestore::clear("UMP_COMPACTION_INSTANCE_ID");
+
+        // A disabled route requesting proxy_visible_summary must not trip
+        // env validation, because it cannot serve traffic.
+        parse_config_value(serde_json::json!({
+            "routes": [{
+                "enabled": false,
+                "source": { "model": "compact", "format": "responses" },
+                "target": {
+                    "provider": "bedrock",
+                    "model": "anthropic.claude-opus-4-7",
+                    "format": "anthropic_messages"
+                },
+                "remote_compaction_policy": "proxy_visible_summary"
+            }]
+        }))
+        .unwrap();
     }
 }
