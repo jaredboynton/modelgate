@@ -19,6 +19,7 @@ run_check() {
 }
 
 run_check "tracked runtime artifacts" scripts/gc/check-tracked-runtime-artifacts.sh
+run_check "live capture artifacts" scripts/gc/check-live-captures.sh
 run_check "secret marker filenames" scripts/gc/check-secret-markers.sh
 run_check "absolute local paths report" scripts/gc/check-local-paths.sh
 run_check "task marker inventory report" scripts/gc/check-todos.sh

@@ -6,7 +6,11 @@ use axum::{
 
 use crate::{
     adapter::anthropic_responses::anthropic_messages_to_responses,
-    model_alias::{resolve_model_required, Provider, ResolvedModel},
+    model_alias::{resolve_model_required, ResolvedTarget},
+    route::dispatch::{
+        plan_for_target, plan_with_resolver, plan_with_state, DispatchAction, DispatchEdge,
+        RequestFormat,
+    },
     upstream, AppError, AppResult, AppState, UpstreamResponse,
 };
 
@@ -22,25 +26,25 @@ pub async fn messages(
     body: Bytes,
 ) -> AppResult<UpstreamResponse> {
     let value = serde_json::from_slice(&body)?;
-    let model = required_model(&value)?;
-    let alias = state.resolve_model_for_format(model, "anthropic_messages")?;
-    match messages_route_for_alias(model, &alias)? {
-        MessagesRoute::BedrockMessages => {
+    let plan = plan_with_state(&state, RequestFormat::AnthropicMessages, &value)?;
+    match plan.action {
+        DispatchAction::BedrockAnthropicMessages => {
             upstream::bedrock::forward_messages_response(&state, value, headers).await
         }
-        MessagesRoute::CodexResponses => {
+        DispatchAction::CodexResponses => {
             let mut responses = anthropic_messages_to_responses(value)?;
-            responses["model"] = serde_json::Value::String(alias.upstream_model);
+            responses["model"] = serde_json::Value::String(plan.target.upstream_model);
             codex_response_bytes(upstream::codex::responses(&state, responses).await?)
+        }
+        DispatchAction::GoogleGenerateContent => {
+            Err(AppError::ModelNotSupported(plan.requested_model))
         }
     }
 }
 
 pub async fn count_tokens(State(state): State<AppState>, body: Bytes) -> AppResult<Bytes> {
     let value: serde_json::Value = serde_json::from_slice(&body)?;
-    let model = required_model(&value)?;
-    let alias = state.resolve_model_for_format(model, "anthropic_messages")?;
-    messages_route_for_alias(model, &alias)?;
+    plan_with_state(&state, RequestFormat::AnthropicMessages, &value)?;
     let rough = value.to_string().len().div_ceil(4);
     Ok(Bytes::from(
         serde_json::json!({ "input_tokens": rough }).to_string(),
@@ -53,31 +57,37 @@ pub fn route_for_messages_model(value: &serde_json::Value) -> AppResult<Messages
 
 pub fn route_for_messages_model_with_resolver<F>(
     value: &serde_json::Value,
-    mut resolve: F,
+    resolve: F,
 ) -> AppResult<MessagesRoute>
 where
-    F: FnMut(&str) -> AppResult<ResolvedModel>,
+    F: FnMut(&str) -> AppResult<crate::model_alias::ResolvedModel>,
 {
-    let model = required_model(value)?;
-    let alias = resolve(model)?;
-    messages_route_for_alias(model, &alias)
+    route_from_plan(plan_with_resolver(
+        value,
+        RequestFormat::AnthropicMessages,
+        resolve,
+    )?)
 }
 
-fn messages_route_for_alias(model: &str, alias: &ResolvedModel) -> AppResult<MessagesRoute> {
-    match alias.provider {
-        Provider::Bedrock => Ok(MessagesRoute::BedrockMessages),
-        Provider::Codex if alias.upstream_model.starts_with("gpt-") => {
-            Ok(MessagesRoute::CodexResponses)
+fn route_from_plan(plan: crate::route::dispatch::DispatchPlan) -> AppResult<MessagesRoute> {
+    match plan.edge {
+        DispatchEdge::AnthropicMessagesToAnthropicMessagesBedrock => {
+            Ok(MessagesRoute::BedrockMessages)
         }
-        _ => Err(AppError::ModelNotSupported(model.into())),
+        DispatchEdge::AnthropicMessagesToResponsesCodex => Ok(MessagesRoute::CodexResponses),
+        _ => Err(AppError::ModelNotSupported(plan.requested_model)),
     }
 }
 
-fn required_model(value: &serde_json::Value) -> AppResult<&str> {
-    value
-        .get("model")
-        .and_then(|value| value.as_str())
-        .ok_or_else(|| AppError::BadRequest("missing model".into()))
+pub fn messages_route_for_alias(
+    model: &str,
+    alias: &crate::model_alias::ResolvedModel,
+) -> AppResult<MessagesRoute> {
+    route_from_plan(plan_for_target(
+        RequestFormat::AnthropicMessages,
+        model,
+        ResolvedTarget::from_resolved_model(alias.clone(), model)?,
+    )?)
 }
 
 fn codex_response_bytes(body: Bytes) -> AppResult<UpstreamResponse> {

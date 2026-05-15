@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Unified Model Proxy v2 · Config Route Map</title>
+    <link rel="stylesheet" href="/config/assets/config.css">
+    <script src="/config/assets/config.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#routes-table">Skip to route map</a>
+
+    <main class="config-shell" data-config-app>
+      <header class="topbar" aria-labelledby="page-title">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">UMP</span>
+          <div>
+            <p class="eyebrow">Unified Model Proxy v2</p>
+            <h1 id="page-title">Config route map</h1>
+            <p class="lede">Local routing state for Amp, grouped by provider and endpoint. Models stay tucked behind each endpoint.</p>
+          </div>
+        </div>
+        <div class="topbar__actions" aria-label="Config actions">
+          <div class="status-pill" aria-live="polite" role="status">
+            <span class="status-dot" data-status-dot></span>
+            <span data-status-text>Loading route projection…</span>
+          </div>
+          <div class="summary-pill" data-table-summary aria-live="polite" role="status"></div>
+          <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">Dark</button>
+          <a class="api-link" href="/api/config">Raw /api/config</a>
+        </div>
+      </header>
+
+      <section class="notice notice--empty" data-empty-state hidden>
+        No hot overrides. Catalog routes are effective.
+      </section>
+
+      <section class="notice notice--error" data-error-state hidden aria-live="assertive"></section>
+
+      <section class="route-layout" aria-label="Configuration workspace">
+        <section class="panel panel--routes" aria-labelledby="routes-title" data-catalog-region>
+          <div class="panel__header panel__header--routes">
+            <div>
+              <p class="panel__kicker">Provider → endpoint</p>
+              <h2 id="routes-title">Routes</h2>
+            </div>
+            <div class="legend" data-provider-legend aria-label="Provider legend"></div>
+          </div>
+
+          <div class="table-wrap">
+            <table id="routes-table" class="routes-table">
+              <caption>
+                Server-projected effective routes grouped by provider, endpoint, and expandable model lists.
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Provider</th>
+                  <th scope="col">Endpoint</th>
+                  <th scope="col">Models</th>
+                  <th scope="col">State</th>
+                </tr>
+              </thead>
+              <tbody data-routes-body></tbody>
+            </table>
+          </div>
+
+          <div class="route-cards" data-route-cards aria-label="Route cards"></div>
+        </section>
+
+        <aside class="side-stack" aria-label="Route details and editing">
+          <section class="panel panel--inspector" aria-labelledby="inspector-title" data-sticky-inspector>
+            <div class="panel__header">
+              <div>
+                <p class="panel__kicker">Selected route</p>
+                <h2 id="inspector-title">Inspector</h2>
+              </div>
+            </div>
+            <div class="inspector" data-inspector>
+              <p class="muted">Select a route from an endpoint to inspect server-provided details.</p>
+            </div>
+          </section>
+
+          <details class="panel panel--editor" data-route-editor-region>
+            <summary class="panel__summary">
+              <span>
+                <span class="panel__kicker">Draft override</span>
+                <span class="summary-title" id="editor-title">Route editor</span>
+              </span>
+              <span class="editor-mode" data-route-editor-mode>Typed draft</span>
+            </summary>
+
+            <form class="route-editor" data-route-editor-form data-route-editor>
+              <input type="hidden" name="route_id" data-route-id>
+              <div class="route-editor__grid">
+                <label class="form-field" for="route-source-model">
+                  <span>Source model</span>
+                  <input id="route-source-model" name="source_model" data-route-source-model autocomplete="off" placeholder="anthropic/claude-sonnet-4.5">
+                </label>
+                <label class="form-field" for="route-runtime-format">
+                  <span>Endpoint</span>
+                  <select id="route-runtime-format" name="runtime_format" data-route-runtime-format>
+                    <option value="">Any endpoint</option>
+                    <option value="responses">OpenAI Responses</option>
+                    <option value="chat_completions">OpenAI Chat</option>
+                    <option value="anthropic_messages">Anthropic Messages</option>
+                    <option value="google_generate_content">Google native</option>
+                    <option value="openai_images">OpenAI Images</option>
+                  </select>
+                </label>
+                <label class="form-field" for="route-target-provider">
+                  <span>Target provider</span>
+                  <select id="route-target-provider" name="target_provider" data-route-target-provider>
+                    <option value="">Choose provider</option>
+                    <option value="codex">Codex OAuth</option>
+                    <option value="bedrock">Bedrock Mantle</option>
+                    <option value="google">Google direct</option>
+                  </select>
+                </label>
+                <label class="form-field" for="route-target-model">
+                  <span>Target model</span>
+                  <input id="route-target-model" name="target_model" data-route-target-model autocomplete="off" placeholder="gpt-5.5">
+                </label>
+                <label class="form-field" for="route-target-format">
+                  <span>Target format</span>
+                  <select id="route-target-format" name="target_format" data-route-target-format>
+                    <option value="">Provider default</option>
+                    <option value="responses">OpenAI Responses</option>
+                    <option value="anthropic_messages">Anthropic Messages</option>
+                    <option value="google_generate_content">Google native</option>
+                    <option value="openai_images">OpenAI Images</option>
+                  </select>
+                </label>
+                <label class="form-field form-field--checkbox" for="route-enabled">
+                  <input id="route-enabled" name="enabled" type="checkbox" data-route-enabled checked>
+                  <span>Enabled route</span>
+                </label>
+              </div>
+
+              <div class="route-editor__actions" aria-label="Route editor actions">
+                <button class="button button--primary" type="button" data-route-action="create" data-route-create>Create route</button>
+                <button class="button" type="button" data-route-action="update" data-route-update>Edit selected</button>
+                <button class="button" type="button" data-route-action="preview" data-route-preview>Preview draft</button>
+                <button class="button" type="button" data-route-action="validate" data-route-validate>Validate route</button>
+                <button class="button button--ink" type="button" data-route-action="save" data-route-save>Save route</button>
+              </div>
+
+              <div class="route-editor__secondary" aria-label="Route ordering and availability">
+                <button class="button button--ghost" type="button" data-route-action="move-up" data-route-move-up>Move up</button>
+                <button class="button button--ghost" type="button" data-route-action="move-down" data-route-move-down>Move down</button>
+                <button class="button button--ghost" type="button" data-route-action="enable" data-route-enable>Enable</button>
+                <button class="button button--ghost" type="button" data-route-action="disable" data-route-disable>Disable</button>
+              </div>
+
+              <p class="route-editor__status" data-route-editor-status aria-live="polite">
+                Select a model row to seed the typed editor, or draft a new hot override.
+              </p>
+
+              <div class="draft-route-list" data-draft-route-list role="listbox" aria-label="Draft hot routes"></div>
+            </form>
+          </details>
+
+          <details class="panel panel--profiles" data-profiles-region>
+            <summary class="panel__summary">
+              <span>
+                <span class="panel__kicker">Profiles</span>
+                <span class="summary-title" id="profiles-title">Runtime templates</span>
+              </span>
+            </summary>
+            <div class="template-shelf" data-template-shelf>
+              <button class="template-card" type="button" data-template-id="codex-responses" data-template-apply>
+                <strong>Codex Responses</strong>
+                <span>OpenAI-shaped facade with OAuth-backed Codex transport.</span>
+              </button>
+              <button class="template-card" type="button" data-template-id="bedrock-messages" data-template-apply>
+                <strong>Bedrock Messages</strong>
+                <span>Anthropic Messages routed through Mantle and AWS credentials.</span>
+              </button>
+              <button class="template-card" type="button" data-template-id="google-native" data-template-apply>
+                <strong>Google native</strong>
+                <span>Gemini direct routes with provider-isolated HTTP/SSE bridges.</span>
+              </button>
+            </div>
+          </details>
+
+          <details class="panel panel--diagnostics" data-diagnostics-region>
+            <summary class="panel__summary">
+              <span>
+                <span class="panel__kicker">Diagnostics</span>
+                <span class="summary-title" id="diagnostics-title">Validation board</span>
+              </span>
+            </summary>
+            <div class="diagnostics" data-diagnostics aria-live="polite">
+              <p class="muted">No diagnostics reported.</p>
+            </div>
+          </details>
+        </aside>
+      </section>
+
+      <details class="panel panel--map" data-route-map-region>
+        <summary class="panel__summary">
+          <span>
+            <span class="panel__kicker">Visual graph</span>
+            <span class="summary-title" id="map-title">Map view</span>
+          </span>
+          <span class="raw-drawer__hint">Optional SVG projection</span>
+        </summary>
+        <div class="map-frame" data-map-frame>
+          <svg
+            class="route-map"
+            data-route-map
+            role="img"
+            aria-labelledby="map-title map-desc"
+            focusable="false"
+          >
+            <desc id="map-desc">
+              SVG projection of effective config routes, grouped by server-provided nodes and edges.
+            </desc>
+          </svg>
+        </div>
+      </details>
+
+      <details class="raw-drawer panel" data-raw-drawer>
+        <summary class="panel__summary">
+          <span>
+            <span class="panel__kicker">Raw JSON</span>
+            <span class="summary-title">Draft payload</span>
+          </span>
+          <span class="raw-drawer__hint">Edit, validate, save, or revert</span>
+        </summary>
+        <div class="raw-drawer__body">
+          <div class="editor-grid">
+            <label class="editor-field" for="current-config">
+              <span>Current</span>
+              <textarea id="current-config" data-current-editor readonly spellcheck="false"></textarea>
+            </label>
+            <label class="editor-field" for="draft-config">
+              <span>Draft</span>
+              <textarea id="draft-config" data-draft-editor spellcheck="false"></textarea>
+            </label>
+          </div>
+          <div class="raw-actions">
+            <button class="button button--primary" type="button" data-validate-draft>Validate draft</button>
+            <button class="button" type="button" data-save-config>Save draft</button>
+            <button class="button button--ghost" type="button" data-revert-config>Revert</button>
+            <p class="raw-actions__status" data-editor-status aria-live="polite"></p>
+          </div>
+        </div>
+      </details>
+    </main>
+  </body>
+</html>

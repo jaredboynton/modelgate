@@ -16,8 +16,14 @@ use crate::{
             responses_to_google_generate_content_with_context, GoogleResponsesSseTranslator,
         },
     },
-    model_alias::{resolve_model_required, Provider, ResolvedModel},
-    route::models::validate_codex_catalog_request,
+    model_alias::{resolve_model_required, ResolvedTarget},
+    route::{
+        dispatch::{
+            plan_for_target, plan_with_resolver, plan_with_state, resolve_planned_model,
+            DispatchAction, DispatchEdge, RequestFormat,
+        },
+        models::validate_codex_catalog_request,
+    },
     upstream, AppError, AppResult, AppState, UpstreamResponse,
 };
 
@@ -39,18 +45,19 @@ pub async fn execute_responses_request(
     mut value: serde_json::Value,
     options: ExecuteResponsesOptions,
 ) -> AppResult<UpstreamResponse> {
-    let requested_model = required_model(&value)?.to_string();
-    let alias = state.resolve_model_for_format(&requested_model, "responses")?;
-    match responses_route_for_alias(&requested_model, &alias)? {
-        ResponsesRoute::CodexResponses => {
-            let upstream_model = alias.upstream_model.clone();
+    let plan = plan_with_state(state, RequestFormat::Responses, &value)?;
+    match plan.action {
+        DispatchAction::CodexResponses => {
+            let upstream_model = plan.target.upstream_model.clone();
             let prepared = upstream::codex::prepare_responses_body_with_resolver(value, |model| {
-                state.resolve_model_for_format(model, "responses")
+                resolve_planned_model(&plan, model, |model| {
+                    state.resolve_model_for_format(model, RequestFormat::Responses.as_str())
+                })
             })?;
             validate_codex_catalog_request(state, &prepared, &upstream_model).await?;
             codex_response_bytes(upstream::codex::responses_prepared(state, prepared).await?)
         }
-        ResponsesRoute::BedrockMessages => {
+        DispatchAction::BedrockAnthropicMessages => {
             if options.force_stream {
                 value["stream"] = serde_json::Value::Bool(true);
             }
@@ -59,15 +66,16 @@ pub async fn execute_responses_request(
                 upstream::bedrock::forward_messages_response(state, body, headers).await?;
             anthropic_messages_response_to_responses(
                 upstream_response,
-                &requested_model,
+                &plan.requested_model,
                 tool_context,
             )
             .await
         }
-        ResponsesRoute::GoogleGenerateContent { upstream_model } => {
+        DispatchAction::GoogleGenerateContent => {
             if options.force_stream {
                 value["stream"] = serde_json::Value::Bool(true);
             }
+            let upstream_model = plan.target.upstream_model.clone();
             let stream = is_google_responses_stream_request(&value);
             let (body, tool_context) =
                 responses_to_google_generate_content_with_context(value, &upstream_model)?;
@@ -91,7 +99,7 @@ pub async fn execute_responses_request(
             };
             google_generate_content_response_to_responses(
                 upstream_response,
-                &requested_model,
+                &plan.requested_model,
                 tool_context,
             )
             .await
@@ -105,31 +113,27 @@ pub fn route_for_responses_model(value: &serde_json::Value) -> AppResult<Respons
 
 pub fn route_for_responses_model_with_resolver<F>(
     value: &serde_json::Value,
-    mut resolve: F,
+    resolve: F,
 ) -> AppResult<ResponsesRoute>
 where
-    F: FnMut(&str) -> AppResult<ResolvedModel>,
+    F: FnMut(&str) -> AppResult<crate::model_alias::ResolvedModel>,
 {
-    let model = required_model(value)?;
-    let alias = resolve(model)?;
-    responses_route_for_alias(model, &alias)
+    route_from_plan(plan_with_resolver(
+        value,
+        RequestFormat::Responses,
+        resolve,
+    )?)
 }
 
-pub fn responses_route_for_alias(model: &str, alias: &ResolvedModel) -> AppResult<ResponsesRoute> {
-    match alias.provider {
-        Provider::Codex if alias.upstream_model.starts_with("gpt-") => {
-            Ok(ResponsesRoute::CodexResponses)
-        }
-        Provider::Bedrock
-            if model.starts_with("anthropic/") || alias.upstream_model.contains("claude") =>
-        {
-            Ok(ResponsesRoute::BedrockMessages)
-        }
-        Provider::Google => Ok(ResponsesRoute::GoogleGenerateContent {
-            upstream_model: alias.upstream_model.clone(),
-        }),
-        _ => Err(AppError::ModelNotSupported(model.into())),
-    }
+pub fn responses_route_for_alias(
+    model: &str,
+    alias: &crate::model_alias::ResolvedModel,
+) -> AppResult<ResponsesRoute> {
+    route_from_plan(plan_for_target(
+        RequestFormat::Responses,
+        model,
+        ResolvedTarget::from_resolved_model(alias.clone(), model)?,
+    )?)
 }
 
 pub fn ensure_codex_model(value: &serde_json::Value) -> AppResult<()> {
@@ -138,6 +142,19 @@ pub fn ensure_codex_model(value: &serde_json::Value) -> AppResult<()> {
         ResponsesRoute::BedrockMessages | ResponsesRoute::GoogleGenerateContent { .. } => Err(
             AppError::ModelNotSupported(required_model(value)?.to_string()),
         ),
+    }
+}
+
+fn route_from_plan(plan: crate::route::dispatch::DispatchPlan) -> AppResult<ResponsesRoute> {
+    match plan.edge {
+        DispatchEdge::ResponsesToResponsesCodex => Ok(ResponsesRoute::CodexResponses),
+        DispatchEdge::ResponsesToAnthropicMessagesBedrock => Ok(ResponsesRoute::BedrockMessages),
+        DispatchEdge::ResponsesToGoogleGenerateContentGoogle => {
+            Ok(ResponsesRoute::GoogleGenerateContent {
+                upstream_model: plan.target.upstream_model,
+            })
+        }
+        _ => Err(AppError::ModelNotSupported(plan.requested_model)),
     }
 }
 

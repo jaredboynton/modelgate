@@ -1,8 +1,13 @@
 use unified_model_proxy_v2::{
-    model_alias::{resolve_model, Provider, KNOWN_MODELS},
-    route::chat::{route_for_chat_model, ChatRoute},
-    route::messages::{route_for_messages_model, MessagesRoute},
-    route::responses::{route_for_responses_model, ResponsesRoute},
+    error::AppResult,
+    model_alias::{resolve_model, Provider, ResolvedModel, TargetFormat, KNOWN_MODELS},
+    route::chat::{route_for_chat_model, route_for_chat_model_with_resolver, ChatRoute},
+    route::messages::{
+        route_for_messages_model, route_for_messages_model_with_resolver, MessagesRoute,
+    },
+    route::responses::{
+        route_for_responses_model, route_for_responses_model_with_resolver, ResponsesRoute,
+    },
 };
 
 #[test]
@@ -107,6 +112,23 @@ fn known_model_list_is_stable_and_resolvable() {
 }
 
 #[test]
+fn provider_defaults_select_expected_target_formats() {
+    assert_eq!(
+        Provider::Bedrock.default_target_format(),
+        Some(TargetFormat::AnthropicMessages)
+    );
+    assert_eq!(
+        Provider::Codex.default_target_format(),
+        Some(TargetFormat::Responses)
+    );
+    assert_eq!(
+        Provider::Google.default_target_format(),
+        Some(TargetFormat::GoogleGenerateContent)
+    );
+    assert_eq!(Provider::Unsupported.default_target_format(), None);
+}
+
+#[test]
 fn every_claude_alias_routes_to_bedrock() {
     for model in KNOWN_MODELS {
         if model.id.contains("claude") || model.id.starts_with("anthropic/") {
@@ -120,6 +142,102 @@ fn every_claude_alias_routes_to_bedrock() {
                 alias.upstream_model
             );
         }
+    }
+}
+
+#[test]
+fn chat_route_planner_allows_only_codex_gpt_and_bedrock_claude() {
+    for (provider, upstream_model, expected) in [
+        (Provider::Codex, "gpt-5.5", Ok(ChatRoute::CodexResponses)),
+        (
+            Provider::Bedrock,
+            "us.anthropic.claude-sonnet-4-6",
+            Ok(ChatRoute::BedrockMessages),
+        ),
+        (
+            Provider::Google,
+            "gemini-3.1-flash-lite",
+            Err("model_not_supported"),
+        ),
+        (
+            Provider::Unsupported,
+            "gpt-image-2",
+            Err("model_not_supported"),
+        ),
+    ] {
+        let body = serde_json::json!({ "model": "planner-fixture", "messages": [] });
+        let route =
+            route_for_chat_model_with_resolver(&body, |_| Ok(resolved(provider, upstream_model)));
+
+        assert_route_result(route, expected, provider, upstream_model);
+    }
+}
+
+#[test]
+fn messages_route_planner_allows_only_bedrock_and_codex_gpt() {
+    for (provider, upstream_model, expected) in [
+        (
+            Provider::Bedrock,
+            "us.anthropic.claude-sonnet-4-6",
+            Ok(MessagesRoute::BedrockMessages),
+        ),
+        (
+            Provider::Codex,
+            "gpt-5.5",
+            Ok(MessagesRoute::CodexResponses),
+        ),
+        (
+            Provider::Google,
+            "gemini-3.1-flash-lite",
+            Err("model_not_supported"),
+        ),
+        (
+            Provider::Unsupported,
+            "gpt-image-2",
+            Err("model_not_supported"),
+        ),
+    ] {
+        let body = serde_json::json!({ "model": "planner-fixture", "messages": [] });
+        let route = route_for_messages_model_with_resolver(&body, |_| {
+            Ok(resolved(provider, upstream_model))
+        });
+
+        assert_route_result(route, expected, provider, upstream_model);
+    }
+}
+
+#[test]
+fn responses_route_planner_allows_codex_bedrock_and_google_only() {
+    for (provider, upstream_model, expected) in [
+        (
+            Provider::Codex,
+            "gpt-5.5",
+            Ok(ResponsesRoute::CodexResponses),
+        ),
+        (
+            Provider::Bedrock,
+            "us.anthropic.claude-sonnet-4-6",
+            Ok(ResponsesRoute::BedrockMessages),
+        ),
+        (
+            Provider::Google,
+            "gemini-3.1-flash-lite",
+            Ok(ResponsesRoute::GoogleGenerateContent {
+                upstream_model: "gemini-3.1-flash-lite".to_string(),
+            }),
+        ),
+        (
+            Provider::Unsupported,
+            "gpt-image-2",
+            Err("model_not_supported"),
+        ),
+    ] {
+        let body = serde_json::json!({ "model": "planner-fixture", "input": "hello" });
+        let route = route_for_responses_model_with_resolver(&body, |_| {
+            Ok(resolved(provider, upstream_model))
+        });
+
+        assert_route_result(route, expected, provider, upstream_model);
     }
 }
 
@@ -215,4 +333,32 @@ fn responses_route_helper_selects_supported_provider_routes() {
 
     let unknown = serde_json::json!({ "model": "claude-sonnet-4-7", "input": "hello" });
     assert!(route_for_responses_model(&unknown).is_err());
+}
+
+fn resolved(provider: Provider, upstream_model: &str) -> ResolvedModel {
+    ResolvedModel {
+        provider,
+        upstream_model: upstream_model.to_string(),
+    }
+}
+
+fn assert_route_result<T>(
+    actual: AppResult<T>,
+    expected: Result<T, &str>,
+    provider: Provider,
+    upstream_model: &str,
+) where
+    T: std::fmt::Debug + Eq,
+{
+    match expected {
+        Ok(expected) => assert_eq!(actual.unwrap(), expected, "{provider:?} {upstream_model}"),
+        Err(expected_code) => {
+            let error = actual.unwrap_err();
+            assert_eq!(
+                error.code(),
+                Some(expected_code),
+                "{provider:?} {upstream_model}: {error}"
+            );
+        }
+    }
 }

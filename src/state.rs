@@ -14,7 +14,7 @@ use crate::{
     amp_compat::AmpStore,
     codex_catalog::{CodexCatalogCache, CodexCatalogConfig},
     hot_config::HotRoutingConfig,
-    model_alias::{resolve_model_required, ResolvedModel},
+    model_alias::{resolve_target_required, ResolvedModel, ResolvedTarget},
     AppResult,
 };
 
@@ -183,10 +183,7 @@ impl AppState {
     }
 
     pub fn resolve_model(&self, input: &str) -> AppResult<ResolvedModel> {
-        if let Some(alias) = self.routing_config.resolve_model(input)? {
-            return Ok(alias);
-        }
-        resolve_model_required(input)
+        self.resolve_target(input).map(ResolvedModel::from)
     }
 
     pub fn resolve_model_for_format(
@@ -194,13 +191,29 @@ impl AppState {
         input: &str,
         source_format: &str,
     ) -> AppResult<ResolvedModel> {
-        if let Some(alias) = self
-            .routing_config
-            .resolve_model_for_format(input, Some(source_format))?
-        {
-            return Ok(alias);
+        self.resolve_target_for_format(input, source_format)
+            .map(ResolvedModel::from)
+    }
+
+    pub fn resolve_target(&self, input: &str) -> AppResult<ResolvedTarget> {
+        if let Some(target) = self.routing_config.resolve_target_for_format(input, None)? {
+            return Ok(target);
         }
-        resolve_model_required(input)
+        resolve_target_required(input)
+    }
+
+    pub fn resolve_target_for_format(
+        &self,
+        input: &str,
+        source_format: &str,
+    ) -> AppResult<ResolvedTarget> {
+        if let Some(target) = self
+            .routing_config
+            .resolve_target_for_format(input, Some(source_format))?
+        {
+            return Ok(target);
+        }
+        resolve_target_required(input)
     }
 
     pub fn codex_wss_latched(&self) -> bool {

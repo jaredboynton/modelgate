@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{fs, net::SocketAddr, time::Duration};
 
 use serde_json::{json, Value};
 use specter::Message as SpecterMessage;
@@ -183,7 +183,7 @@ async fn websocket_facade_rejects_malformed_previous_response_id_and_recovers() 
 
     let error = expect_json_frame(&mut ws).await;
     assert_eq!(error["type"], "error");
-    assert_eq!(error["error"]["code"], "invalid_previous_response_id");
+    assert_eq!(error["error"]["code"], "previous_response_field_mismatch");
     assert!(error["error"]["message"]
         .as_str()
         .unwrap()
@@ -256,7 +256,9 @@ async fn websocket_facade_cross_route_previous_response_id_error_keeps_socket_us
     assert_eq!(error["type"], "error");
     assert!(matches!(
         error["error"]["code"].as_str(),
-        Some("previous_response_route_mismatch") | Some("previous_response_model_mismatch")
+        Some("previous_response_route_mismatch")
+            | Some("previous_response_model_mismatch")
+            | Some("previous_response_target_format_mismatch")
     ));
     let message = error["error"]["message"].as_str().unwrap();
     assert!(
@@ -272,6 +274,75 @@ async fn websocket_facade_cross_route_previous_response_id_error_keeps_socket_us
     assert_eq!(next_created["type"], "response.created");
     let next_completed = expect_json_frame(&mut ws).await;
     assert_eq!(next_completed["type"], "response.completed");
+
+    proxy.handle.abort();
+}
+
+#[tokio::test]
+async fn websocket_facade_rejects_previous_response_id_after_target_format_hot_change() {
+    let test_state = http_backed_google_state();
+    let proxy = spawn_proxy(test_state.state.clone()).await;
+    let mut ws = connect_proxy_ws(&proxy).await;
+
+    ws.send_text(response_create_generate_false("facade-google-model").to_string())
+        .await
+        .unwrap();
+    let created = expect_json_frame(&mut ws).await;
+    let response_id = created["response"]["id"].as_str().unwrap().to_string();
+    let _completed = expect_json_frame(&mut ws).await;
+
+    fs::write(
+        test_state._auth_home.path().join("config.json"),
+        json!({
+            "routes": [{
+                "source": { "model": "facade-google-model", "format": "responses" },
+                "target": {
+                    "provider": "codex",
+                    "model": "gpt-5.5",
+                    "format": "responses"
+                }
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    ws.send_text(
+        response_create_with_previous_response_id("facade-google-model", &response_id).to_string(),
+    )
+    .await
+    .unwrap();
+
+    let error = expect_json_frame(&mut ws).await;
+    assert_eq!(error["type"], "error");
+    assert_eq!(
+        error["error"]["code"],
+        "previous_response_target_format_mismatch"
+    );
+    assert_no_raw_sse(&error);
+
+    proxy.handle.abort();
+}
+
+#[tokio::test]
+async fn websocket_facade_invalid_target_format_edge_fails_before_credentials() {
+    let test_state = invalid_google_target_format_state();
+    let proxy = spawn_proxy(test_state.state.clone()).await;
+    let mut ws = connect_proxy_ws(&proxy).await;
+
+    ws.send_text(response_create_generate_false("invalid-google-target").to_string())
+        .await
+        .unwrap();
+
+    let error = expect_json_frame(&mut ws).await;
+    assert_eq!(error["type"], "error");
+    assert_eq!(error["status"], 400);
+    assert_eq!(error["error"]["code"], "model_not_supported");
+    assert!(!error["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Google API key"));
+    assert_no_raw_sse(&error);
 
     proxy.handle.abort();
 }
@@ -300,18 +371,53 @@ fn http_backed_mixed_state() -> TestState {
     ])
 }
 
+fn invalid_google_target_format_state() -> TestState {
+    let codex_home = TempDir::new().unwrap();
+    let auth_home = TempDir::new().unwrap();
+    fs::write(
+        auth_home.path().join("config.json"),
+        json!({
+            "routes": [{
+                "source": { "model": "invalid-google-target", "format": "responses" },
+                "target": {
+                    "provider": "google",
+                    "model": "gemini-3.1-flash-lite",
+                    "format": "responses"
+                }
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let state = AppState::for_tests(
+        codex_home.path().to_path_buf(),
+        auth_home.path().to_path_buf(),
+    );
+    TestState {
+        _codex_home: codex_home,
+        _auth_home: auth_home,
+        state,
+    }
+}
+
 fn http_backed_state(routes: Vec<(&str, &str, &str)>) -> TestState {
     let codex_home = TempDir::new().unwrap();
     let auth_home = TempDir::new().unwrap();
     let routes = routes
         .into_iter()
         .map(|(source_model, provider, target_model)| {
+            let target_format = match provider {
+                "bedrock" => "anthropic_messages",
+                "codex" => "responses",
+                "google" => "google_generate_content",
+                _ => "responses",
+            };
             json!({
                 "source": { "model": source_model, "format": "responses" },
                 "target": {
                     "provider": provider,
                     "model": target_model,
-                    "format": "responses"
+                    "format": target_format
                 }
             })
         })

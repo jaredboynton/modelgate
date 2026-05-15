@@ -10,6 +10,39 @@
 # Local agent/runtime state
 /.omx/
 
+# Local live harness captures and raw transcripts
+/.live-harness/
+/live-captures/
+/live-validation/
+*.har
+*.pcap
+*.pcapng
+*.jsonl
+*.ndjson
+*raw-transcript*
+*raw_transcript*
+*transcript.raw*
+
+# Keep room for checked-in redacted/synthetic capture fixtures.
+!tests/fixtures/**/*synthetic*.har
+!tests/fixtures/**/*synthetic*.jsonl
+!tests/fixtures/**/*synthetic*.ndjson
+!tests/fixtures/**/*redacted*.har
+!tests/fixtures/**/*redacted*.jsonl
+!tests/fixtures/**/*redacted*.ndjson
+!tests/fixtures/**/*sample*.har
+!tests/fixtures/**/*sample*.jsonl
+!tests/fixtures/**/*sample*.ndjson
+!fixtures/**/*synthetic*.har
+!fixtures/**/*synthetic*.jsonl
+!fixtures/**/*synthetic*.ndjson
+!fixtures/**/*redacted*.har
+!fixtures/**/*redacted*.jsonl
+!fixtures/**/*redacted*.ndjson
+!fixtures/**/*sample*.har
+!fixtures/**/*sample*.jsonl
+!fixtures/**/*sample*.ndjson
+
 # Logs, coverage, and profiling artifacts
 *.log
 *.log.*

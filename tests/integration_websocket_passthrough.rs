@@ -1012,9 +1012,15 @@ fn codex_test_state_with_route_specs(routes: &[(&str, &str, &str)]) -> TestState
     let routes = routes
         .iter()
         .map(|(source_model, provider, target_model)| {
+            let target_format = match *provider {
+                "bedrock" => "anthropic_messages",
+                "codex" => "responses",
+                "google" => "google_generate_content",
+                _ => "responses",
+            };
             json!({
                 "source": { "model": source_model, "format": "responses" },
-                "target": { "provider": provider, "model": target_model, "format": "responses" }
+                "target": { "provider": provider, "model": target_model, "format": target_format }
             })
         })
         .collect::<Vec<_>>();

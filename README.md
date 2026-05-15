@@ -49,6 +49,23 @@ Config UI:
 open http://127.0.0.1:18743/config
 ```
 
+Safe config UI smoke:
+
+```sh
+tmpdir="$(mktemp -d)"
+export UMP_V2_AUTH_HOME="$tmpdir/auth"
+export UMP_V2_CODEX_HOME="$tmpdir/codex"
+export UMP_V2_CONFIG="$tmpdir/config.json"
+export UMP_V2_LISTEN_ADDR="127.0.0.1:0"
+printf '{"routes":[]}' > "$UMP_V2_CONFIG"
+cargo run
+```
+
+Use the ephemeral address printed by the process, wait for `/health`, then open
+`/config` with a CDP/browser runner pointed only at that temp process. Capture a
+screenshot or DOM dump plus browser console output, then verify the route map,
+typed editor, diagnostics, validate, preview, and save controls.
+
 ## Runtime Config
 
 - `UMP_V2_LISTEN_ADDR`, default `127.0.0.1:18743`
@@ -101,6 +118,22 @@ Hot routing config:
 ```
 
 Changing the JSON file affects the next request without restarting the proxy.
+
+The browser config surface is split by purpose:
+
+- `/config` shows the local route map for static routing state. It should show
+  built-in effective routes even when the hot config is `{ "routes": [] }`.
+- `/api/config` is the raw hot-config compatibility API. `GET` reads persisted
+  JSON and strict `PUT` saves a full valid hot-config document for later
+  requests.
+- `/api/config/graph` is the Switchyard Atlas graph projection used by the route
+  map and typed editor. `GET` projects persisted config; `POST` validates and
+  projects a draft without writing it, rejecting unknown fields and
+  secret-shaped keys.
+
+These routes are local admin surfaces. They require loopback Host values, reject
+cross-site unsafe browser writes, return `Cache-Control: no-store`, and keep the
+UI on same-origin CSP-protected assets.
 
 Responses WebSocket passthrough:
 

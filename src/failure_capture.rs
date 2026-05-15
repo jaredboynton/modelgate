@@ -146,15 +146,8 @@ pub fn redact_failure_value(value: &mut Value) {
 fn redact_value(value: &mut Value, parent_key: Option<&str>) {
     match value {
         Value::Object(map) => {
-            let parent_is_headers = parent_key
-                .map(|key| key.eq_ignore_ascii_case("headers"))
-                .unwrap_or(false);
-            let parent_is_inline_data = parent_key
-                .map(|key| key.eq_ignore_ascii_case("inline_data"))
-                .unwrap_or(false);
-
             for (key, child) in map {
-                if should_redact_key(key, parent_is_headers, parent_is_inline_data) {
+                if should_redact_key(key, parent_key) {
                     *child = Value::String(REDACTED.to_string());
                 } else {
                     redact_value(child, Some(key));
@@ -166,11 +159,19 @@ fn redact_value(value: &mut Value, parent_key: Option<&str>) {
                 redact_value(child, parent_key);
             }
         }
-        Value::String(text) if is_base64_data_url(text) => {
-            *value = Value::String(REDACTED.to_string());
+        Value::String(text) => {
+            if should_redact_string(text) {
+                *value = Value::String(REDACTED.to_string());
+            } else if let Some(redacted) = redact_url_query(text) {
+                *value = Value::String(redacted);
+            }
         }
         _ => {}
     }
+}
+
+fn should_redact_string(text: &str) -> bool {
+    is_base64_data_url(text) || looks_like_sdp(text)
 }
 
 fn is_base64_data_url(text: &str) -> bool {
@@ -181,22 +182,96 @@ fn is_base64_data_url(text: &str) -> bool {
     lower.starts_with("data:") && lower.contains(";base64,")
 }
 
-fn should_redact_key(key: &str, parent_is_headers: bool, parent_is_inline_data: bool) -> bool {
-    if parent_is_headers {
-        return matches!(
-            key.to_ascii_lowercase().as_str(),
-            "authorization" | "x-api-key" | "x-goog-api-key" | "cookie"
-        );
+fn looks_like_sdp(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with("v=0\r\n") || trimmed.starts_with("v=0\n")
+}
+
+fn redact_url_query(text: &str) -> Option<String> {
+    let lower = text
+        .get(..text.len().min(16))
+        .unwrap_or(text)
+        .to_ascii_lowercase();
+    if !(lower.starts_with("wss://") || lower.starts_with("https://")) {
+        return None;
     }
 
-    if parent_is_inline_data && key.eq_ignore_ascii_case("data") {
+    let query_start = text.find('?')?;
+    let fragment_start = text[query_start..]
+        .find('#')
+        .map(|offset| query_start + offset);
+    let prefix = &text[..query_start];
+    let suffix = fragment_start.map_or("", |index| &text[index..]);
+    Some(format!("{prefix}?[redacted]{suffix}"))
+}
+
+fn should_redact_key(key: &str, parent_key: Option<&str>) -> bool {
+    let normalized = normalize_key(key);
+    let parent_normalized = parent_key.map(normalize_key);
+
+    if parent_normalized.as_deref() == Some("headers") && is_sensitive_header_key(&normalized) {
+        return true;
+    }
+
+    if parent_normalized.as_deref() == Some("inline_data") && normalized == "data" {
+        return true;
+    }
+
+    if parent_normalized.as_deref() == Some("transcript")
+        && matches!(normalized.as_str(), "text" | "delta")
+    {
         return true;
     }
 
     matches!(
-        key.to_ascii_lowercase().as_str(),
-        "refresh_token" | "b64_json"
+        normalized.as_str(),
+        "access_token"
+            | "refresh_token"
+            | "id_token"
+            | "bearer"
+            | "api_key"
+            | "apikey"
+            | "client_secret"
+            | "account_id"
+            | "chatgpt_account_id"
+            | "b64_json"
+            | "base64"
+            | "base64_payload"
+            | "sdp"
+            | "offer_sdp"
+            | "answer_sdp"
+            | "local_sdp"
+            | "remote_sdp"
+            | "audio"
+            | "audio_bytes"
+            | "audio_data"
+            | "input_audio"
+            | "input_audio_buffer"
+            | "multipart"
+            | "multipart_body"
+            | "multipart_text"
+            | "transcript"
+            | "transcript_text"
+            | "transcript_delta"
     )
+}
+
+fn is_sensitive_header_key(normalized: &str) -> bool {
+    matches!(
+        normalized,
+        "authorization"
+            | "proxy_authorization"
+            | "x_api_key"
+            | "x_goog_api_key"
+            | "api_key"
+            | "cookie"
+            | "set_cookie"
+            | "chatgpt_account_id"
+    )
+}
+
+fn normalize_key(key: &str) -> String {
+    key.to_ascii_lowercase().replace(['-', ' '], "_")
 }
 
 fn header_map_json(headers: &HeaderMap) -> Value {

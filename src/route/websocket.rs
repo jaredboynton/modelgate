@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::VecDeque};
+use std::{borrow::Cow, collections::VecDeque, time::Duration};
 
 use axum::{
     body::to_bytes,
@@ -6,25 +6,33 @@ use axum::{
         ws::{close_code, CloseFrame, Message, WebSocket, WebSocketUpgrade},
         State,
     },
-    http::{header, HeaderMap, Method, StatusCode},
+    http::{header, HeaderMap, Method, StatusCode, Uri},
     response::IntoResponse,
 };
-use futures::StreamExt;
+use futures::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use specter::Message as UpstreamMessage;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, time::Instant};
 
 use crate::{
     adapter::responses_sse::ResponsesSseParser,
     route::{
+        dispatch::{plan_with_state, DispatchAction, RequestFormat},
         models::validate_codex_catalog_websocket_request,
-        responses::{
-            responses_route_for_alias, route_for_responses_model_with_resolver, ResponsesRoute,
-        },
+        responses::ResponsesRoute,
         responses_executor::{execute_responses_request, ExecuteResponsesOptions},
     },
     upstream, AppError, AppResult, AppState, UpstreamResponse,
 };
+
+pub const REALTIME_WS_HANDSHAKE_TIMEOUT_MS: u64 = 5000;
+pub const REALTIME_WS_HEARTBEAT_TIMEOUT_MS: u64 = 30000;
+pub const REALTIME_WS_MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+pub const REALTIME_WS_QUEUE_CAPACITY: usize = 32;
+pub const REALTIME_WS_QUEUE_SATURATION_TIMEOUT_MS: u64 = 2000;
+
+const OPENAI_PUBLIC_REALTIME_MODEL: &str = "gpt-realtime-2";
+const MISSING_CODEX_AUTH_MESSAGE: &str = "Missing Codex OAuth credentials at ~/.codex/auth.json.";
 
 pub async fn responses_ws(
     State(state): State<AppState>,
@@ -32,6 +40,18 @@ pub async fn responses_ws(
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| async move {
         proxy_responses_websocket(state, socket).await;
+    })
+}
+
+pub async fn realtime_ws(
+    State(state): State<AppState>,
+    uri: Uri,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    let query_result = validate_realtime_model_query(uri.query());
+    ws.on_upgrade(move |socket| async move {
+        proxy_realtime_websocket(state, headers, socket, query_result).await;
     })
 }
 
@@ -144,17 +164,469 @@ async fn proxy_responses_websocket(state: AppState, mut client: WebSocket) {
     }
 }
 
-async fn dispatch_responses_websocket(state: &AppState, client: &mut WebSocket) -> AppResult<()> {
-    let mut session = BridgeSessionState::default();
+async fn proxy_realtime_websocket(
+    state: AppState,
+    inbound_headers: HeaderMap,
+    client: WebSocket,
+    query_result: Result<&'static str, RealtimeWsLocalError>,
+) {
+    if let Err(error) =
+        dispatch_realtime_websocket(&state, &inbound_headers, client, query_result).await
+    {
+        tracing::warn!(error = %error, "Realtime WebSocket passthrough failed");
+    }
+}
+
+async fn dispatch_realtime_websocket(
+    state: &AppState,
+    inbound_headers: &HeaderMap,
+    client: WebSocket,
+    query_result: Result<&'static str, RealtimeWsLocalError>,
+) -> AppResult<()> {
+    let model = match query_result {
+        Ok(model) => model,
+        Err(error) => return send_realtime_error_and_close(client, error).await,
+    };
+    let upstream = match connect_public_openai_realtime_ws(state, inbound_headers, model).await {
+        Ok(upstream) => upstream,
+        Err(error) if matches!(error, AppError::MissingCredential(_)) => {
+            return send_realtime_error_and_close(client, realtime_auth_error(error)).await;
+        }
+        Err(_error) => {
+            return send_realtime_error_and_close(
+                client,
+                RealtimeWsLocalError::new(
+                    StatusCode::BAD_GATEWAY,
+                    "upstream_error",
+                    "upstream_realtime_websocket_handshake_failed",
+                    "Public OpenAI Realtime WebSocket handshake failed.",
+                    close_code::ERROR,
+                    "upstream realtime handshake failed",
+                ),
+            )
+            .await;
+        }
+    };
+
+    bridge_public_openai_realtime(client, upstream).await
+}
+
+async fn connect_public_openai_realtime_ws(
+    state: &AppState,
+    inbound_headers: &HeaderMap,
+    model: &str,
+) -> AppResult<specter::WebSocket> {
+    debug_assert_eq!(model, OPENAI_PUBLIC_REALTIME_MODEL);
+    let request =
+        upstream::openai_realtime::build_realtime_ws_request(state, inbound_headers, model)?;
+    let mut builder = state
+        .specter
+        .websocket(request.url)
+        .connect_timeout(Duration::from_millis(REALTIME_WS_HANDSHAKE_TIMEOUT_MS))
+        .handshake_timeout(Duration::from_millis(REALTIME_WS_HANDSHAKE_TIMEOUT_MS))
+        .max_frame_size(REALTIME_WS_MAX_FRAME_BYTES)
+        .max_message_size(REALTIME_WS_MAX_FRAME_BYTES);
+    for (name, value) in request.headers.iter() {
+        builder = builder.header(
+            name.as_str(),
+            value.to_str().map_err(|_| {
+                AppError::BadRequest(format!("invalid public OpenAI realtime header: {name}"))
+            })?,
+        );
+    }
+    builder.connect().await.map_err(|error| {
+        AppError::Upstream(format!(
+            "Public OpenAI Realtime WebSocket handshake failed: {error}"
+        ))
+    })
+}
+
+async fn bridge_public_openai_realtime(
+    client: WebSocket,
+    mut upstream: specter::WebSocket,
+) -> AppResult<()> {
+    let (mut client_sender, mut client_receiver) = client.split();
+    let heartbeat = tokio::time::sleep(Duration::from_millis(REALTIME_WS_HEARTBEAT_TIMEOUT_MS));
+    tokio::pin!(heartbeat);
+
     loop {
-        let Some(frame) = next_client_data_frame(client).await? else {
-            return Ok(());
-        };
-        let value = client_frame_json(frame)?;
-        if !dispatch_responses_client_event(state, client, &mut session, value).await? {
-            return Ok(());
+        tokio::select! {
+            _ = &mut heartbeat => {
+                let error = RealtimeWsLocalError::new(
+                    StatusCode::BAD_GATEWAY,
+                    "upstream_error",
+                    "realtime_heartbeat_timeout",
+                    "Public OpenAI Realtime WebSocket heartbeat timed out.",
+                    close_code::ERROR,
+                    "upstream realtime heartbeat timeout",
+                );
+                send_realtime_error_to_client_sender(&mut client_sender, &error).await?;
+                close_client_sender(&mut client_sender, error.close_code, error.close_reason).await?;
+                let _ = upstream.close(Some(specter::CloseFrame {
+                    code: specter::CloseCode::Error,
+                    reason: "heartbeat timeout".to_string(),
+                })).await;
+                return Ok(());
+            }
+            client_message = client_receiver.next() => {
+                let Some(client_message) = client_message else {
+                    let _ = upstream.close(None).await;
+                    return Ok(());
+                };
+                let client_message = client_message.map_err(|error| {
+                    AppError::Upstream(format!("client Realtime WebSocket read failed: {error}"))
+                })?;
+                if forward_realtime_client_message(client_message, &mut upstream, &mut client_sender).await? {
+                    return Ok(());
+                }
+            }
+            upstream_message = upstream.next() => {
+                heartbeat.as_mut().reset(Instant::now() + Duration::from_millis(REALTIME_WS_HEARTBEAT_TIMEOUT_MS));
+                match upstream_message {
+                    Ok(Some(upstream_message)) => {
+                        if forward_realtime_upstream_message(upstream_message, &mut client_sender).await? {
+                            return Ok(());
+                        }
+                    }
+                    Ok(None) => {
+                        close_client_sender(&mut client_sender, close_code::NORMAL, "upstream realtime closed").await?;
+                        return Ok(());
+                    }
+                    Err(_error) => {
+                        let error = RealtimeWsLocalError::new(
+                            StatusCode::BAD_GATEWAY,
+                            "upstream_error",
+                            "upstream_realtime_websocket_read_failed",
+                            "Public OpenAI Realtime WebSocket read failed.",
+                            close_code::ERROR,
+                            "upstream realtime read failed",
+                        );
+                        send_realtime_error_to_client_sender(&mut client_sender, &error).await?;
+                        close_client_sender(&mut client_sender, error.close_code, error.close_reason).await?;
+                        return Ok(());
+                    }
+                }
+            }
         }
     }
+}
+
+async fn forward_realtime_client_message(
+    message: Message,
+    upstream: &mut specter::WebSocket,
+    client_sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+) -> AppResult<bool> {
+    let upstream_message = match message {
+        Message::Text(text) => {
+            if text.len() > REALTIME_WS_MAX_FRAME_BYTES {
+                send_realtime_oversize_and_close(client_sender, upstream).await?;
+                return Ok(true);
+            }
+            UpstreamMessage::Text(text)
+        }
+        Message::Binary(bytes) => {
+            if bytes.len() > REALTIME_WS_MAX_FRAME_BYTES {
+                send_realtime_oversize_and_close(client_sender, upstream).await?;
+                return Ok(true);
+            }
+            UpstreamMessage::Binary(bytes.into())
+        }
+        Message::Ping(bytes) => UpstreamMessage::Ping(bytes.into()),
+        Message::Pong(bytes) => UpstreamMessage::Pong(bytes.into()),
+        Message::Close(frame) => {
+            let _ = upstream.close(to_upstream_close_frame(frame)).await;
+            return Ok(true);
+        }
+    };
+
+    send_upstream_with_saturation(upstream, upstream_message, client_sender).await?;
+    Ok(false)
+}
+
+async fn forward_realtime_upstream_message(
+    message: UpstreamMessage,
+    client_sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+) -> AppResult<bool> {
+    let client_message = match message {
+        UpstreamMessage::Text(text) => Message::Text(text),
+        UpstreamMessage::Binary(bytes) => Message::Binary(bytes.to_vec()),
+        UpstreamMessage::Ping(bytes) => Message::Ping(bytes.to_vec()),
+        UpstreamMessage::Pong(bytes) => Message::Pong(bytes.to_vec()),
+        UpstreamMessage::Close(frame) => {
+            close_client_sender(
+                client_sender,
+                close_code_from_upstream(frame.as_ref()),
+                close_reason_from_upstream(frame.as_ref()),
+            )
+            .await?;
+            return Ok(true);
+        }
+    };
+    send_client_with_saturation(client_sender, client_message).await?;
+    Ok(false)
+}
+
+async fn send_upstream_with_saturation(
+    upstream: &mut specter::WebSocket,
+    message: UpstreamMessage,
+    client_sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+) -> AppResult<()> {
+    match tokio::time::timeout(
+        Duration::from_millis(REALTIME_WS_QUEUE_SATURATION_TIMEOUT_MS),
+        upstream.send(message),
+    )
+    .await
+    {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => Err(AppError::Upstream(format!(
+            "Public OpenAI Realtime WebSocket send failed: {error}"
+        ))),
+        Err(_) => {
+            let error = realtime_queue_saturated_error();
+            send_realtime_error_to_client_sender(client_sender, &error).await?;
+            close_client_sender(client_sender, error.close_code, error.close_reason).await
+        }
+    }
+}
+
+async fn send_client_with_saturation(
+    client_sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    message: Message,
+) -> AppResult<()> {
+    match tokio::time::timeout(
+        Duration::from_millis(REALTIME_WS_QUEUE_SATURATION_TIMEOUT_MS),
+        client_sender.send(message),
+    )
+    .await
+    {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => Err(AppError::Upstream(format!(
+            "client Realtime WebSocket send failed: {error}"
+        ))),
+        Err(_) => Err(AppError::Upstream(
+            "client Realtime WebSocket send saturated".into(),
+        )),
+    }
+}
+
+async fn send_realtime_oversize_and_close(
+    client_sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    upstream: &mut specter::WebSocket,
+) -> AppResult<()> {
+    let error = RealtimeWsLocalError::new(
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "invalid_request_error",
+        "realtime_frame_too_large",
+        "Realtime WebSocket frame exceeds the supported size limit.",
+        close_code::SIZE,
+        "realtime frame too large",
+    );
+    send_realtime_error_to_client_sender(client_sender, &error).await?;
+    close_client_sender(client_sender, error.close_code, error.close_reason).await?;
+    let _ = upstream
+        .close(Some(specter::CloseFrame {
+            code: specter::CloseCode::Size,
+            reason: "frame too large".to_string(),
+        }))
+        .await;
+    Ok(())
+}
+
+async fn send_realtime_error_and_close(
+    client: WebSocket,
+    error: RealtimeWsLocalError,
+) -> AppResult<()> {
+    let (mut client_sender, _client_receiver) = client.split();
+    send_realtime_error_to_client_sender(&mut client_sender, &error).await?;
+    close_client_sender(&mut client_sender, error.close_code, error.close_reason).await
+}
+
+async fn send_realtime_error_to_client_sender(
+    client_sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    error: &RealtimeWsLocalError,
+) -> AppResult<()> {
+    client_sender
+        .send(Message::Text(error.frame().to_string()))
+        .await
+        .map_err(|send_error| {
+            AppError::Upstream(format!(
+                "client Realtime WebSocket error send failed: {send_error}"
+            ))
+        })
+}
+
+async fn close_client_sender(
+    client_sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    code: u16,
+    reason: &'static str,
+) -> AppResult<()> {
+    client_sender
+        .send(Message::Close(Some(CloseFrame {
+            code,
+            reason: Cow::Borrowed(reason),
+        })))
+        .await
+        .map_err(|error| {
+            AppError::Upstream(format!("client Realtime WebSocket close failed: {error}"))
+        })
+}
+
+fn validate_realtime_model_query(
+    query: Option<&str>,
+) -> Result<&'static str, RealtimeWsLocalError> {
+    let Some(query) = query.filter(|query| !query.is_empty()) else {
+        return Err(invalid_realtime_model_query(
+            "model query parameter is required.",
+        ));
+    };
+    let mut model = None;
+    for pair in query.split('&') {
+        let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if name != "model" {
+            return Err(invalid_realtime_model_query(
+                "Only the model query parameter is supported.",
+            ));
+        }
+        if model.replace(value).is_some() {
+            return Err(invalid_realtime_model_query(
+                "model query parameter must appear exactly once.",
+            ));
+        }
+    }
+    match model {
+        Some(OPENAI_PUBLIC_REALTIME_MODEL) => Ok(OPENAI_PUBLIC_REALTIME_MODEL),
+        Some("") | None => Err(invalid_realtime_model_query(
+            "model query parameter must be non-empty.",
+        )),
+        Some(other) => Err(RealtimeWsLocalError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "model_not_supported",
+            format!("model is not supported for Realtime WebSocket: {other}"),
+            close_code::POLICY,
+            "unsupported realtime model",
+        )),
+    }
+}
+
+fn invalid_realtime_model_query(message: impl Into<String>) -> RealtimeWsLocalError {
+    RealtimeWsLocalError::new(
+        StatusCode::BAD_REQUEST,
+        "invalid_request_error",
+        "invalid_realtime_model_query",
+        message,
+        close_code::POLICY,
+        "invalid realtime model query",
+    )
+}
+
+fn realtime_auth_error(error: AppError) -> RealtimeWsLocalError {
+    match error {
+        AppError::MissingCredential(message)
+            if message.contains("codex")
+                || message.contains("Codex")
+                || message.contains(".codex") =>
+        {
+            RealtimeWsLocalError::new(
+                StatusCode::UNAUTHORIZED,
+                "authentication_error",
+                "invalid_api_key",
+                MISSING_CODEX_AUTH_MESSAGE,
+                close_code::ERROR,
+                "missing Codex auth",
+            )
+        }
+        other => RealtimeWsLocalError::new(
+            other.status(),
+            other.error_type(),
+            other.code().unwrap_or(other.error_type()),
+            other.to_string(),
+            close_code_for_error(&other),
+            "realtime auth failed",
+        ),
+    }
+}
+
+fn realtime_queue_saturated_error() -> RealtimeWsLocalError {
+    RealtimeWsLocalError::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "upstream_error",
+        "realtime_proxy_queue_saturated",
+        "Realtime WebSocket proxy queue was saturated.",
+        close_code::AGAIN,
+        "realtime proxy queue saturated",
+    )
+}
+
+struct RealtimeWsLocalError {
+    status: StatusCode,
+    error_type: &'static str,
+    code: &'static str,
+    message: String,
+    close_code: u16,
+    close_reason: &'static str,
+}
+
+impl RealtimeWsLocalError {
+    fn new(
+        status: StatusCode,
+        error_type: &'static str,
+        code: &'static str,
+        message: impl Into<String>,
+        close_code: u16,
+        close_reason: &'static str,
+    ) -> Self {
+        Self {
+            status,
+            error_type,
+            code,
+            message: message.into(),
+            close_code,
+            close_reason,
+        }
+    }
+
+    fn frame(&self) -> Value {
+        json!({
+            "type": "error",
+            "status": self.status.as_u16(),
+            "error": {
+                "type": self.error_type,
+                "code": self.code,
+                "message": self.message,
+                "param": null,
+            }
+        })
+    }
+}
+
+impl std::fmt::Display for RealtimeWsLocalError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.message)
+    }
+}
+
+impl std::fmt::Debug for RealtimeWsLocalError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RealtimeWsLocalError")
+            .field("status", &self.status)
+            .field("error_type", &self.error_type)
+            .field("code", &self.code)
+            .finish_non_exhaustive()
+    }
+}
+
+fn close_code_from_upstream(frame: Option<&specter::CloseFrame>) -> u16 {
+    frame
+        .map(|frame| frame.code.as_u16())
+        .filter(|code| (1000..=4999).contains(code))
+        .unwrap_or(close_code::NORMAL)
+}
+
+fn close_reason_from_upstream(frame: Option<&specter::CloseFrame>) -> &'static str {
+    let _ = frame;
+    "upstream realtime closed"
 }
 
 enum ClientDataFrame {
@@ -190,13 +662,12 @@ fn client_frame_json(frame: ClientDataFrame) -> AppResult<Value> {
 
 fn ensure_responses_websocket_capable(state: &AppState, value: &Value) -> AppResult<()> {
     let request = responses_request_body(value)?;
-    match route_for_responses_model_with_resolver(request, |model| {
-        state.resolve_model_for_format(model, "responses")
-    })? {
-        ResponsesRoute::CodexResponses => Ok(()),
-        ResponsesRoute::BedrockMessages | ResponsesRoute::GoogleGenerateContent { .. } => Err(
-            AppError::ModelNotSupported(required_model(request)?.to_string()),
-        ),
+    let plan = plan_with_state(state, RequestFormat::Responses, request)?;
+    match plan.action {
+        DispatchAction::CodexResponses => Ok(()),
+        DispatchAction::BedrockAnthropicMessages | DispatchAction::GoogleGenerateContent => {
+            Err(AppError::ModelNotSupported(plan.requested_model))
+        }
     }
 }
 
@@ -205,13 +676,6 @@ fn responses_request_body(value: &Value) -> AppResult<&Value> {
         return Ok(value.get("response").unwrap_or(value));
     }
     Ok(value)
-}
-
-fn required_model(value: &Value) -> AppResult<&str> {
-    value
-        .get("model")
-        .and_then(Value::as_str)
-        .ok_or_else(|| AppError::BadRequest("missing model".into()))
 }
 
 fn close_code_for_error(error: &AppError) -> u16 {
@@ -232,6 +696,7 @@ struct BridgeRouteFingerprint {
     route: ResponsesRoute,
     model: String,
     upstream_model: String,
+    target_format: String,
 }
 
 #[derive(Default)]
@@ -339,13 +804,20 @@ async fn resolve_bridge_route(
     state: &AppState,
     request: &Value,
 ) -> AppResult<BridgeRouteFingerprint> {
-    let model = required_model(request)?.to_string();
-    let alias = state.resolve_model_for_format(&model, "responses")?;
-    let route = responses_route_for_alias(&model, &alias)?;
+    let plan = plan_with_state(state, RequestFormat::Responses, request)?;
+    let route = match plan.action {
+        DispatchAction::CodexResponses => ResponsesRoute::CodexResponses,
+        DispatchAction::BedrockAnthropicMessages => ResponsesRoute::BedrockMessages,
+        DispatchAction::GoogleGenerateContent => ResponsesRoute::GoogleGenerateContent {
+            upstream_model: plan.target.upstream_model.clone(),
+        },
+    };
+    let target_format = plan.target.target_format.as_str().to_string();
     Ok(BridgeRouteFingerprint {
         route,
-        model,
-        upstream_model: alias.upstream_model,
+        model: plan.requested_model,
+        upstream_model: plan.target.upstream_model,
+        target_format,
     })
 }
 
@@ -431,7 +903,7 @@ fn prepare_bridge_request(
         Some(Value::String(value)) => value.clone(),
         Some(_) => {
             return Err(BridgePolicyError::new(
-                "invalid_previous_response_id",
+                "previous_response_field_mismatch",
                 "previous_response_id must be a string",
             ));
         }
@@ -443,6 +915,15 @@ fn prepare_bridge_request(
         ));
     };
 
+    if prior.fingerprint.target_format != fingerprint.target_format {
+        return Err(BridgePolicyError::new(
+            "previous_response_target_format_mismatch",
+            format!(
+                "previous_response_id belongs to target format {}, not {}",
+                prior.fingerprint.target_format, fingerprint.target_format
+            ),
+        ));
+    }
     if bridge_route_lane(&prior.fingerprint.route) != bridge_route_lane(&fingerprint.route) {
         return Err(BridgePolicyError::new(
             "previous_response_route_mismatch",
@@ -1327,11 +1808,64 @@ fn to_client_close_frame(frame: Option<specter::CloseFrame>) -> Option<CloseFram
     })
 }
 
+async fn dispatch_responses_websocket(state: &AppState, client: &mut WebSocket) -> AppResult<()> {
+    let mut session = BridgeSessionState::default();
+    loop {
+        let Some(frame) = next_client_data_frame(client).await? else {
+            return Ok(());
+        };
+        let value = client_frame_json(frame)?;
+        if !dispatch_responses_client_event(state, client, &mut session, value).await? {
+            return Ok(());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use axum::{body::Bytes, http::HeaderValue};
 
     use super::*;
+
+    #[test]
+    fn realtime_ws_accepts_only_single_gpt_realtime_2_model_query() {
+        assert_eq!(
+            validate_realtime_model_query(Some("model=gpt-realtime-2")).unwrap(),
+            OPENAI_PUBLIC_REALTIME_MODEL
+        );
+
+        for query in [
+            None,
+            Some(""),
+            Some("model="),
+            Some("model=gpt-realtime-2&model=gpt-realtime-2"),
+        ] {
+            let error = validate_realtime_model_query(query).unwrap_err();
+            assert_eq!(error.status, StatusCode::BAD_REQUEST);
+            assert_eq!(error.error_type, "invalid_request_error");
+            assert_eq!(error.code, "invalid_realtime_model_query");
+            assert_eq!(error.close_code, close_code::POLICY);
+        }
+
+        let error = validate_realtime_model_query(Some("model=gpt-realtime")).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.error_type, "invalid_request_error");
+        assert_eq!(error.code, "model_not_supported");
+        assert_eq!(error.close_code, close_code::POLICY);
+    }
+
+    #[test]
+    fn realtime_ws_missing_codex_auth_error_is_sanitized_openai_shape() {
+        let error = realtime_auth_error(AppError::MissingCredential("~/.codex/auth.json"));
+        let frame = error.frame();
+
+        assert_eq!(frame["type"], "error");
+        assert_eq!(frame["status"], 401);
+        assert_eq!(frame["error"]["type"], "authentication_error");
+        assert_eq!(frame["error"]["code"], "invalid_api_key");
+        assert_eq!(frame["error"]["message"], MISSING_CODEX_AUTH_MESSAGE);
+        assert!(frame["error"]["param"].is_null());
+    }
 
     #[tokio::test]
     async fn bridge_stream_eof_after_created_emits_response_failed() {
@@ -1473,6 +2007,7 @@ mod tests {
                 route: ResponsesRoute::BedrockMessages,
                 model: "claude-opus-4-7".into(),
                 upstream_model: "anthropic.claude-opus-4-7".into(),
+                target_format: "responses".into(),
             },
             response_id: "resp_prior".into(),
             full_request: json!({
@@ -1489,6 +2024,7 @@ mod tests {
             route: ResponsesRoute::CodexResponses,
             model: "gpt-5.5".into(),
             upstream_model: "gpt-5.5".into(),
+            target_format: "responses".into(),
         };
 
         let prepared = prepare_bridge_request(request, &fingerprint, &session).unwrap();
@@ -1509,11 +2045,12 @@ mod tests {
             route: ResponsesRoute::CodexResponses,
             model: "gpt-5.5".into(),
             upstream_model: "gpt-5.5".into(),
+            target_format: "responses".into(),
         };
 
         let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
 
-        assert_eq!(error.code, "invalid_previous_response_id");
+        assert_eq!(error.code, "previous_response_field_mismatch");
     }
 
     #[test]
@@ -1528,11 +2065,12 @@ mod tests {
             route: ResponsesRoute::CodexResponses,
             model: "gpt-5.5".into(),
             upstream_model: "gpt-5.5".into(),
+            target_format: "responses".into(),
         };
 
         let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
 
-        assert_eq!(error.code, "invalid_previous_response_id");
+        assert_eq!(error.code, "previous_response_field_mismatch");
     }
 
     #[test]
@@ -1547,6 +2085,7 @@ mod tests {
             route: ResponsesRoute::CodexResponses,
             model: "gpt-5.5".into(),
             upstream_model: "gpt-5.5".into(),
+            target_format: "responses".into(),
         };
 
         let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
@@ -1562,6 +2101,7 @@ mod tests {
                 route: ResponsesRoute::BedrockMessages,
                 model: "claude-opus-4-7".into(),
                 upstream_model: "anthropic.claude-opus-4-7".into(),
+                target_format: "responses".into(),
             },
             response_id: "resp_prewarm".into(),
             full_request: json!({
@@ -1579,6 +2119,7 @@ mod tests {
             route: ResponsesRoute::BedrockMessages,
             model: "claude-sonnet-4-7".into(),
             upstream_model: "anthropic.claude-sonnet-4-7".into(),
+            target_format: "responses".into(),
         };
 
         let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
@@ -1594,6 +2135,7 @@ mod tests {
                 route: ResponsesRoute::BedrockMessages,
                 model: "claude-opus-4-7".into(),
                 upstream_model: "anthropic.claude-opus-4-7".into(),
+                target_format: "responses".into(),
             },
             response_id: "resp_prewarm".into(),
             full_request: json!({
@@ -1612,11 +2154,51 @@ mod tests {
             route: ResponsesRoute::CodexResponses,
             model: "gpt-5.5".into(),
             upstream_model: "gpt-5.5".into(),
+            target_format: "responses".into(),
         };
 
         let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
 
         assert_eq!(error.code, "previous_response_route_mismatch");
+    }
+
+    #[test]
+    fn bridge_previous_response_id_rejects_target_format_mismatch() {
+        let mut session = BridgeSessionState::default();
+        session.record(BridgeResponseState {
+            fingerprint: BridgeRouteFingerprint {
+                route: ResponsesRoute::GoogleGenerateContent {
+                    upstream_model: "gemini-3.1-flash-lite".into(),
+                },
+                model: "facade-google-model".into(),
+                upstream_model: "gemini-3.1-flash-lite".into(),
+                target_format: "responses".into(),
+            },
+            response_id: "resp_prewarm".into(),
+            full_request: json!({
+                "model": "facade-google-model",
+                "input": "warm",
+                "generate": false
+            }),
+            output_item_done_items: Vec::new(),
+        });
+        let request = json!({
+            "model": "facade-google-model",
+            "input": [],
+            "previous_response_id": "resp_prewarm"
+        });
+        let fingerprint = BridgeRouteFingerprint {
+            route: ResponsesRoute::GoogleGenerateContent {
+                upstream_model: "gemini-3.1-flash-lite".into(),
+            },
+            model: "facade-google-model".into(),
+            upstream_model: "gemini-3.1-flash-lite".into(),
+            target_format: "google_generate_content".into(),
+        };
+
+        let error = prepare_bridge_request(request, &fingerprint, &session).unwrap_err();
+
+        assert_eq!(error.code, "previous_response_target_format_mismatch");
     }
 
     #[test]
@@ -1626,6 +2208,7 @@ mod tests {
             route: ResponsesRoute::CodexResponses,
             model: "gpt-5.5".into(),
             upstream_model: "gpt-5.5".into(),
+            target_format: "responses".into(),
         };
         for index in 0..=BRIDGE_RESPONSE_STATE_LIMIT {
             session.record(BridgeResponseState {

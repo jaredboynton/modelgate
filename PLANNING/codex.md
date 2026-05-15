@@ -207,6 +207,23 @@ Known gotchas to handle in v2:
 - Public-only OpenAI features, including routes without Codex scopes or adapter
   semantics, fail closed until they have an explicit provider and tests.
 
+## Realtime and Audio Facade Status
+
+`/v1/realtime`, `/v1/realtime/transcription_sessions`, and
+`/v1/audio/transcriptions` are the only public OpenAI realtime/audio surfaces
+currently allowed to attempt Codex OAuth bearer forwarding. The upstream base is
+hardcoded to `https://api.openai.com` for HTTP and converted to
+`wss://api.openai.com` for realtime WebSocket. This is a known limitation, not a
+general `public-openai` provider: alternate public OpenAI base URLs, API-key
+auth, and non-Codex credentials remain out of scope until a separately
+configured provider exists.
+
+Live validation for those routes is `live-blocked` by default. The registered
+live smoke tests stay ignored unless `UMP_V2_LIVE_CODEX_REALTIME_AUDIO=1`,
+local Codex OAuth auth, and any required audio fixture env are present. Normal
+CI should rely on the local contract tests and must not claim full public
+OpenAI realtime/audio parity.
+
 ## Quick V2 Checklist
 
 When wiring the Codex adapter in v2:

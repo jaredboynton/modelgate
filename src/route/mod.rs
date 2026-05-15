@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod chat;
 pub mod config;
+pub mod dispatch;
 pub mod google;
 pub mod health;
 pub mod images;

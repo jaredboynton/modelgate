@@ -4,6 +4,7 @@ use std::fs;
 
 use unified_model_proxy_v2::failure_capture::{
     failure_dir, failure_path, generate_request_id, list_failure_filenames, redact_failure_value,
+    write_failure_json,
 };
 
 #[test]
@@ -59,6 +60,87 @@ fn redacts_sensitive_headers_tokens_and_base64_image_payloads() {
     assert_eq!(value["refresh_token"], "[redacted]");
     assert_eq!(value["input"][0]["image"]["b64_json"], "[redacted]");
     assert_eq!(value["input"][0]["inline_data"]["data"], "[redacted]");
+}
+
+#[test]
+fn serialized_failure_json_does_not_leak_live_sensitive_payload_classes() {
+    let homes = common::TestHomes::new();
+    let leaked_values = [
+        "fake-access-token-lane-5",
+        "fake-refresh-token-lane-5",
+        "fake-id-token-lane-5",
+        "Bearer fake-bearer-token-lane-5",
+        "session=fake-cookie-lane-5",
+        "fake-api-key-lane-5",
+        "fake-client-secret-lane-5",
+        "acct_fake_chatgpt_lane_5",
+        "secret_query_lane_5",
+        "v=0\r\no=- 46117326 2 IN IP4 127.0.0.1\r\ns=fake-sdp-offer-lane-5",
+        "fake-audio-bytes-lane-5",
+        "fake multipart body lane 5",
+        "ZmFrZS1iYXNlNjQtcGF5bG9hZC1sYW5lLTU=",
+        "fake transcript text lane 5",
+        "fake transcript delta lane 5",
+    ];
+    let path = write_failure_json(
+        &homes.state,
+        "req-redaction",
+        "codex-realtime",
+        serde_json::json!({
+            "headers": {
+                "Authorization": "Bearer fake-bearer-token-lane-5",
+                "cookie": "session=fake-cookie-lane-5",
+                "x-api-key": "fake-api-key-lane-5",
+                "ChatGPT-Account-Id": "acct_fake_chatgpt_lane_5"
+            },
+            "tokens": {
+                "access_token": "fake-access-token-lane-5",
+                "refresh_token": "fake-refresh-token-lane-5",
+                "id_token": "fake-id-token-lane-5",
+                "client_secret": "fake-client-secret-lane-5",
+                "bearer": "Bearer fake-bearer-token-lane-5"
+            },
+            "account_id": "acct_fake_chatgpt_lane_5",
+            "urls": [
+                "wss://chatgpt.com/backend-api/codex/responses?access_token=secret_query_lane_5",
+                "https://api.openai.com/v1/realtime?api_key=secret_query_lane_5"
+            ],
+            "realtime": {
+                "offer": "v=0\r\no=- 46117326 2 IN IP4 127.0.0.1\r\ns=fake-sdp-offer-lane-5",
+                "answer_sdp": "v=0\r\ns=fake-sdp-answer-lane-5",
+                "audio_bytes": "fake-audio-bytes-lane-5",
+                "input_audio_buffer": {"audio": "fake-audio-bytes-lane-5"}
+            },
+            "multipart_body": "fake multipart body lane 5",
+            "base64_payload": "ZmFrZS1iYXNlNjQtcGF5bG9hZC1sYW5lLTU=",
+            "transcript": {
+                "text": "fake transcript text lane 5",
+                "delta": "fake transcript delta lane 5"
+            }
+        }),
+    )
+    .unwrap();
+
+    let serialized = fs::read_to_string(path).unwrap();
+    for leaked_value in leaked_values {
+        assert!(
+            !serialized.contains(leaked_value),
+            "serialized failure JSON leaked {leaked_value:?}: {serialized}"
+        );
+    }
+}
+
+#[test]
+fn common_live_assertions_catch_fake_sensitive_sentinels() {
+    let output = "status=500 fake-access-token-lane-5";
+
+    assert!(
+        std::panic::catch_unwind(|| common::assert_no_unredacted_sensitive_values(output)).is_err()
+    );
+    assert_eq!(
+        common::redact_sensitive_values(output),
+        "status=500 [REDACTED]"
+    );
 }
 
 #[test]

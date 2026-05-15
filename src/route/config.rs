@@ -1,93 +1,163 @@
-use axum::{body::Bytes, extract::State, response::Html, Json};
+use axum::{
+    body::Bytes,
+    extract::State,
+    http::{header, HeaderMap, HeaderValue, StatusCode},
+    response::{Html, IntoResponse, Response},
+    Json,
+};
 use serde_json::{json, Value};
 
-use crate::{AppResult, AppState};
+use crate::{config_graph, error::openai_error_body, AppError, AppState};
 
-pub async fn config_page(State(state): State<AppState>) -> AppResult<Html<String>> {
-    let config = state.routing_config.read_json()?;
-    let pretty = serde_json::to_string_pretty(&config)?;
-    Ok(Html(render_config_page(&pretty)))
+const CONFIG_CSP: &str = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'";
+const CONFIG_HTML: &str = include_str!("../assets/config/page.html");
+const CONFIG_CSS: &str = include_str!("../assets/config/config.css");
+const CONFIG_JS: &str = include_str!("../assets/config/config.js");
+
+pub async fn config_page() -> Response {
+    html_response(CONFIG_HTML)
 }
 
-pub async fn get_config(State(state): State<AppState>) -> AppResult<Json<Value>> {
-    Ok(Json(state.routing_config.read_json()?))
+pub async fn config_css() -> Response {
+    static_response("text/css; charset=utf-8", CONFIG_CSS)
 }
 
-pub async fn put_config(State(state): State<AppState>, body: Bytes) -> AppResult<Json<Value>> {
-    let config: Value = serde_json::from_slice(&body)?;
-    state.routing_config.write_json(&config)?;
-    Ok(Json(json!({
-        "ok": true,
-        "config": config,
-    })))
+pub async fn config_js() -> Response {
+    static_response("application/javascript; charset=utf-8", CONFIG_JS)
 }
 
-fn render_config_page(config_json: &str) -> String {
-    format!(
-        r#"<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Unified Model Proxy v2 Config</title>
-  <style>
-    body {{ margin: 0; padding: 32px; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #111827; color: #f9fafb; }}
-    main {{ max-width: 960px; margin: 0 auto; }}
-    textarea {{ box-sizing: border-box; width: 100%; min-height: 440px; padding: 16px; border: 1px solid #374151; border-radius: 12px; background: #030712; color: #d1fae5; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }}
-    button {{ margin-top: 12px; padding: 10px 14px; border: 0; border-radius: 10px; background: #10b981; color: #022c22; font-weight: 700; cursor: pointer; }}
-    .row {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; }}
-    .hint, #status {{ color: #9ca3af; }}
-    code {{ color: #93c5fd; }}
-  </style>
-</head>
-<body>
-  <main>
-    <div class="row">
-      <div>
-        <h1>Unified Model Proxy v2</h1>
-        <p class="hint">Edit hot routing JSON. Saves to <code>/api/config</code> and affects the next request.</p>
-      </div>
-      <button id="save" type="button">Save config</button>
-    </div>
-    <textarea id="config" spellcheck="false">{}</textarea>
-    <p id="status">Ready.</p>
-  </main>
-  <script>
-    const textarea = document.getElementById('config');
-    const status = document.getElementById('status');
-    document.getElementById('save').addEventListener('click', async () => {{
-      status.textContent = 'Saving...';
-      let parsed;
-      try {{
-        parsed = JSON.parse(textarea.value);
-      }} catch (error) {{
-        status.textContent = `Invalid JSON: ${{error.message}}`;
-        return;
-      }}
-      const response = await fetch('/api/config', {{
-        method: 'PUT',
-        headers: {{ 'content-type': 'application/json' }},
-        body: JSON.stringify(parsed),
-      }});
-      const body = await response.json().catch(() => ({{}}));
-      if (!response.ok) {{
-        status.textContent = body.error?.message || `Save failed: ${{response.status}}`;
-        return;
-      }}
-      textarea.value = JSON.stringify(body.config, null, 2);
-      status.textContent = 'Saved. New routing applies to the next request.';
-    }});
-  </script>
-</body>
-</html>"#,
-        escape_html(config_json)
+pub async fn get_config(State(state): State<AppState>) -> Response {
+    json_result_response(state.routing_config.read_json())
+}
+
+pub async fn put_config(State(state): State<AppState>, body: Bytes) -> Response {
+    let config: Value = match serde_json::from_slice(&body) {
+        Ok(config) => config,
+        Err(error) => return invalid_routing_config_response(error.to_string()),
+    };
+
+    if let Err(error) = state.routing_config.write_json(&config) {
+        return routing_config_error_response(error);
+    }
+
+    json_response(
+        StatusCode::OK,
+        json!({
+            "ok": true,
+            "config": config,
+        }),
     )
 }
 
-fn escape_html(input: &str) -> String {
-    input
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
+pub async fn get_config_graph(State(state): State<AppState>) -> Response {
+    match state.routing_config.read_json() {
+        Ok(config) => graph_response(config),
+        Err(error) => routing_config_error_response(error),
+    }
+}
+
+pub async fn post_config_graph(body: Bytes) -> Response {
+    let draft: Value = match serde_json::from_slice(&body) {
+        Ok(draft) => draft,
+        Err(_) => return sanitized_invalid_routing_config_response(),
+    };
+    sanitized_graph_response(draft)
+}
+
+fn html_response(html: &'static str) -> Response {
+    let mut response = Html(html).into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    response.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(CONFIG_CSP),
+    );
+    add_admin_headers(response.headers_mut());
+    response
+}
+
+fn static_response(content_type: &'static str, body: &'static str) -> Response {
+    let mut response = body.into_response();
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    add_admin_headers(response.headers_mut());
+    response
+}
+
+fn json_result_response(result: Result<Value, AppError>) -> Response {
+    match result {
+        Ok(value) => json_response(StatusCode::OK, value),
+        Err(error) => routing_config_error_response(error),
+    }
+}
+
+fn json_response(status: StatusCode, body: Value) -> Response {
+    let mut response = (status, Json(body)).into_response();
+    add_admin_headers(response.headers_mut());
+    response
+}
+
+fn routing_config_error_response(error: AppError) -> Response {
+    match error {
+        AppError::BadRequest(message) => invalid_routing_config_response(message),
+        AppError::Json(error) => invalid_routing_config_response(error.to_string()),
+        other => {
+            let status = other.status();
+            let body = openai_error_body(other.to_string(), other.error_type(), None, other.code());
+            json_response(status, body)
+        }
+    }
+}
+
+fn invalid_routing_config_response(message: String) -> Response {
+    json_response(
+        StatusCode::BAD_REQUEST,
+        openai_error_body(
+            format!("invalid routing config: {message}"),
+            "invalid_request_error",
+            None,
+            Some("invalid_routing_config"),
+        ),
+    )
+}
+
+fn sanitized_invalid_routing_config_response() -> Response {
+    json_response(
+        StatusCode::BAD_REQUEST,
+        openai_error_body(
+            "invalid routing config",
+            "invalid_request_error",
+            None,
+            Some("invalid_routing_config"),
+        ),
+    )
+}
+
+fn add_admin_headers(headers: &mut HeaderMap) {
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+}
+
+fn graph_response(raw_hot_config: Value) -> Response {
+    match config_graph::build_config_graph(raw_hot_config)
+        .and_then(|graph| serde_json::to_value(graph).map_err(AppError::Json))
+    {
+        Ok(graph) => json_response(StatusCode::OK, graph),
+        Err(error) => routing_config_error_response(error),
+    }
+}
+
+fn sanitized_graph_response(raw_hot_config: Value) -> Response {
+    match config_graph::build_config_graph(raw_hot_config)
+        .and_then(|graph| serde_json::to_value(graph).map_err(AppError::Json))
+    {
+        Ok(graph) => json_response(StatusCode::OK, graph),
+        Err(_) => sanitized_invalid_routing_config_response(),
+    }
 }

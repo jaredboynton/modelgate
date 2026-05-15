@@ -5,6 +5,25 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use unified_model_proxy_v2::AppState;
 
+const FAKE_SENSITIVE_SENTINELS: &[&str] = &[
+    "fake-access-token-lane-5",
+    "fake-refresh-token-lane-5",
+    "fake-id-token-lane-5",
+    "fake-bearer-token-lane-5",
+    "fake-cookie-lane-5",
+    "fake-api-key-lane-5",
+    "fake-client-secret-lane-5",
+    "acct_fake_chatgpt_lane_5",
+    "secret_query_lane_5",
+    "fake-sdp-offer-lane-5",
+    "fake-sdp-answer-lane-5",
+    "fake-audio-bytes-lane-5",
+    "fake multipart body lane 5",
+    "ZmFrZS1iYXNlNjQtcGF5bG9hZC1sYW5lLTU=",
+    "fake transcript text lane 5",
+    "fake transcript delta lane 5",
+];
+
 pub struct TestHomes {
     _temp: TempDir,
     pub state: AppState,
@@ -51,6 +70,9 @@ pub fn optional_env(name: &str) -> Option<String> {
 
 pub fn redact_sensitive_values(text: &str) -> String {
     let mut redacted = text.to_string();
+    for value in FAKE_SENSITIVE_SENTINELS {
+        redacted = redacted.replace(value, "[REDACTED]");
+    }
     for name in [
         "AWS_BEARER_TOKEN_BEDROCK",
         "GOOGLE_API_KEY",
@@ -66,6 +88,13 @@ pub fn redact_sensitive_values(text: &str) -> String {
 }
 
 pub fn assert_no_unredacted_sensitive_values(text: &str) {
+    for value in FAKE_SENSITIVE_SENTINELS {
+        assert!(
+            !text.contains(value),
+            "output leaked fake sensitive sentinel {value:?}"
+        );
+    }
+
     for name in [
         "AWS_BEARER_TOKEN_BEDROCK",
         "GOOGLE_API_KEY",

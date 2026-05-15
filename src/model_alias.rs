@@ -23,12 +23,95 @@ pub struct ResolvedModel {
     pub upstream_model: String,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceFormat {
+    Responses,
+    AnthropicMessages,
+    ChatCompletions,
+    GoogleGenerateContent,
+    OpenaiImages,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetFormat {
+    Responses,
+    AnthropicMessages,
+    GoogleGenerateContent,
+    OpenaiImages,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+pub struct ResolvedTarget {
+    pub provider: Provider,
+    pub upstream_model: String,
+    pub target_format: TargetFormat,
+}
+
 impl From<ModelAlias> for ResolvedModel {
     fn from(alias: ModelAlias) -> Self {
         Self {
             provider: alias.provider,
             upstream_model: alias.upstream_model.to_string(),
         }
+    }
+}
+
+impl From<ResolvedTarget> for ResolvedModel {
+    fn from(target: ResolvedTarget) -> Self {
+        Self {
+            provider: target.provider,
+            upstream_model: target.upstream_model,
+        }
+    }
+}
+
+impl Provider {
+    pub fn default_target_format(self) -> Option<TargetFormat> {
+        match self {
+            Provider::Bedrock => Some(TargetFormat::AnthropicMessages),
+            Provider::Codex => Some(TargetFormat::Responses),
+            Provider::Google => Some(TargetFormat::GoogleGenerateContent),
+            Provider::Unsupported => None,
+        }
+    }
+}
+
+impl SourceFormat {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Responses => "responses",
+            Self::AnthropicMessages => "anthropic_messages",
+            Self::ChatCompletions => "chat_completions",
+            Self::GoogleGenerateContent => "google_generate_content",
+            Self::OpenaiImages => "openai_images",
+        }
+    }
+}
+
+impl TargetFormat {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Responses => "responses",
+            Self::AnthropicMessages => "anthropic_messages",
+            Self::GoogleGenerateContent => "google_generate_content",
+            Self::OpenaiImages => "openai_images",
+        }
+    }
+}
+
+impl ResolvedTarget {
+    pub fn from_resolved_model(model: ResolvedModel, requested_model: &str) -> AppResult<Self> {
+        let target_format = model
+            .provider
+            .default_target_format()
+            .ok_or_else(|| AppError::ModelNotSupported(requested_model.to_string()))?;
+        Ok(Self {
+            provider: model.provider,
+            upstream_model: model.upstream_model,
+            target_format,
+        })
     }
 }
 
@@ -265,6 +348,10 @@ pub fn resolve_model_required(input: &str) -> AppResult<ResolvedModel> {
     resolve_model(input)
         .map(ResolvedModel::from)
         .ok_or_else(|| AppError::ModelNotSupported(input.into()))
+}
+
+pub fn resolve_target_required(input: &str) -> AppResult<ResolvedTarget> {
+    ResolvedTarget::from_resolved_model(resolve_model_required(input)?, input)
 }
 
 fn lookup_exact(input: &str) -> Option<ModelAlias> {

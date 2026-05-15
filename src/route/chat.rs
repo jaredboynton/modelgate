@@ -8,8 +8,14 @@ use crate::{
     adapter::anthropic_responses::{
         chat_completions_to_responses, responses_to_anthropic_messages,
     },
-    model_alias::{resolve_model_required, Provider, ResolvedModel},
-    route::models::validate_codex_catalog_request,
+    model_alias::{resolve_model_required, ResolvedTarget},
+    route::{
+        dispatch::{
+            plan_for_target, plan_with_resolver, plan_with_state, resolve_planned_model,
+            DispatchAction, DispatchEdge, RequestFormat,
+        },
+        models::validate_codex_catalog_request,
+    },
     upstream, AppError, AppResult, AppState, UpstreamResponse,
 };
 
@@ -25,22 +31,29 @@ pub async fn chat_completions(
     body: Bytes,
 ) -> AppResult<UpstreamResponse> {
     let value = serde_json::from_slice(&body)?;
-    let model = required_model(&value)?;
-    let alias = state.resolve_model_for_format(model, "chat_completions")?;
-    match chat_route_for_alias(model, &alias)? {
-        ChatRoute::CodexResponses => {
-            let upstream_model = alias.upstream_model.clone();
+    let plan = plan_with_state(&state, RequestFormat::ChatCompletions, &value)?;
+    match plan.action {
+        DispatchAction::CodexResponses => {
+            let upstream_model = plan.target.upstream_model.clone();
             let responses = chat_completions_to_responses(value)?;
             let prepared =
                 upstream::codex::prepare_responses_body_with_resolver(responses, |model| {
-                    state.resolve_model_for_format(model, "chat_completions")
+                    resolve_planned_model(&plan, model, |model| {
+                        state.resolve_model_for_format(
+                            model,
+                            RequestFormat::ChatCompletions.as_str(),
+                        )
+                    })
                 })?;
             validate_codex_catalog_request(&state, &prepared, &upstream_model).await?;
             codex_response_bytes(upstream::codex::responses_prepared(&state, prepared).await?)
         }
-        ChatRoute::BedrockMessages => {
+        DispatchAction::BedrockAnthropicMessages => {
             let messages = responses_to_anthropic_messages(chat_completions_to_responses(value)?)?;
             upstream::bedrock::forward_messages_response(&state, messages, headers).await
+        }
+        DispatchAction::GoogleGenerateContent => {
+            Err(AppError::ModelNotSupported(plan.requested_model))
         }
     }
 }
@@ -51,35 +64,35 @@ pub fn route_for_chat_model(value: &serde_json::Value) -> AppResult<ChatRoute> {
 
 pub fn route_for_chat_model_with_resolver<F>(
     value: &serde_json::Value,
-    mut resolve: F,
+    resolve: F,
 ) -> AppResult<ChatRoute>
 where
-    F: FnMut(&str) -> AppResult<ResolvedModel>,
+    F: FnMut(&str) -> AppResult<crate::model_alias::ResolvedModel>,
 {
-    let model = required_model(value)?;
-    let alias = resolve(model)?;
-    chat_route_for_alias(model, &alias)
+    route_from_plan(plan_with_resolver(
+        value,
+        RequestFormat::ChatCompletions,
+        resolve,
+    )?)
 }
 
-fn chat_route_for_alias(model: &str, alias: &ResolvedModel) -> AppResult<ChatRoute> {
-    match alias.provider {
-        Provider::Codex if alias.upstream_model.starts_with("gpt-") => {
-            Ok(ChatRoute::CodexResponses)
-        }
-        Provider::Bedrock
-            if model.starts_with("anthropic/") || alias.upstream_model.contains("claude") =>
-        {
-            Ok(ChatRoute::BedrockMessages)
-        }
-        _ => Err(AppError::ModelNotSupported(model.into())),
+fn route_from_plan(plan: crate::route::dispatch::DispatchPlan) -> AppResult<ChatRoute> {
+    match plan.edge {
+        DispatchEdge::ChatCompletionsToResponsesCodex => Ok(ChatRoute::CodexResponses),
+        DispatchEdge::ChatCompletionsToAnthropicMessagesBedrock => Ok(ChatRoute::BedrockMessages),
+        _ => Err(AppError::ModelNotSupported(plan.requested_model)),
     }
 }
 
-fn required_model(value: &serde_json::Value) -> AppResult<&str> {
-    value
-        .get("model")
-        .and_then(|value| value.as_str())
-        .ok_or_else(|| AppError::BadRequest("missing model".into()))
+pub fn chat_route_for_alias(
+    model: &str,
+    alias: &crate::model_alias::ResolvedModel,
+) -> AppResult<ChatRoute> {
+    route_from_plan(plan_for_target(
+        RequestFormat::ChatCompletions,
+        model,
+        ResolvedTarget::from_resolved_model(alias.clone(), model)?,
+    )?)
 }
 
 fn codex_response_bytes(body: Bytes) -> AppResult<UpstreamResponse> {

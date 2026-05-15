@@ -59,6 +59,18 @@ fn gpt_realtime_2_does_not_send_beta_realtime_header() {
 }
 
 #[test]
+fn public_realtime_header_normalization_does_not_add_codex_responses_headers() {
+    let mut headers = HeaderMap::new();
+    headers.insert("OpenAI-Beta", HeaderValue::from_static("realtime=v1"));
+
+    realtime_headers_for_model("gpt-realtime-2", &mut headers).unwrap();
+
+    assert!(!headers.contains_key("OpenAI-Beta"));
+    assert!(!headers.contains_key("originator"));
+    assert!(!headers.contains_key("ChatGPT-Account-Id"));
+}
+
+#[test]
 fn realtime_route_accepts_ga_text_and_done_events() {
     for event in [
         json!({"type": "response.output_text.delta", "delta": "hel"}),

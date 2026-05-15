@@ -2899,6 +2899,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wiremock",
+ "zstd",
 ]
 
 [[package]]

@@ -99,6 +99,92 @@ fn codex_load_uses_test_home_override_and_fails_closed_when_missing() {
     );
 }
 
+#[test]
+fn home_and_codex_home_resolve_to_temp_roots_without_raw_dot_access() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let home = tempdir().unwrap();
+    let codex_home = tempdir().unwrap();
+
+    fs::write(
+        codex_home.path().join("auth.json"),
+        r#"{"access_token":"must-not-read-codex-home"}"#,
+    )
+    .unwrap();
+
+    with_env("HOME", Some(home.path().as_os_str()), || {
+        with_env("CODEX_HOME", Some(codex_home.path().as_os_str()), || {
+            with_env("UMP_V2_CODEX_HOME", None, || {
+                with_env("UMP_V2_AUTH_HOME", None, || {
+                    let state = AppState::from_env();
+
+                    assert!(state.codex_home.starts_with(home.path()));
+                    assert!(state.auth_home.starts_with(home.path()));
+                    assert_eq!(state.codex_home, home.path().join(".codex"));
+                    assert_eq!(state.auth_home, home.path().join(".ump"));
+
+                    let missing = load_codex_auth(&state).unwrap_err();
+                    assert!(matches!(
+                        missing,
+                        AppError::MissingCredential("~/.codex/auth.json")
+                    ));
+                })
+            })
+        })
+    });
+}
+
+#[test]
+fn ump_v2_home_overrides_resolve_to_temp_roots_without_raw_dot_access() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let home = tempdir().unwrap();
+    let codex_home = tempdir().unwrap();
+    let auth_home = tempdir().unwrap();
+
+    fs::create_dir_all(home.path().join(".codex")).unwrap();
+    fs::create_dir_all(home.path().join(".ump")).unwrap();
+    fs::write(
+        home.path().join(".codex/auth.json"),
+        r#"{"access_token":"must-not-read-home-codex"}"#,
+    )
+    .unwrap();
+    fs::write(
+        home.path().join(".ump/auth.json"),
+        r#"{"codex":{"account_id":"must-not-read-home-ump"}}"#,
+    )
+    .unwrap();
+
+    with_env("HOME", Some(home.path().as_os_str()), || {
+        with_env(
+            "CODEX_HOME",
+            Some(home.path().join("ignored-codex-home").as_os_str()),
+            || {
+                with_env(
+                    "UMP_V2_CODEX_HOME",
+                    Some(codex_home.path().as_os_str()),
+                    || {
+                        with_env(
+                            "UMP_V2_AUTH_HOME",
+                            Some(auth_home.path().as_os_str()),
+                            || {
+                                let state = AppState::from_env();
+
+                                assert_eq!(state.codex_home, codex_home.path());
+                                assert_eq!(state.auth_home, auth_home.path());
+
+                                let missing = load_codex_auth(&state).unwrap_err();
+                                assert!(matches!(
+                                    missing,
+                                    AppError::MissingCredential("~/.codex/auth.json")
+                                ));
+                            },
+                        )
+                    },
+                )
+            },
+        )
+    });
+}
+
 #[tokio::test]
 async fn codex_refresh_writes_codex_auth_and_diagnostic_mirror() {
     let codex_home = tempdir().unwrap();

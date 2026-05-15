@@ -1,19 +1,20 @@
 use axum::{
     body::{to_bytes, Body},
-    http::{header, header::HeaderName, HeaderMap, HeaderValue, Method, Request},
+    http::{header, header::HeaderName, HeaderMap, HeaderValue, Method, Request, StatusCode},
     middleware::{self, Next},
-    response::Response,
+    response::{IntoResponse, Response},
     routing::{any, get, post},
-    Router,
+    Json, Router,
 };
+use serde_json::json;
 use tower_http::trace::TraceLayer;
 
 use crate::{
     failure_capture,
     model_alias::{resolve_model, Provider},
-    route,
+    request_body, route,
     upstream_response::UpstreamResponseMetadata,
-    AppState,
+    AppError, AppState,
 };
 
 use std::time::Instant;
@@ -37,9 +38,15 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(route::health::health))
         .route("/config", get(route::config::config_page))
+        .route("/config/assets/config.css", get(route::config::config_css))
+        .route("/config/assets/config.js", get(route::config::config_js))
         .route(
             "/api/config",
             get(route::config::get_config).put(route::config::put_config),
+        )
+        .route(
+            "/api/config/graph",
+            get(route::config::get_config_graph).post(route::config::post_config_graph),
         )
         .route("/news.rss", get(route::internal::news_rss))
         .route("/api/internal", post(route::internal::amp_internal))
@@ -102,12 +109,78 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/v1/chat/completions", post(route::chat::chat_completions))
         .route(
+            "/api/provider/openai/v1/realtime",
+            get(route::websocket::realtime_ws),
+        )
+        .route(
             "/api/provider/openai/v1/realtime/transcription_sessions",
             post(route::audio::realtime_transcription_sessions),
         )
         .route(
+            "/api/provider/openai/v1/realtime/client_secrets",
+            post(route::audio::realtime_client_secrets),
+        )
+        .route(
+            "/api/provider/openai/v1/realtime/calls",
+            post(route::audio::realtime_calls),
+        )
+        .route(
+            "/api/provider/openai/v1/realtime/calls/:call_id/accept",
+            post(route::audio::realtime_unsupported_descendant),
+        )
+        .route(
+            "/api/provider/openai/v1/realtime/calls/:call_id/reject",
+            post(route::audio::realtime_unsupported_descendant),
+        )
+        .route(
+            "/api/provider/openai/v1/realtime/calls/:call_id/hangup",
+            post(route::audio::realtime_unsupported_descendant),
+        )
+        .route(
+            "/api/provider/openai/v1/realtime/calls/:call_id/refer",
+            post(route::audio::realtime_unsupported_descendant),
+        )
+        .route(
+            "/api/provider/openai/v1/realtime/calls/:call_id/*path",
+            any(route::audio::realtime_unsupported_descendant),
+        )
+        .route(
+            "/api/provider/openai/v1/realtime/*path",
+            any(route::audio::realtime_unsupported_descendant),
+        )
+        .route("/v1/realtime", get(route::websocket::realtime_ws))
+        .route(
             "/v1/realtime/transcription_sessions",
             post(route::audio::realtime_transcription_sessions),
+        )
+        .route(
+            "/v1/realtime/client_secrets",
+            post(route::audio::realtime_client_secrets),
+        )
+        .route("/v1/realtime/calls", post(route::audio::realtime_calls))
+        .route(
+            "/v1/realtime/calls/:call_id/accept",
+            post(route::audio::realtime_unsupported_descendant),
+        )
+        .route(
+            "/v1/realtime/calls/:call_id/reject",
+            post(route::audio::realtime_unsupported_descendant),
+        )
+        .route(
+            "/v1/realtime/calls/:call_id/hangup",
+            post(route::audio::realtime_unsupported_descendant),
+        )
+        .route(
+            "/v1/realtime/calls/:call_id/refer",
+            post(route::audio::realtime_unsupported_descendant),
+        )
+        .route(
+            "/v1/realtime/calls/:call_id/*path",
+            any(route::audio::realtime_unsupported_descendant),
+        )
+        .route(
+            "/v1/realtime/*path",
+            any(route::audio::realtime_unsupported_descendant),
         )
         .route(
             "/api/provider/openai/v1/audio/speech",
@@ -120,10 +193,21 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/api/provider/openai/v1/audio/translations",
-            post(route::audio::transcribe),
+            post(route::audio::audio_translations),
         )
         .route("/v1/audio/transcriptions", post(route::audio::transcribe))
-        .route("/v1/audio/translations", post(route::audio::transcribe))
+        .route(
+            "/v1/audio/translations",
+            post(route::audio::audio_translations),
+        )
+        .route(
+            "/api/provider/openai/v1/audio/*path",
+            any(route::audio::audio_unsupported_descendant),
+        )
+        .route(
+            "/v1/audio/*path",
+            any(route::audio::audio_unsupported_descendant),
+        )
         .route(
             "/api/provider/openai/v1/images/generations",
             post(route::images::unsupported_generation),
@@ -163,8 +247,159 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/provider/google/*path", any(route::google::google))
         .fallback(route::not_found)
         .layer(middleware::from_fn(request_id_middleware))
+        .layer(middleware::from_fn(config_admin_guard))
         .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn(content_encoding_middleware))
         .with_state(state)
+}
+
+async fn content_encoding_middleware(mut request: Request<Body>, next: Next) -> Response {
+    if !request_body::has_content_encoding(request.headers()) {
+        return next.run(request).await;
+    }
+
+    let body = std::mem::replace(request.body_mut(), Body::empty());
+    let bytes = match to_bytes(body, request_body::MAX_ENCODED_REQUEST_BODY_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return AppError::BadRequest(format!("failed to read encoded request body: {error}"))
+                .into_response();
+        }
+    };
+
+    match request_body::decode_content_encoded_body(request.headers_mut(), bytes) {
+        Ok(decoded) => {
+            *request.body_mut() = Body::from(decoded);
+            next.run(request).await
+        }
+        Err(error) => error.into_response(),
+    }
+}
+
+async fn config_admin_guard(request: Request<Body>, next: Next) -> Response {
+    if !is_config_admin_path(request.uri().path()) {
+        return next.run(request).await;
+    }
+
+    if !request
+        .headers()
+        .get(header::HOST)
+        .and_then(|host| host.to_str().ok())
+        .is_some_and(is_loopback_host_with_optional_port)
+    {
+        return config_guard_failure(request.uri().path());
+    }
+
+    if is_unsafe_method(request.method()) {
+        if request
+            .headers()
+            .get("sec-fetch-site")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.eq_ignore_ascii_case("cross-site"))
+        {
+            return config_guard_failure(request.uri().path());
+        }
+
+        if request
+            .headers()
+            .get(header::ORIGIN)
+            .and_then(|origin| origin.to_str().ok())
+            .is_some_and(|origin| !is_loopback_origin(origin))
+        {
+            return config_guard_failure(request.uri().path());
+        }
+    }
+
+    next.run(request).await
+}
+
+fn config_guard_failure(path: &str) -> Response {
+    let mut response = if path.starts_with("/api/config") {
+        (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": {
+                    "message": "config admin access is only allowed from loopback same-origin requests",
+                    "type": "permission_error",
+                    "param": null,
+                    "code": "config_admin_forbidden",
+                }
+            })),
+        )
+            .into_response()
+    } else {
+        (StatusCode::FORBIDDEN, "config admin access forbidden").into_response()
+    };
+    add_config_no_store_headers(response.headers_mut());
+    response
+}
+
+fn is_config_admin_path(path: &str) -> bool {
+    matches!(
+        path,
+        "/config"
+            | "/config/assets/config.css"
+            | "/config/assets/config.js"
+            | "/api/config"
+            | "/api/config/graph"
+    )
+}
+
+fn is_unsafe_method(method: &Method) -> bool {
+    matches!(
+        *method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    )
+}
+
+fn is_loopback_origin(origin: &str) -> bool {
+    let Some(after_scheme) = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))
+    else {
+        return false;
+    };
+    let host = after_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .filter(|host| !host.is_empty())
+        .unwrap_or_default();
+    is_loopback_host_with_optional_port(host)
+}
+
+fn is_loopback_host_with_optional_port(host: &str) -> bool {
+    if host.is_empty() || host.contains('@') {
+        return false;
+    }
+
+    if let Some(rest) = host.strip_prefix("[::1]") {
+        return rest.is_empty() || parse_optional_port(rest);
+    }
+
+    let Some((name, port)) = host.split_once(':') else {
+        return is_allowed_loopback_name(host);
+    };
+    is_allowed_loopback_name(name) && parse_port(port)
+}
+
+fn is_allowed_loopback_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("localhost") || name == "127.0.0.1"
+}
+
+fn parse_optional_port(rest: &str) -> bool {
+    rest.strip_prefix(':').is_some_and(parse_port)
+}
+
+fn parse_port(port: &str) -> bool {
+    !port.is_empty() && port.parse::<u16>().is_ok()
+}
+
+fn add_config_no_store_headers(headers: &mut HeaderMap) {
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
 }
 
 async fn request_id_middleware(mut request: Request<Body>, next: Next) -> Response {
@@ -201,7 +436,7 @@ async fn request_observation(request: &mut Request<Body>) -> RequestObservation 
     let path = request.uri().path().to_string();
     let mut model = None;
 
-    if should_read_json_body(request.headers()) {
+    if !should_skip_observation_body(&path) && should_read_json_body(request.headers()) {
         let replacement = Body::empty();
         let body = std::mem::replace(request.body_mut(), replacement);
         match to_bytes(body, OBSERVABILITY_BODY_LIMIT).await {
@@ -223,6 +458,10 @@ async fn request_observation(request: &mut Request<Body>) -> RequestObservation 
         provider,
         model,
     }
+}
+
+fn should_skip_observation_body(path: &str) -> bool {
+    path == "/config" || path.starts_with("/api/config")
 }
 
 fn should_read_json_body(headers: &HeaderMap) -> bool {
@@ -276,7 +515,12 @@ fn provider_for_request_path_and_model(path: &str, model: Option<&str>) -> Optio
 
     if path.contains("/anthropic/") || path == "/v1/messages" {
         Some("bedrock")
-    } else if path.contains("/openai/") || path == "/v1/responses" {
+    } else if path.contains("/openai/")
+        || path == "/v1/responses"
+        || path == "/v1/realtime"
+        || path.starts_with("/v1/realtime/")
+        || path.starts_with("/v1/audio/")
+    {
         Some("codex")
     } else {
         None

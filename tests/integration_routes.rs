@@ -2,7 +2,7 @@ use std::{env, ffi::OsString, fs, sync::Mutex};
 
 use axum::{
     body::{to_bytes, Body},
-    http::{Request, StatusCode},
+    http::{HeaderMap, Request, StatusCode},
 };
 use serde_json::Value;
 use tempfile::TempDir;
@@ -117,11 +117,35 @@ async fn request_json_with_state(
     let request = Request::builder()
         .method(method)
         .uri(path)
+        .header("host", "localhost")
         .header("content-type", "application/json")
         .body(match body {
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json = serde_json::from_slice(&bytes).unwrap();
+    (status, json)
+}
+
+async fn request_body_with_content_type(
+    state: AppState,
+    method: &str,
+    path: &str,
+    content_type: &str,
+    body: &str,
+) -> (StatusCode, Value) {
+    let app = build_router(state);
+    let request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("host", "localhost")
+        .header("content-type", content_type)
+        .body(Body::from(body.to_string()))
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
@@ -141,6 +165,7 @@ async fn request_text_with_state(
     let request = Request::builder()
         .method(method)
         .uri(path)
+        .header("host", "localhost")
         .body(match body {
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
@@ -152,6 +177,260 @@ async fn request_text_with_state(
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let text = String::from_utf8(bytes.to_vec()).unwrap();
     (status, text)
+}
+
+async fn request_bytes_with_headers(
+    state: AppState,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
+) -> (StatusCode, HeaderMap, Vec<u8>) {
+    let app = build_router(state);
+    let mut builder = Request::builder().method(method).uri(path);
+    for (name, value) in headers {
+        builder = builder.header(*name, *value);
+    }
+    let request = builder
+        .body(match body {
+            Some(value) => Body::from(value.to_string()),
+            None => Body::empty(),
+        })
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec();
+    (status, headers, bytes)
+}
+
+async fn request_json_with_headers(
+    state: AppState,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
+) -> (StatusCode, HeaderMap, Value) {
+    let mut all_headers = vec![("host", "localhost"), ("content-type", "application/json")];
+    all_headers.extend_from_slice(headers);
+    let (status, headers, bytes) =
+        request_bytes_with_headers(state, method, path, &all_headers, body).await;
+    let json = serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+        panic!(
+            "response was not json: {error}; status={status}; body={}",
+            String::from_utf8_lossy(&bytes)
+        )
+    });
+    (status, headers, json)
+}
+
+async fn request_json_bytes_with_headers(
+    state: AppState,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: Vec<u8>,
+) -> (StatusCode, HeaderMap, Value) {
+    let app = build_router(state);
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("host", "localhost")
+        .header("content-type", "application/json");
+    for (name, value) in headers {
+        builder = builder.header(*name, *value);
+    }
+    let request = builder.body(Body::from(body)).unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec();
+    let json = serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+        panic!(
+            "response was not json: {error}; status={status}; body={}",
+            String::from_utf8_lossy(&bytes)
+        )
+    });
+    (status, headers, json)
+}
+
+async fn request_json_with_raw_headers(
+    state: AppState,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
+) -> (StatusCode, HeaderMap, Value) {
+    let (status, headers, bytes) =
+        request_bytes_with_headers(state, method, path, headers, body).await;
+    let json = serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+        panic!(
+            "response was not json: {error}; status={status}; body={}",
+            String::from_utf8_lossy(&bytes)
+        )
+    });
+    (status, headers, json)
+}
+
+fn header_value<'a>(headers: &'a HeaderMap, name: &str) -> &'a str {
+    headers
+        .get(name)
+        .unwrap_or_else(|| panic!("missing response header {name}"))
+        .to_str()
+        .unwrap()
+}
+
+fn assert_no_store_nosniff(headers: &HeaderMap) {
+    assert_eq!(header_value(headers, "cache-control"), "no-store");
+    assert_eq!(header_value(headers, "x-content-type-options"), "nosniff");
+}
+
+fn assert_config_shell_has_no_inline_code(html: &str) {
+    let lower = html.to_ascii_lowercase();
+    for script_tag in lower.match_indices("<script").map(|(index, _)| {
+        let end = lower[index..]
+            .find('>')
+            .map(|relative_end| index + relative_end)
+            .unwrap_or(lower.len());
+        &lower[index..=end]
+    }) {
+        assert!(
+            script_tag.contains(" src="),
+            "config shell must not use inline scripts"
+        );
+    }
+    assert!(
+        !lower.contains("<style"),
+        "config shell must not use inline styles"
+    );
+    assert!(
+        !lower.contains(" style="),
+        "config shell must not use style attributes"
+    );
+    for event_attr in [
+        " onabort=",
+        " onblur=",
+        " onchange=",
+        " onclick=",
+        " onerror=",
+        " onfocus=",
+        " oninput=",
+        " onkeydown=",
+        " onkeyup=",
+        " onload=",
+        " onmousedown=",
+        " onmouseover=",
+        " onsubmit=",
+    ] {
+        assert!(
+            !lower.contains(event_attr),
+            "config shell must not use inline event handler attributes"
+        );
+    }
+}
+
+fn assert_graph_v2_contract(body: &Value) {
+    for field in [
+        "schema_version",
+        "generated_at",
+        "raw_hot_config",
+        "sources",
+        "runtime_formats",
+        "config_routes",
+        "effective_routes",
+        "nodes",
+        "edges",
+        "diagnostics",
+        "validation_issues",
+        "contract_version",
+        "draft_status",
+        "groups",
+        "focal",
+        "route_cards",
+        "diagnostics_v2",
+    ] {
+        assert!(
+            body.get(field).is_some(),
+            "Switchyard Atlas graph response is missing {field}"
+        );
+    }
+
+    let contract_version = &body["contract_version"];
+    assert!(
+        contract_version == 2
+            || contract_version
+                .as_str()
+                .is_some_and(|value| value.contains('2')),
+        "contract_version must identify graph v2: {contract_version:?}"
+    );
+    assert!(
+        body["draft_status"].is_string(),
+        "draft_status must be a string"
+    );
+    assert!(body["groups"].is_array(), "groups must be an array");
+    assert!(
+        body["route_cards"].is_array(),
+        "route_cards must be an array"
+    );
+    assert!(
+        body["diagnostics_v2"].is_array(),
+        "diagnostics_v2 must be an array"
+    );
+}
+
+fn assert_no_config_graph_payload(body: &Value) {
+    for field in [
+        "schema_version",
+        "generated_at",
+        "raw_hot_config",
+        "sources",
+        "runtime_formats",
+        "config_routes",
+        "effective_routes",
+        "nodes",
+        "edges",
+        "diagnostics",
+        "validation_issues",
+        "contract_version",
+        "draft_status",
+        "groups",
+        "focal",
+        "route_cards",
+        "diagnostics_v2",
+    ] {
+        assert!(
+            body.get(field).is_none(),
+            "error response must not include graph field {field}: {body}"
+        );
+    }
+}
+
+fn assert_blocking_diagnostics_v2(body: &Value) {
+    let diagnostics = body["diagnostics_v2"]
+        .as_array()
+        .expect("diagnostics_v2 must be an array");
+    assert!(
+        !diagnostics.is_empty(),
+        "diagnostics_v2 must include at least one diagnostic"
+    );
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic["blocking"] == true
+                || diagnostic["blocks_write"] == true
+                || diagnostic["severity"] == "blocking"
+                || diagnostic["severity"] == "error"
+                || diagnostic["level"] == "blocking"
+        }),
+        "diagnostics_v2 must include a blocking diagnostic: {diagnostics:?}"
+    );
 }
 
 fn assert_missing_codex_auth_contract(status: StatusCode, body: &Value) {
@@ -427,6 +706,55 @@ async fn integration_routes_count_tokens_is_local_stub_and_rejects_unknown_model
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"]["type"], "invalid_request_error");
     assert_eq!(body["error"]["code"], "model_not_supported");
+}
+
+#[tokio::test]
+async fn integration_routes_count_tokens_accepts_zstd_encoded_json_body() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    let state = test_state(&codex_home, &auth_home);
+    let body = serde_json::json!({
+        "model": "openai:gpt-5.5",
+        "messages": [{ "role": "user", "content": "hello compressed request" }]
+    })
+    .to_string();
+    let compressed = zstd::stream::encode_all(body.as_bytes(), 0).unwrap();
+
+    let (status, _, response) = request_json_bytes_with_headers(
+        state,
+        "POST",
+        "/api/provider/anthropic/v1/messages/count_tokens",
+        &[("content-encoding", "zstd")],
+        compressed,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{response}");
+    assert!(response["input_tokens"].as_u64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn integration_routes_responses_accepts_zstd_encoded_json_body_before_auth() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    let state = test_state(&codex_home, &auth_home);
+    let body = serde_json::json!({
+        "model": "openai:gpt-5.5",
+        "input": "hello compressed response request"
+    })
+    .to_string();
+    let compressed = zstd::stream::encode_all(body.as_bytes(), 0).unwrap();
+
+    let (status, _, response) = request_json_bytes_with_headers(
+        state,
+        "POST",
+        "/v1/responses",
+        &[("content-encoding", "zstd")],
+        compressed,
+    )
+    .await;
+
+    assert_missing_codex_auth_contract(status, &response);
 }
 
 #[tokio::test]
@@ -717,6 +1045,518 @@ async fn integration_routes_config_ui_reads_and_writes_hot_config() {
 }
 
 #[tokio::test]
+async fn integration_routes_config_shell_headers_and_markup_are_browser_safe() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    let state = test_state(&codex_home, &auth_home);
+    let (status, headers, bytes) =
+        request_bytes_with_headers(state, "GET", "/config", &[("host", "localhost")], None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        header_value(&headers, "content-type"),
+        "text/html; charset=utf-8"
+    );
+    assert_eq!(
+        header_value(&headers, "content-security-policy"),
+        "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'"
+    );
+    assert_no_store_nosniff(&headers);
+    let html = String::from_utf8(bytes).unwrap();
+    assert_config_shell_has_no_inline_code(&html);
+}
+
+#[tokio::test]
+async fn integration_routes_config_assets_return_safe_content_headers() {
+    for (path, content_type) in [
+        ("/config/assets/config.css", "text/css; charset=utf-8"),
+        (
+            "/config/assets/config.js",
+            "application/javascript; charset=utf-8",
+        ),
+    ] {
+        let codex_home = tempfile::tempdir().unwrap();
+        let auth_home = tempfile::tempdir().unwrap();
+        let state = test_state(&codex_home, &auth_home);
+        let (status, headers, _bytes) =
+            request_bytes_with_headers(state, "GET", path, &[("host", "localhost")], None).await;
+
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert_eq!(
+            header_value(&headers, "content-type"),
+            content_type,
+            "{path}"
+        );
+        assert_no_store_nosniff(&headers);
+    }
+}
+
+#[tokio::test]
+async fn integration_routes_config_raw_api_preserves_get_and_put_compatibility() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    let config_path = auth_home.path().join("config.json");
+    let state = test_state(&codex_home, &auth_home);
+
+    let (status, headers, body) =
+        request_json_with_headers(state.clone(), "GET", "/api/config", &[], None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(header_value(&headers, "content-type"), "application/json");
+    assert_eq!(header_value(&headers, "cache-control"), "no-store");
+    assert_eq!(body, serde_json::json!({ "routes": [] }));
+
+    let config = serde_json::json!({
+        "routes": [{
+            "source": { "model": "integration-raw-model", "format": "responses" },
+            "target": { "provider": "codex", "model": "gpt-5.5", "format": "responses" }
+        }]
+    });
+    let (status, _headers, body) = request_json_with_headers(
+        state.clone(),
+        "PUT",
+        "/api/config",
+        &[],
+        Some(&config.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+
+    let written: Value = serde_json::from_str(&fs::read_to_string(config_path).unwrap()).unwrap();
+    assert_eq!(written, config);
+}
+
+#[tokio::test]
+async fn integration_routes_config_malformed_json_returns_invalid_routing_config() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    let state = test_state(&codex_home, &auth_home);
+
+    let (status, _headers, body) =
+        request_json_with_headers(state, "PUT", "/api/config", &[], Some(r#"{ "routes": ["#)).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "invalid_routing_config");
+}
+
+#[tokio::test]
+async fn integration_routes_config_graph_get_returns_persisted_projection() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    fs::write(
+        auth_home.path().join("config.json"),
+        serde_json::json!({
+            "routes": [{
+                "source": { "model": "integration-graph-model", "format": "responses" },
+                "target": { "provider": "codex", "model": "gpt-5.5", "format": "responses" }
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let state = test_state(&codex_home, &auth_home);
+
+    let (status, headers, body) =
+        request_json_with_headers(state, "GET", "/api/config/graph", &[], None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(header_value(&headers, "content-type"), "application/json");
+    assert_eq!(header_value(&headers, "cache-control"), "no-store");
+    assert_eq!(
+        body["raw_hot_config"]["routes"][0]["source"]["model"],
+        "integration-graph-model"
+    );
+    assert!(body["effective_routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|route| {
+            route["source_model"] == "integration-graph-model"
+                || route["source"]["model"] == "integration-graph-model"
+        }));
+}
+
+#[tokio::test]
+async fn integration_routes_config_graph_get_returns_switchyard_atlas_v2_contract() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    fs::write(
+        auth_home.path().join("config.json"),
+        serde_json::json!({
+            "routes": [{
+                "source": { "model": "atlas-v2-model", "format": "responses" },
+                "target": { "provider": "codex", "model": "gpt-5.5", "format": "responses" }
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let state = test_state(&codex_home, &auth_home);
+
+    let (status, _headers, body) =
+        request_json_with_headers(state, "GET", "/api/config/graph", &[], None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_graph_v2_contract(&body);
+    assert_eq!(body["draft_status"], "valid");
+    assert!(
+        body["effective_routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|route| route["source_model"] == "atlas-v2-model"),
+        "v1 effective_routes must remain populated"
+    );
+    assert!(
+        body["route_cards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|route| route["source_model"] == "atlas-v2-model"
+                || route["source"]["model"] == "atlas-v2-model"),
+        "v2 route_cards must expose the projected route"
+    );
+}
+
+#[tokio::test]
+async fn integration_routes_config_graph_post_projects_draft_without_writing() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    let config_path = auth_home.path().join("config.json");
+    let persisted = serde_json::json!({ "routes": [] });
+    fs::write(&config_path, persisted.to_string()).unwrap();
+    let state = test_state(&codex_home, &auth_home);
+    let draft = serde_json::json!({
+        "routes": [{
+            "source": { "model": "draft-only-model", "format": "responses" },
+            "target": { "provider": "codex", "model": "gpt-5.5", "format": "responses" }
+        }]
+    });
+
+    let (status, _headers, body) = request_json_with_headers(
+        state.clone(),
+        "POST",
+        "/api/config/graph",
+        &[],
+        Some(&draft.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["raw_hot_config"]["routes"][0]["source"]["model"],
+        "draft-only-model"
+    );
+
+    let written: Value = serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_eq!(written, persisted);
+    let (status, _headers, body) =
+        request_json_with_headers(state, "GET", "/api/config", &[], None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, persisted);
+}
+
+fn assert_graph_post_invalid_response(body: &Value, forbidden_fragments: &[&str]) {
+    assert_eq!(body["error"]["type"], "invalid_request_error");
+    assert_eq!(body["error"]["code"], "invalid_routing_config");
+    assert_no_config_graph_payload(body);
+    let body_text = body.to_string();
+    for fragment in forbidden_fragments {
+        assert!(
+            !body_text.contains(fragment),
+            "graph validation error leaked submitted fragment {fragment}: {body_text}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn integration_routes_config_graph_post_invalid_configs_return_sanitized_error_only() {
+    for (name, body, forbidden_fragments) in [
+        (
+            "malformed_json",
+            r#"{ "routes": ["#,
+            vec!["raw_hot_config", "effective_routes"],
+        ),
+        (
+            "non_object_root",
+            r#""secret-root-value""#,
+            vec!["secret-root-value", "raw_hot_config", "effective_routes"],
+        ),
+        (
+            "unknown_root_field",
+            r#"{ "routes": [], "mysteryRoot": "unknown-root-secret" }"#,
+            vec!["unknown-root-secret", "raw_hot_config", "effective_routes"],
+        ),
+        (
+            "unknown_route_field",
+            r#"{
+                "routes": [{
+                    "source": { "model": "x" },
+                    "target": { "provider": "codex", "model": "gpt-5.5" },
+                    "mysteryRoute": "unknown-route-secret"
+                }]
+            }"#,
+            vec!["unknown-route-secret", "raw_hot_config", "effective_routes"],
+        ),
+        (
+            "unknown_source_field",
+            r#"{
+                "routes": [{
+                    "source": { "model": "x", "mysterySource": "unknown-source-secret" },
+                    "target": { "provider": "codex", "model": "gpt-5.5" }
+                }]
+            }"#,
+            vec![
+                "unknown-source-secret",
+                "raw_hot_config",
+                "effective_routes",
+            ],
+        ),
+        (
+            "unknown_target_field",
+            r#"{
+                "routes": [{
+                    "source": { "model": "x" },
+                    "target": {
+                        "provider": "codex",
+                        "model": "gpt-5.5",
+                        "mysteryTarget": "unknown-target-secret"
+                    }
+                }]
+            }"#,
+            vec![
+                "unknown-target-secret",
+                "raw_hot_config",
+                "effective_routes",
+            ],
+        ),
+        (
+            "forbidden_secret_key",
+            r#"{
+                "routes": [{
+                    "source": { "model": "x" },
+                    "target": { "provider": "codex", "model": "gpt-5.5" },
+                    "api-key": "do-not-echo"
+                }]
+            }"#,
+            vec!["do-not-echo", "raw_hot_config", "effective_routes"],
+        ),
+        (
+            "unprojectable_shape",
+            r#"{ "routes": "not-a-route-array" }"#,
+            vec!["not-a-route-array", "raw_hot_config", "effective_routes"],
+        ),
+    ] {
+        let codex_home = tempfile::tempdir().unwrap();
+        let auth_home = tempfile::tempdir().unwrap();
+        let state = test_state(&codex_home, &auth_home);
+
+        let (status, headers, response) =
+            request_json_with_headers(state, "POST", "/api/config/graph", &[], Some(body)).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{name}: {response}");
+        assert_eq!(
+            header_value(&headers, "cache-control"),
+            "no-store",
+            "{name}"
+        );
+        assert_eq!(
+            header_value(&headers, "x-content-type-options"),
+            "nosniff",
+            "{name}"
+        );
+        assert_graph_post_invalid_response(&response, &forbidden_fragments);
+    }
+}
+
+#[tokio::test]
+async fn integration_routes_config_graph_post_semantic_row_error_returns_invalid_draft() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    let state = test_state(&codex_home, &auth_home);
+    let draft = serde_json::json!({
+        "routes": [{
+            "source": { "model": "semantic-row-error-model", "format": "responses" },
+            "target": { "provider": "unsupported", "model": "unsupported-target-model" }
+        }]
+    });
+
+    let (status, _headers, body) = request_json_with_headers(
+        state,
+        "POST",
+        "/api/config/graph",
+        &[],
+        Some(&draft.to_string()),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_graph_v2_contract(&body);
+    assert_eq!(body["draft_status"], "invalid");
+    assert_blocking_diagnostics_v2(&body);
+}
+
+#[tokio::test]
+async fn integration_routes_config_graph_post_partially_projectable_row_reports_partial_projection()
+{
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    let state = test_state(&codex_home, &auth_home);
+    let draft = serde_json::json!({
+        "routes": [
+            {
+                "source": { "model": "partial-valid-model", "format": "responses" },
+                "target": { "provider": "codex", "model": "gpt-5.5", "format": "responses" }
+            },
+            {
+                "source": { "model": "partial-invalid-model", "format": "responses" },
+                "target": { "provider": "unsupported", "model": "unsupported-target-model" }
+            }
+        ]
+    });
+
+    let (status, _headers, body) = request_json_with_headers(
+        state,
+        "POST",
+        "/api/config/graph",
+        &[],
+        Some(&draft.to_string()),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_graph_v2_contract(&body);
+    assert_eq!(body["draft_status"], "partially_projected");
+    assert_blocking_diagnostics_v2(&body);
+    assert!(
+        body["effective_routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|route| route["source_model"] == "partial-valid-model"),
+        "partial projection must preserve projectable rows"
+    );
+}
+
+#[tokio::test]
+async fn integration_routes_config_guard_allows_loopback_hosts_and_missing_origin() {
+    for host in [
+        "localhost",
+        "localhost:18743",
+        "127.0.0.1",
+        "127.0.0.1:18743",
+        "[::1]",
+        "[::1]:18743",
+    ] {
+        let codex_home = tempfile::tempdir().unwrap();
+        let auth_home = tempfile::tempdir().unwrap();
+        let state = test_state(&codex_home, &auth_home);
+        let (status, _headers, _body) =
+            request_json_with_raw_headers(state, "GET", "/api/config", &[("host", host)], None)
+                .await;
+        assert_eq!(status, StatusCode::OK, "{host}");
+    }
+
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    let state = test_state(&codex_home, &auth_home);
+    let (status, _headers, body) = request_json_with_headers(
+        state,
+        "PUT",
+        "/api/config",
+        &[],
+        Some(r#"{ "routes": [] }"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+}
+
+#[tokio::test]
+async fn integration_routes_config_guard_rejects_missing_or_foreign_host() {
+    for headers in [&[][..], &[("host", "example.com")][..]] {
+        let codex_home = tempfile::tempdir().unwrap();
+        let auth_home = tempfile::tempdir().unwrap();
+        let state = test_state(&codex_home, &auth_home);
+        let (status, response_headers, _body) =
+            request_json_with_raw_headers(state, "GET", "/api/config", headers, None).await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_no_store_nosniff(&response_headers);
+    }
+}
+
+#[tokio::test]
+async fn integration_routes_config_guard_rejects_cross_site_unsafe_requests() {
+    for extra_headers in [
+        vec![("origin", "https://evil.example")],
+        vec![("sec-fetch-site", "cross-site")],
+    ] {
+        let codex_home = tempfile::tempdir().unwrap();
+        let auth_home = tempfile::tempdir().unwrap();
+        let state = test_state(&codex_home, &auth_home);
+        let (status, response_headers, _body) = request_json_with_headers(
+            state,
+            "PUT",
+            "/api/config",
+            &extra_headers,
+            Some(r#"{ "routes": [] }"#),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_no_store_nosniff(&response_headers);
+    }
+}
+
+#[tokio::test]
+async fn integration_routes_config_guard_allows_loopback_origin_for_unsafe_requests() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    let state = test_state(&codex_home, &auth_home);
+
+    let (status, _headers, body) = request_json_with_headers(
+        state,
+        "PUT",
+        "/api/config",
+        &[("origin", "http://localhost:18743")],
+        Some(r#"{ "routes": [] }"#),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+}
+
+#[tokio::test]
+async fn integration_routes_config_empty_graph_includes_catalog_routes_and_no_override_banner_data()
+{
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    fs::write(auth_home.path().join("config.json"), r#"{ "routes": [] }"#).unwrap();
+    let state = test_state(&codex_home, &auth_home);
+
+    let (status, _headers, body) =
+        request_json_with_headers(state, "GET", "/api/config/graph", &[], None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["raw_hot_config"], serde_json::json!({ "routes": [] }));
+    assert!(
+        !body["effective_routes"].as_array().unwrap().is_empty(),
+        "empty hot config must still project built-in catalog routes"
+    );
+    assert!(body["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|diagnostic| {
+            diagnostic["code"] == "no_hot_overrides"
+                || diagnostic["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("No hot overrides"))
+        }));
+}
+
+#[tokio::test]
 async fn integration_routes_route_model_resolvers_reject_unknown_models_before_credentials() {
     let unknown_chat = serde_json::json!({ "model": "nope/nope", "messages": [] });
     let (status, body) = request_json("POST", "/v1/chat/completions", Some(unknown_chat)).await;
@@ -853,6 +1693,73 @@ async fn integration_routes_unsupported_codex_fields_fail_before_auth_and_catalo
 }
 
 #[tokio::test]
+async fn integration_routes_unsupported_model_edges_fail_before_credentials() {
+    for (path, body) in [
+        (
+            "/v1/responses",
+            serde_json::json!({ "model": "gpt-image-2", "input": "paint" }),
+        ),
+        (
+            "/v1/chat/completions",
+            serde_json::json!({ "model": "gpt-image-2", "messages": [] }),
+        ),
+        (
+            "/v1/messages",
+            serde_json::json!({ "model": "gpt-image-2", "messages": [] }),
+        ),
+    ] {
+        let (status, response) = request_json("POST", path, Some(body)).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}: {response}");
+        assert_eq!(response["error"]["type"], "invalid_request_error", "{path}");
+        assert_eq!(response["error"]["code"], "model_not_supported", "{path}");
+        assert!(!response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("~/.codex/auth.json"));
+    }
+}
+
+#[test]
+fn integration_routes_invalid_hot_target_format_edge_fails_before_credentials() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    fs::write(
+        auth_home.path().join("config.json"),
+        serde_json::json!({
+            "routes": [{
+                "source": { "model": "invalid-google-target", "format": "responses" },
+                "target": {
+                    "provider": "google",
+                    "model": "gemini-3.1-flash-lite",
+                    "format": "responses"
+                }
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let state = test_state(&codex_home, &auth_home);
+    let body = serde_json::json!({ "model": "invalid-google-target", "input": "hello" });
+
+    let (status, response) = request_json_with_state_without_env_vars(
+        state,
+        "POST",
+        "/v1/responses",
+        Some(body),
+        &["GOOGLE_API_KEY"],
+    );
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(response["error"]["type"], "invalid_request_error");
+    assert_eq!(response["error"]["code"], "model_not_supported");
+    assert!(!response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("GOOGLE_API_KEY"));
+}
+
+#[tokio::test]
 async fn integration_routes_image_routes_return_explicit_unsupported_error() {
     let body = serde_json::json!({ "model": "gpt-image-2", "prompt": "paint" });
     for path in [
@@ -874,28 +1781,42 @@ async fn integration_routes_image_routes_return_explicit_unsupported_error() {
 
 #[tokio::test]
 async fn integration_routes_audio_and_realtime_are_explicit_feature_gates() {
-    for (path, marker) in [
-        (
-            "/v1/realtime/transcription_sessions",
-            "realtime transcription sessions",
-        ),
-        (
-            "/api/provider/openai/v1/realtime/transcription_sessions",
-            "realtime transcription sessions",
-        ),
-        ("/v1/audio/speech", "audio speech"),
-        ("/api/provider/openai/v1/audio/speech", "audio speech"),
-        ("/v1/audio/transcriptions", "dictation transcription"),
-        (
-            "/api/provider/openai/v1/audio/transcriptions",
-            "dictation transcription",
-        ),
-        ("/v1/audio/translations", "dictation transcription"),
-        (
-            "/api/provider/openai/v1/audio/translations",
-            "dictation transcription",
-        ),
-        ("/transcribe", "dictation transcription"),
+    for path in [
+        "/v1/realtime/transcription_sessions",
+        "/api/provider/openai/v1/realtime/transcription_sessions",
+    ] {
+        let (status, body) = request_json(
+            "POST",
+            path,
+            Some(serde_json::json!({ "model": "gpt-realtime-2" })),
+        )
+        .await;
+        assert_missing_codex_auth_contract(status, &body);
+    }
+
+    for path in [
+        "/v1/audio/transcriptions",
+        "/api/provider/openai/v1/audio/transcriptions",
+    ] {
+        let codex_home = tempfile::tempdir().unwrap();
+        let auth_home = tempfile::tempdir().unwrap();
+        let (status, body) = request_body_with_content_type(
+            test_state(&codex_home, &auth_home),
+            "POST",
+            path,
+            "multipart/form-data; boundary=audio-test",
+            "--audio-test\r\n--audio-test--\r\n",
+        )
+        .await;
+        assert_missing_codex_auth_contract(status, &body);
+    }
+
+    for path in [
+        "/v1/audio/speech",
+        "/api/provider/openai/v1/audio/speech",
+        "/v1/audio/translations",
+        "/api/provider/openai/v1/audio/translations",
+        "/transcribe",
     ] {
         let (status, body) = request_json(
             "POST",
@@ -906,10 +1827,46 @@ async fn integration_routes_audio_and_realtime_are_explicit_feature_gates() {
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{path}");
         assert_eq!(body["error"]["type"], "invalid_request_error", "{path}");
         assert_eq!(body["error"]["code"], "unsupported_feature", "{path}");
-        assert!(
-            body["error"]["message"].as_str().unwrap().contains(marker),
+        assert_eq!(
+            body["error"]["message"],
+            "This route family is not supported by the Codex OAuth public OpenAI facade.",
             "{path}: {body}"
         );
+    }
+}
+
+#[tokio::test]
+async fn integration_routes_audio_transcriptions_validate_multipart_before_codex_auth() {
+    for (content_type, expected_status, expected_code) in [
+        (
+            "application/json",
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "invalid_content_type",
+        ),
+        (
+            "multipart/form-data",
+            StatusCode::BAD_REQUEST,
+            "missing_multipart_boundary",
+        ),
+    ] {
+        let codex_home = tempfile::tempdir().unwrap();
+        let auth_home = tempfile::tempdir().unwrap();
+        let (status, body) = request_body_with_content_type(
+            test_state(&codex_home, &auth_home),
+            "POST",
+            "/v1/audio/transcriptions",
+            content_type,
+            "{}",
+        )
+        .await;
+
+        assert_eq!(status, expected_status, "{content_type}: {body}");
+        assert_eq!(body["error"]["type"], "invalid_request_error");
+        assert_eq!(body["error"]["code"], expected_code);
+        assert!(!body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("~/.codex/auth.json"));
     }
 }
 
