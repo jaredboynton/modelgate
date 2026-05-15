@@ -17,7 +17,7 @@
           <div>
             <p class="eyebrow">Unified Model Proxy v2</p>
             <h1 id="page-title">Config route map</h1>
-            <p class="lede">Local routing state for Amp, grouped by provider and endpoint. Models stay tucked behind each endpoint.</p>
+            <p class="lede">Local routing state for Amp, grouped by source provider and endpoint. Target adapters stay visible on each model row.</p>
           </div>
         </div>
         <div class="topbar__actions" aria-label="Config actions">
@@ -41,20 +41,20 @@
         <section class="panel panel--routes" aria-labelledby="routes-title" data-catalog-region>
           <div class="panel__header panel__header--routes">
             <div>
-              <p class="panel__kicker">Provider → endpoint</p>
+              <p class="panel__kicker">Source provider → endpoint</p>
               <h2 id="routes-title">Routes</h2>
             </div>
-            <div class="legend" data-provider-legend aria-label="Provider legend"></div>
+            <div class="legend" data-provider-legend aria-label="Source provider legend"></div>
           </div>
 
           <div class="table-wrap">
             <table id="routes-table" class="routes-table">
               <caption>
-                Server-projected effective routes grouped by provider, endpoint, and expandable model lists.
+                Server-projected effective routes grouped by source provider, endpoint, and expandable model lists.
               </caption>
               <thead>
                 <tr>
-                  <th scope="col">Provider</th>
+                  <th scope="col">Source provider</th>
                   <th scope="col">Endpoint</th>
                   <th scope="col">Models</th>
                   <th scope="col">State</th>

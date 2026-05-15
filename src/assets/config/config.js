@@ -5,7 +5,7 @@
   var API_GRAPH = "/api/config/graph";
   var SVG_NS = "http://www.w3.org/2000/svg";
   var FOCAL_ROUTE_LIMIT = 14;
-  var PROVIDERS = ["bedrock", "codex", "google"];
+  var SOURCE_PROVIDERS = ["cursor", "openai", "anthropic", "google", "custom"];
   var SOURCE_FORMATS = ["", "responses", "chat_completions", "anthropic_messages", "google_generate_content", "openai_images"];
   var TARGET_FORMATS = ["", "responses", "anthropic_messages", "google_generate_content", "openai_images"];
   var providerStyles = [
@@ -660,7 +660,7 @@
 
     providerNames({}, routes).forEach(function (provider) {
       var index = routes.findIndex(function (route) {
-        return targetProviderName(route) === provider && !seen.has(routeIdentity(route, routes.indexOf(route)));
+        return sourceProviderName(route) === provider && !seen.has(routeIdentity(route, routes.indexOf(route)));
       });
       if (index >= 0) {
         addFocalRoute(selected, seen, routes[index], index);
@@ -863,14 +863,14 @@
     button.dataset.routeSelect = routeId;
     button.setAttribute("aria-current", String(routeId === state.selectedRouteId));
     button.appendChild(strong(sourceModelName(route) + " → " + targetModelName(route)));
-    button.appendChild(span("subtle", targetFormat(route) + " · " + routeLabel(route, index)));
+    button.appendChild(span("subtle", targetProviderName(route) + " · " + targetFormat(route) + " · " + routeLabel(route, index)));
     return button;
   }
 
   function groupRoutesForLedger(routes) {
     var providerGroups = new Map();
     routes.forEach(function (route, index) {
-      var provider = targetProviderName(route);
+      var provider = sourceProviderName(route);
       var format = runtimeFormat(route);
       if (!providerGroups.has(provider)) {
         providerGroups.set(provider, { provider: provider, routeCount: 0, endpointsByFormat: new Map(), endpoints: [] });
@@ -935,23 +935,25 @@
     var endpointCount = groups.reduce(function (total, group) {
       return total + group.endpoints.length;
     }, 0);
-    return groups.length + " " + pluralize(groups.length, "provider") +
+    return groups.length + " source " + pluralize(groups.length, "provider") +
       " · " + endpointCount + " " + pluralize(endpointCount, "endpoint") +
       " · " + routes.length + " " + pluralize(routes.length, "route");
   }
 
   function providerDisplayName(provider) {
     var labels = {
-      bedrock: "Bedrock Mantle",
-      codex: "Codex OAuth",
-      google: "Google direct"
+      cursor: "Cursor / Composer",
+      openai: "OpenAI",
+      anthropic: "Anthropic",
+      google: "Google",
+      custom: "Custom"
     };
     return labels[provider] || provider;
   }
 
   function providerOrder(provider) {
-    var index = PROVIDERS.indexOf(provider);
-    return index === -1 ? PROVIDERS.length : index;
+    var index = SOURCE_PROVIDERS.indexOf(provider);
+    return index === -1 ? SOURCE_PROVIDERS.length : index;
   }
 
   function endpointOrder(format) {
@@ -1091,7 +1093,7 @@
     card.className = "route-card";
     card.dataset.routeSelect = routeId;
     card.setAttribute("aria-current", String(routeId === state.selectedRouteId));
-    applyProviderStyle(card, targetProviderName(route));
+    applyProviderStyle(card, sourceProviderName(route));
 
     card.appendChild(strong(route.__card_title || sourceModelName(route)));
     card.appendChild(span("subtle", route.__card_subtitle || runtimeFormat(route) + " → " + targetProviderName(route) + " / " + targetModelName(route)));
@@ -1345,9 +1347,10 @@
     list.className = "definition-list";
     addDefinition(list, "Origin", isHotRoute(route) ? "User-defined adapter" : "Catalog route");
     addDefinition(list, "Route ID", routeIdentity(route, 0));
+    addDefinition(list, "Source provider", providerDisplayName(sourceProviderName(route)));
     addDefinition(list, "Source model", sourceModelName(route));
     addDefinition(list, "Runtime format", runtimeFormat(route));
-    addDefinition(list, "Target provider", targetProviderName(route));
+    addDefinition(list, "Target adapter", targetProviderName(route));
     addDefinition(list, "Target model", targetModelName(route));
     addDefinition(list, "Target format", targetFormat(route));
     addDefinition(list, "Config index", routeConfigIndex(route) == null ? "catalog" : routeConfigIndex(route));
@@ -1406,7 +1409,7 @@
       button.setAttribute("role", "option");
       button.setAttribute("aria-selected", String(index === state.selectedDraftRouteIndex));
       button.setAttribute("aria-current", String(index === state.selectedDraftRouteIndex));
-      applyProviderStyle(button, route.target.provider);
+      applyProviderStyle(button, inferSourceProvider(route.source.model));
       button.appendChild(strong(route.source.model || "New source"));
       button.appendChild(span("subtle", (route.source.format || "*") + " → " + route.target.provider + " / " + (route.target.model || "New target")));
       var chipRow = document.createElement("span");
@@ -1622,6 +1625,36 @@
     return stringValue(nestedValue(route, ["target", "provider"], route.target_provider || route.provider || route.targetProvider), "unknown provider");
   }
 
+  function sourceProviderName(route) {
+    return stringValue(
+      nestedValue(route, ["source", "source_provider"], route.source_provider || route.sourceProvider),
+      inferSourceProvider(sourceModelName(route))
+    );
+  }
+
+  function inferSourceProvider(model) {
+    var value = stringValue(model, "").toLowerCase();
+    if (value === "composer-2" || value === "composer-2-fast" || value === "composer-1.5" || value.indexOf("composer-") === 0) {
+      return "cursor";
+    }
+    if (value.indexOf("openai/") === 0 || value.indexOf("openai:") === 0 || value.indexOf("gpt-") === 0 || openAiOSeriesSourceModel(value)) {
+      return "openai";
+    }
+    if (value.indexOf("anthropic/") === 0 || value.indexOf("anthropic.") === 0 || value.indexOf("claude-") === 0) {
+      return "anthropic";
+    }
+    if (value.indexOf("google/") === 0 || value.indexOf("gemini-") === 0 || value.indexOf("models/gemini-") === 0) {
+      return "google";
+    }
+    return "custom";
+  }
+
+  function openAiOSeriesSourceModel(model) {
+    return ["o1", "o3", "o4"].some(function (prefix) {
+      return model === prefix || model.indexOf(prefix + "-") === 0;
+    });
+  }
+
   function targetModelName(route) {
     return stringValue(nestedValue(route, ["target", "model"], route.target_model || route.targetModel), "unknown target");
   }
@@ -1679,21 +1712,23 @@
   function providerNames(graph, routes) {
     var names = new Set();
     routes.forEach(function (route) {
-      names.add(targetProviderName(route));
+      names.add(sourceProviderName(route));
     });
     graphNodes(graph).forEach(function (node) {
-      var provider = nodeProviderName(node);
+      var provider = stringValue(node.source_provider || node.sourceProvider, "");
       if (provider) {
         names.add(provider);
       }
     });
     graphEdges(graph).forEach(function (edge) {
-      var provider = edgeProviderName(edge);
+      var provider = stringValue(edge.source_provider || edge.sourceProvider, "");
       if (provider) {
         names.add(provider);
       }
     });
-    return Array.from(names).filter(Boolean).sort();
+    return Array.from(names).filter(Boolean).sort(function (a, b) {
+      return providerOrder(a) - providerOrder(b) || a.localeCompare(b);
+    });
   }
 
   function assignProviderStyles(graph, routes) {
@@ -1775,7 +1810,7 @@
       var sourceId = "source:" + sourceModelName(route) + ":" + runtimeFormat(route);
       var targetId = "target:" + targetProviderName(route) + ":" + targetModelName(route);
       if (!byId.has(sourceId)) {
-        byId.set(sourceId, { id: sourceId, role: "source", label: sourceModelName(route), format: runtimeFormat(route) });
+        byId.set(sourceId, { id: sourceId, role: "source", source_provider: sourceProviderName(route), label: sourceModelName(route), format: runtimeFormat(route) });
       }
       if (!byId.has(targetId)) {
         byId.set(targetId, { id: targetId, role: "target", provider: targetProviderName(route), label: targetModelName(route), format: targetFormat(route) });
@@ -1793,6 +1828,7 @@
         from: "source:" + sourceModelName(route) + ":" + runtimeFormat(route),
         to: "target:" + targetProviderName(route) + ":" + targetModelName(route),
         runtime_format: runtimeFormat(route),
+        source_provider: sourceProviderName(route),
         target_provider: targetProviderName(route)
       };
     });
@@ -1811,7 +1847,7 @@
   }
 
   function nodeProviderName(node) {
-    return stringValue(node.provider || node.target_provider, "");
+    return stringValue(node.source_provider || node.sourceProvider || node.provider || node.target_provider, "");
   }
 
   function nodeLabel(node) {
@@ -1839,7 +1875,7 @@
   }
 
   function edgeProviderName(edge) {
-    return stringValue(edge.target_provider || edge.provider || nestedValue(edge, ["target", "provider"], ""), "");
+    return stringValue(edge.source_provider || edge.sourceProvider || edge.target_provider || edge.provider || nestedValue(edge, ["target", "provider"], ""), "");
   }
 
   function edgeText(edge) {

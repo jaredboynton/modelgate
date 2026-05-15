@@ -1396,6 +1396,104 @@ async fn integration_routes_config_graph_post_semantic_row_error_returns_invalid
 }
 
 #[tokio::test]
+async fn integration_routes_config_graph_projects_composer_source_provider() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    let state = test_state(&codex_home, &auth_home);
+    let draft = serde_json::json!({
+        "routes": [{
+            "source": { "model": "composer-2-fast", "format": "responses" },
+            "target": { "provider": "codex", "model": "composer-2-fast", "format": "responses" }
+        }]
+    });
+
+    let (status, _headers, body) = request_json_with_headers(
+        state,
+        "POST",
+        "/api/config/graph",
+        &[],
+        Some(&draft.to_string()),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_graph_v2_contract(&body);
+    assert_eq!(body["draft_status"], "valid");
+    assert_eq!(body["config_routes"][0]["source_provider"], "cursor");
+    assert!(body["effective_routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|route| route["source_model"] == "composer-2-fast"
+            && route["source_provider"] == "cursor"
+            && route["target_provider"] == "codex"
+            && route["target_model"] == "composer-2-fast"));
+    assert!(body["sources"].as_array().unwrap().iter().any(|source| {
+        source["model"] == "composer-2-fast" && source["source_provider"] == "cursor"
+    }));
+    assert!(body["route_cards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|card| card["source"]["model"] == "composer-2-fast"
+            && card["source"]["source_provider"] == "cursor"
+            && card["target"]["provider"] == "codex"
+            && card["target"]["model"] == "composer-2-fast"));
+    assert!(body["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|node| { node["kind"] == "source_model" && node["source_provider"] == "cursor" }));
+    assert!(body["edges"].as_array().unwrap().iter().any(|edge| {
+        edge["route_id"] == "effective:composer-2-fast:responses"
+            && edge["source_provider"] == "cursor"
+    }));
+}
+
+#[tokio::test]
+async fn integration_routes_config_graph_projects_composer_source_provider_and_rejects_cursor_target(
+) {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    let state = test_state(&codex_home, &auth_home);
+    let draft = serde_json::json!({
+        "routes": [{
+            "source": { "model": "composer-2-fast", "format": "responses" },
+            "target": { "provider": "cursor", "model": "composer-2-fast" }
+        }]
+    });
+
+    let (status, _headers, body) = request_json_with_headers(
+        state,
+        "POST",
+        "/api/config/graph",
+        &[],
+        Some(&draft.to_string()),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_graph_v2_contract(&body);
+    assert_eq!(body["draft_status"], "invalid");
+    let card = body["route_cards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|card| card["id"] == "config:0")
+        .unwrap();
+    assert_eq!(card["source"]["source_provider"], "cursor");
+    assert_eq!(card["target"]["provider"], "unsupported");
+    assert!(body["diagnostics_v2"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|diagnostic| {
+            diagnostic["code"] == "unsupported_target_provider"
+                && diagnostic["path"] == "$.routes[0].target.provider"
+        }));
+}
+
+#[tokio::test]
 async fn integration_routes_config_graph_post_partially_projectable_row_reports_partial_projection()
 {
     let codex_home = tempfile::tempdir().unwrap();

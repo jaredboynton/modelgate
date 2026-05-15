@@ -44,6 +44,7 @@ pub struct ConfigGraph {
 pub struct GraphSource {
     pub model: String,
     pub origin: GraphRouteOrigin,
+    pub source_provider: SourceProvider,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -59,6 +60,7 @@ pub struct ConfigRouteProjection {
     pub enabled: bool,
     pub mutable: bool,
     pub source_model: String,
+    pub source_provider: SourceProvider,
     pub source_runtime_format: String,
     pub target_provider: Provider,
     pub target_model: String,
@@ -72,6 +74,7 @@ pub struct EffectiveRouteProjection {
     pub origin: GraphRouteOrigin,
     pub mutable: bool,
     pub source_model: String,
+    pub source_provider: SourceProvider,
     pub source_runtime_format: &'static str,
     pub target_provider: Provider,
     pub target_model: String,
@@ -86,6 +89,8 @@ pub struct GraphNode {
     pub label: String,
     pub kind: GraphNodeKind,
     pub provider: Option<Provider>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_provider: Option<SourceProvider>,
     pub mutable: bool,
 }
 
@@ -96,6 +101,7 @@ pub struct GraphEdge {
     pub target: String,
     pub route_id: String,
     pub source_runtime_format: &'static str,
+    pub source_provider: SourceProvider,
     pub origin: GraphRouteOrigin,
 }
 
@@ -143,6 +149,8 @@ pub struct GroupV2 {
     pub counts: GroupCountsV2,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<Provider>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_provider: Option<SourceProvider>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_format: Option<String>,
 }
@@ -209,7 +217,18 @@ pub struct RouteCardV2 {
 #[derive(Debug, Clone, Serialize)]
 pub struct RouteCardSourceV2 {
     pub model: String,
+    pub source_provider: SourceProvider,
     pub runtime_format: String,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceProvider {
+    Cursor,
+    Openai,
+    Anthropic,
+    Google,
+    Custom,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -353,6 +372,7 @@ fn build_config_graph_from_valid(
             enabled: route.enabled,
             mutable: true,
             source_model: route.source.model.clone(),
+            source_provider: source_provider_for_model(&route.source.model),
             source_runtime_format,
             target_provider: route.target.provider,
             target_model: route.target.model.clone(),
@@ -387,6 +407,7 @@ fn build_config_graph_from_valid(
                     origin: GraphRouteOrigin::HotConfig,
                     mutable: true,
                     source_model: source_model.clone(),
+                    source_provider: source_provider_for_model(source_model),
                     source_runtime_format: runtime_format,
                     target_provider: winner.target_provider,
                     target_model: winner.target_model,
@@ -828,6 +849,7 @@ fn build_route_cards(
             enabled: true,
             source: RouteCardSourceV2 {
                 model: route.source_model.clone(),
+                source_provider: route.source_provider,
                 runtime_format: route.source_runtime_format.to_string(),
             },
             target: RouteCardTargetV2 {
@@ -870,6 +892,7 @@ fn build_route_cards(
             enabled: route.enabled,
             source: RouteCardSourceV2 {
                 model: route.source_model.clone(),
+                source_provider: source_provider_for_model(&route.source_model),
                 runtime_format: route.source_runtime_format.clone(),
             },
             target: RouteCardTargetV2 {
@@ -933,7 +956,10 @@ fn diagnostic_ids_for_route(diagnostics: &[DiagnosticV2], route_id: &str) -> Vec
 
 fn group_ids_for_card(card: &RouteCardV2) -> Vec<String> {
     vec![
-        format!("provider:{}", provider_slug(card.target.provider)),
+        format!(
+            "source_provider:{}",
+            source_provider_slug(card.source.source_provider)
+        ),
         format!("runtime:{}", card.source.runtime_format),
         format!("state:{}", route_card_state_slug(card.state)),
     ]
@@ -984,7 +1010,7 @@ fn build_groups(route_cards: &[RouteCardV2], diagnostics: &[DiagnosticV2]) -> Ve
                     }
                 }
             }
-            let (kind, label, provider, runtime_format) = group_metadata(&id);
+            let (kind, label, provider, source_provider, runtime_format) = group_metadata(&id);
             GroupV2 {
                 id,
                 label,
@@ -994,19 +1020,43 @@ fn build_groups(route_cards: &[RouteCardV2], diagnostics: &[DiagnosticV2]) -> Ve
                 collapsed_default: false,
                 counts,
                 provider,
+                source_provider,
                 runtime_format,
             }
         })
         .collect()
 }
 
-fn group_metadata(id: &str) -> (GroupKindV2, String, Option<Provider>, Option<String>) {
+fn group_metadata(
+    id: &str,
+) -> (
+    GroupKindV2,
+    String,
+    Option<Provider>,
+    Option<SourceProvider>,
+    Option<String>,
+) {
+    if let Some(source_provider) = id.strip_prefix("source_provider:") {
+        let source_provider =
+            parse_source_provider(source_provider).unwrap_or(SourceProvider::Custom);
+        return (
+            GroupKindV2::SourceFamily,
+            format!(
+                "Source provider: {source_provider}",
+                source_provider = source_provider_slug(source_provider)
+            ),
+            None,
+            Some(source_provider),
+            None,
+        );
+    }
     if let Some(provider) = id.strip_prefix("provider:") {
         let provider = parse_provider(provider).unwrap_or(Provider::Unsupported);
         return (
             GroupKindV2::Provider,
             format!("Provider: {provider}", provider = provider_slug(provider)),
             Some(provider),
+            None,
             None,
         );
     }
@@ -1015,11 +1065,18 @@ fn group_metadata(id: &str) -> (GroupKindV2, String, Option<Provider>, Option<St
             GroupKindV2::RuntimeFormat,
             format!("Runtime: {runtime_format}"),
             None,
+            None,
             Some(runtime_format.to_string()),
         );
     }
     let state = id.strip_prefix("state:").unwrap_or(id);
-    (GroupKindV2::State, format!("State: {state}"), None, None)
+    (
+        GroupKindV2::State,
+        format!("State: {state}"),
+        None,
+        None,
+        None,
+    )
 }
 
 fn convert_diagnostics_v2(diagnostics: &[ConfigDiagnostic]) -> Vec<DiagnosticV2> {
@@ -1125,6 +1182,62 @@ fn provider_slug(provider: Provider) -> &'static str {
     }
 }
 
+fn source_provider_for_model(model: &str) -> SourceProvider {
+    let lower = model.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "composer-2" | "composer-2-fast" | "composer-1.5"
+    ) || lower.starts_with("composer-")
+    {
+        SourceProvider::Cursor
+    } else if lower.starts_with("openai/")
+        || lower.starts_with("openai:")
+        || lower.starts_with("gpt-")
+        || openai_o_series_source_model(&lower)
+    {
+        SourceProvider::Openai
+    } else if lower.starts_with("anthropic/")
+        || lower.starts_with("claude-")
+        || lower.starts_with("anthropic.")
+    {
+        SourceProvider::Anthropic
+    } else if lower.starts_with("google/")
+        || lower.starts_with("gemini-")
+        || lower.starts_with("models/gemini-")
+    {
+        SourceProvider::Google
+    } else {
+        SourceProvider::Custom
+    }
+}
+
+fn openai_o_series_source_model(model: &str) -> bool {
+    ["o1", "o3", "o4"]
+        .into_iter()
+        .any(|prefix| model == prefix || model.starts_with(&format!("{prefix}-")))
+}
+
+fn parse_source_provider(source_provider: &str) -> Option<SourceProvider> {
+    match source_provider {
+        "cursor" => Some(SourceProvider::Cursor),
+        "openai" => Some(SourceProvider::Openai),
+        "anthropic" => Some(SourceProvider::Anthropic),
+        "google" => Some(SourceProvider::Google),
+        "custom" => Some(SourceProvider::Custom),
+        _ => None,
+    }
+}
+
+fn source_provider_slug(source_provider: SourceProvider) -> &'static str {
+    match source_provider {
+        SourceProvider::Cursor => "cursor",
+        SourceProvider::Openai => "openai",
+        SourceProvider::Anthropic => "anthropic",
+        SourceProvider::Google => "google",
+        SourceProvider::Custom => "custom",
+    }
+}
+
 fn route_card_state_slug(state: RouteCardState) -> &'static str {
     match state {
         RouteCardState::Effective => "effective",
@@ -1204,6 +1317,7 @@ fn catalog_effective_route(
         origin: GraphRouteOrigin::Catalog,
         mutable: false,
         source_model: model.id.to_string(),
+        source_provider: source_provider_for_model(model.id),
         source_runtime_format: runtime_format,
         target_provider: model.provider,
         target_model: model.upstream_model.to_string(),
@@ -1284,6 +1398,7 @@ fn build_sources(
             GraphSource {
                 model: model.clone(),
                 origin,
+                source_provider: source_provider_for_model(model),
             }
         })
         .collect()
@@ -1304,6 +1419,7 @@ fn build_nodes_and_edges(
                 label: format!("{} ({})", route.source_model, route.source_runtime_format),
                 kind: GraphNodeKind::SourceModel,
                 provider: None,
+                source_provider: Some(route.source_provider),
                 mutable: route.mutable,
             });
         }
@@ -1315,6 +1431,7 @@ fn build_nodes_and_edges(
                 label: route.target_model.clone(),
                 kind: GraphNodeKind::TargetModel,
                 provider: Some(route.target_provider),
+                source_provider: None,
                 mutable: route.mutable,
             });
         }
@@ -1325,6 +1442,7 @@ fn build_nodes_and_edges(
             target: target_id,
             route_id: route.route_id.clone(),
             source_runtime_format: route.source_runtime_format,
+            source_provider: route.source_provider,
             origin: route.origin,
         });
     }
@@ -1484,7 +1602,11 @@ mod tests {
             .find(|card| card.id == "config:0")
             .unwrap();
         assert_eq!(card.state, RouteCardState::Effective);
-        assert!(card.group_ids.iter().any(|group| group == "provider:codex"));
+        assert_eq!(card.source.source_provider, SourceProvider::Custom);
+        assert!(card
+            .group_ids
+            .iter()
+            .any(|group| group == "source_provider:custom"));
         assert!(card
             .group_ids
             .iter()
@@ -1494,13 +1616,51 @@ mod tests {
             .iter()
             .any(|group| group == "state:effective"));
         assert!(graph.groups.iter().any(|group| {
-            group.id == "provider:codex"
+            group.id == "source_provider:custom"
                 && group.counts.total > 0
                 && group
                     .route_ids
                     .iter()
                     .any(|route_id| route_id == "config:0")
         }));
+    }
+
+    #[test]
+    fn hot_config_graph_classifies_composer_source_provider_as_cursor() {
+        let graph = graph(json!({
+            "routes": [{
+                "source": { "model": "composer-2-fast", "format": "responses" },
+                "target": { "provider": "codex", "model": "composer-2-fast", "format": "responses" }
+            }]
+        }));
+
+        let config_route = &graph.config_routes[0];
+        assert_eq!(config_route.source_provider, SourceProvider::Cursor);
+        assert_eq!(config_route.target_provider, Provider::Codex);
+        assert_eq!(config_route.target_model, "composer-2-fast");
+
+        let route = effective(&graph, "composer-2-fast", "responses");
+        assert_eq!(route.source_provider, SourceProvider::Cursor);
+        assert_eq!(route.target_provider, Provider::Codex);
+        assert_eq!(route.target_model, "composer-2-fast");
+
+        let source = graph
+            .sources
+            .iter()
+            .find(|source| source.model == "composer-2-fast")
+            .unwrap();
+        assert_eq!(source.source_provider, SourceProvider::Cursor);
+
+        let card = graph
+            .route_cards
+            .iter()
+            .find(|card| card.id == "config:0")
+            .unwrap();
+        assert_eq!(card.source.source_provider, SourceProvider::Cursor);
+        assert!(card
+            .group_ids
+            .iter()
+            .any(|group| group == "source_provider:cursor"));
     }
 
     #[test]
@@ -1638,6 +1798,30 @@ mod tests {
                 && diagnostic.blocking
                 && diagnostic.path.as_deref() == Some("$.routes[0].target.provider")
                 && diagnostic.route_id.as_deref() == Some("config:0")
+        }));
+    }
+
+    #[test]
+    fn hot_config_graph_cursor_target_provider_remains_invalid() {
+        let graph = build_config_graph(json!({
+            "routes": [{
+                "source": { "model": "composer-2", "format": "responses" },
+                "target": { "provider": "cursor", "model": "composer-2" }
+            }]
+        }))
+        .unwrap();
+
+        assert_eq!(graph.draft_status, DraftStatus::Invalid);
+        let card = graph
+            .route_cards
+            .iter()
+            .find(|card| card.id == "config:0")
+            .unwrap();
+        assert_eq!(card.source.source_provider, SourceProvider::Cursor);
+        assert_eq!(card.target.provider, Provider::Unsupported);
+        assert!(graph.diagnostics_v2.iter().any(|diagnostic| {
+            diagnostic.code == "unsupported_target_provider"
+                && diagnostic.path.as_deref() == Some("$.routes[0].target.provider")
         }));
     }
 
