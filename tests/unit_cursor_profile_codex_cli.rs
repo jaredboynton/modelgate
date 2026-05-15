@@ -1,17 +1,3 @@
-//! Unit tests for the CodexCli profile renderer.
-//!
-//! Locks the Cursor `ExecKind` x CodexCli profile cell matrix per the
-//! round-5 design at `.omx/research/cursor-phase0/client-profile-design-v3-deltas.md`
-//! and the policy doc at `.omx/research/cursor-phase0/client-profile-policy.md`.
-//!
-//! Codex CLI built-in tool surface citations live in
-//! `.omx/research/cursor-phase0/client-tool-codex.md`:
-//! - `shell_command` / `exec_command` / `write_stdin` / `apply_patch`
-//!   sourced from `codex-rs/core/src/tools/handlers/shell_spec.rs` and
-//!   `codex-rs/core/src/tools/handlers/apply_patch_spec.rs`.
-//! - `list_mcp_resources` / `read_mcp_resource` from
-//!   `codex-rs/core/src/tools/handlers/mcp_resource_spec.rs`.
-
 use unified_model_proxy_v2::upstream::cursor::profiles::{
     codex_cli, refuse_code, RenderedToolCall,
 };
@@ -115,10 +101,6 @@ fn codex_grep_emits_shell_command_grep() {
 
 #[test]
 fn codex_shell_emits_shell_command_with_bash_dash_c() {
-    // ShellArgs `{ command = 1, working_directory = 2 }`. CodexCli wraps the
-    // command string in `["bash", "-c", "<raw>"]` because Codex's
-    // `shell_command` takes a single command string but Cursor exec args
-    // arrive as an opaque shell line.
     let args = [
         encode_string_field(1, "ls -la /tmp"),
         encode_string_field(2, "/repo"),
@@ -169,8 +151,6 @@ fn codex_shell_stream_emits_exec_command() {
 
 #[test]
 fn codex_background_shell_spawn_refuses_with_capability_unsupported() {
-    // Codex CLI's `exec_command` does not natively background a shell; the
-    // proxy refuses rather than synthesizing a fake session id.
     let args = [
         encode_string_field(1, "long-running"),
         encode_string_field(2, "/tmp"),
@@ -192,7 +172,6 @@ fn codex_background_shell_spawn_refuses_with_capability_unsupported() {
 
 #[test]
 fn codex_write_shell_stdin_emits_write_stdin() {
-    // WriteShellStdinArgs `{ shell_id = 1 (varint), input = 2 (string) }`.
     let args = [
         encode_int64_field(1, 17),
         encode_string_field(2, "hello stdin"),
@@ -210,8 +189,6 @@ fn codex_write_shell_stdin_emits_write_stdin() {
 
 #[test]
 fn codex_write_refuses_with_missing_required_field() {
-    // Cursor `Write` carries `path` only; Codex `apply_patch` needs the body
-    // bytes. Wave 0 refuses pending Live Phase 0.
     let args = encode_string_field(1, "/tmp/out.txt");
     let exec = build_exec(ExecKind::Write, args);
 
@@ -222,7 +199,7 @@ fn codex_write_refuses_with_missing_required_field() {
 
     assert_eq!(exec_id, FIXTURE_EXEC_ID);
     assert!(
-        reason.contains("Live Phase 0") || reason.contains("body"),
+        reason.contains("body"),
         "reason should reference missing body, got {reason}",
     );
 }
@@ -269,9 +246,6 @@ fn codex_diagnostics_refuses_with_shape_unknown() {
 
 #[test]
 fn codex_request_context_refuses_internal() {
-    // RequestContext is proxy-internal; the run engine answers it locally and
-    // never dispatches it to a renderer. If it ever reaches the renderer the
-    // refusal is the safe outcome.
     let exec = build_exec(ExecKind::RequestContext, Vec::new());
 
     let (exec_id, reason) = assert_refuse(
@@ -307,7 +281,6 @@ fn codex_list_mcp_resources_emits_built_in() {
 
 #[test]
 fn codex_read_mcp_resource_emits_built_in() {
-    // ReadMcpResourceExecArgs `{ server = 1, uri = 2 }`.
     let args = [
         encode_string_field(1, "fs"),
         encode_string_field(2, "file:///tmp/notes.md"),
@@ -325,9 +298,6 @@ fn codex_read_mcp_resource_emits_built_in() {
 
 #[test]
 fn codex_mcp_namespaces_with_double_underscore() {
-    // McpArgs uses field 5 for the bare tool name, field 4 for the server
-    // identifier, field 3 for the tool_call_id, and a `repeated MapEntry`
-    // arguments list at field 2 (key=1, value=bytes-of-JSON at 2).
     let argument_entry = [
         encode_string_field(1, "query"),
         encode_message_field(2, br#""hello""#),

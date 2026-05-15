@@ -1,16 +1,3 @@
-//! Unit tests for the Cursor client-profile detector.
-//!
-//! Spec source: `.omx/research/cursor-phase0/client-profile-design-v3-deltas.md`
-//! (CRIT-2 pseudocode lines 60-126) and `.omx/research/cursor-phase0/
-//! client-headers-inventory.md`. The detector module at
-//! `src/upstream/cursor/client_profile.rs` is implemented by Lane 2 in
-//! parallel. Tests are written against the API spec; they will compile and
-//! pass once Lane 2 lands the module.
-//!
-//! Trust-gated and override env tests acquire `ENV_LOCK` to serialize env
-//! mutation across the suite. The `EnvGuard` RAII helpers restore the prior
-//! env state on drop so tests do not leak across boundaries.
-
 use std::ffi::OsString;
 use std::sync::Mutex;
 
@@ -18,9 +5,6 @@ use axum::http::header::USER_AGENT;
 use axum::http::{HeaderMap, HeaderValue};
 
 use unified_model_proxy_v2::upstream::cursor::client_profile::*;
-
-// Single global mutex guarding all env mutations in this file. Acquired by
-// every env-touching test so concurrent threads cannot stomp each other.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 struct EnvGuard {
@@ -58,10 +42,6 @@ fn headers_with(pairs: &[(&'static str, &str)]) -> HeaderMap {
     }
     headers
 }
-
-// ----------------------------------------------------------------------------
-// parse_truthy_env
-// ----------------------------------------------------------------------------
 
 #[test]
 fn parse_truthy_env_accepts_one() {
@@ -152,10 +132,6 @@ fn parse_truthy_env_rejects_trueish() {
 fn parse_truthy_env_rejects_none() {
     assert!(!parse_truthy_env(None));
 }
-
-// ----------------------------------------------------------------------------
-// parse_profile_token
-// ----------------------------------------------------------------------------
 
 #[test]
 fn parse_profile_token_codex_short_alias() {
@@ -291,7 +267,6 @@ fn parse_profile_token_rejects_unknown() {
 
 #[test]
 fn parse_profile_token_rejects_bare_openai() {
-    // Bare "openai" without the generic_ prefix is not accepted.
     assert!(parse_profile_token("openai").is_none());
 }
 
@@ -302,10 +277,6 @@ fn parse_profile_token_trims_whitespace() {
         Some(ClientProfile::Droid)
     ));
 }
-
-// ----------------------------------------------------------------------------
-// is_first_party_codex_originator
-// ----------------------------------------------------------------------------
 
 #[test]
 fn codex_originator_accepts_cli_rs() {
@@ -334,7 +305,6 @@ fn codex_originator_accepts_codex_chatgpt_desktop() {
 
 #[test]
 fn codex_originator_accepts_capital_codex_space_only() {
-    // Exact prefix `Codex ` with a trailing space.
     assert!(is_first_party_codex_originator("Codex "));
 }
 
@@ -350,19 +320,16 @@ fn codex_originator_accepts_capital_codex_versioned() {
 
 #[test]
 fn codex_originator_rejects_lowercase_codex_space() {
-    // Case-sensitive: `codex ` (lowercase) is not accepted.
     assert!(!is_first_party_codex_originator("codex "));
 }
 
 #[test]
 fn codex_originator_rejects_uppercase_codex_space() {
-    // Case-sensitive: `CODEX ` is not accepted either.
     assert!(!is_first_party_codex_originator("CODEX "));
 }
 
 #[test]
 fn codex_originator_rejects_versioned_cli_rs() {
-    // First-party token list is exact match; UA-style versioned tokens are rejected.
     assert!(!is_first_party_codex_originator("codex_cli_rs/2.1.0"));
 }
 
@@ -378,14 +345,8 @@ fn codex_originator_rejects_empty() {
 
 #[test]
 fn codex_originator_rejects_trailing_space_on_exact_token() {
-    // `codex_cli_rs ` with trailing space is not the exact first-party token,
-    // and does not have the `Codex ` capital prefix.
     assert!(!is_first_party_codex_originator("codex_cli_rs "));
 }
-
-// ----------------------------------------------------------------------------
-// is_claude_code_x_app
-// ----------------------------------------------------------------------------
 
 #[test]
 fn claude_code_x_app_accepts_cli() {
@@ -409,8 +370,6 @@ fn claude_code_x_app_trims_cli_bg() {
 
 #[test]
 fn claude_code_x_app_rejects_cli_headless() {
-    // Only exact `cli` / `cli-bg` after trim; future modes are not implicitly
-    // accepted via prefix matching.
     assert!(!is_claude_code_x_app("cli-headless"));
 }
 
@@ -436,7 +395,6 @@ fn claude_code_x_app_rejects_empty() {
 
 #[test]
 fn claude_code_x_app_rejects_uppercase_cli() {
-    // Value comparison is case-sensitive; CLI != cli.
     assert!(!is_claude_code_x_app("CLI"));
 }
 
@@ -444,10 +402,6 @@ fn claude_code_x_app_rejects_uppercase_cli() {
 fn claude_code_x_app_rejects_uppercase_cli_bg() {
     assert!(!is_claude_code_x_app("CLI-bg"));
 }
-
-// ----------------------------------------------------------------------------
-// detect_client_profile — UA fallback and trust-off behavior (env-isolated)
-// ----------------------------------------------------------------------------
 
 #[test]
 fn detect_empty_headers_falls_back_to_generic_openai() {
@@ -469,8 +423,6 @@ fn detect_originator_ignored_when_trust_off() {
 
     let headers = headers_with(&[(HEADER_ORIGINATOR, "codex_cli_rs")]);
     let detection = detect_client_profile(&headers);
-    // Trust off: originator is ignored. UA is empty so detection falls
-    // through to GenericOpenAi/None.
     assert!(matches!(detection.profile, ClientProfile::GenericOpenAi));
     assert!(matches!(detection.signal, ProfileSignal::None));
 }
@@ -586,10 +538,6 @@ fn detect_curl_user_agent_falls_through_to_generic_openai() {
     assert!(matches!(detection.signal, ProfileSignal::None));
 }
 
-// ----------------------------------------------------------------------------
-// detect_client_profile — trust-gated branches
-// ----------------------------------------------------------------------------
-
 #[test]
 fn detect_trusted_originator_resolves_codex_cli() {
     let _guard = ENV_LOCK.lock().unwrap();
@@ -631,9 +579,6 @@ fn detect_trusted_x_app_cli_headless_falls_through() {
     let _guard = ENV_LOCK.lock().unwrap();
     let _trust = EnvGuard::set(ENV_TRUST_HEADERS, "1");
     let _override = EnvGuard::unset(ENV_OVERRIDE);
-
-    // Trust is on, but the predicate rejects `cli-headless`. UA falls
-    // through; with no UA, the residual default applies.
     let headers = headers_with(&[(HEADER_X_APP, "cli-headless")]);
     let detection = detect_client_profile(&headers);
     assert!(matches!(detection.profile, ClientProfile::GenericOpenAi));
@@ -660,7 +605,6 @@ fn detect_override_header_ignored_when_trust_off() {
 
     let headers = headers_with(&[(HEADER_OVERRIDE, "codex")]);
     let detection = detect_client_profile(&headers);
-    // Trust off: override header is ignored. No UA, so residual default.
     assert!(matches!(detection.profile, ClientProfile::GenericOpenAi));
     assert!(matches!(detection.signal, ProfileSignal::None));
 }
@@ -668,7 +612,6 @@ fn detect_override_header_ignored_when_trust_off() {
 #[test]
 fn detect_env_override_wins_regardless_of_trust() {
     let _guard = ENV_LOCK.lock().unwrap();
-    // Env override is process-global; trust gate does not apply.
     let _trust = EnvGuard::unset(ENV_TRUST_HEADERS);
     let _override = EnvGuard::set(ENV_OVERRIDE, "claude_code");
 
@@ -683,9 +626,6 @@ fn detect_invalid_env_override_falls_through_safely() {
     let _guard = ENV_LOCK.lock().unwrap();
     let _trust = EnvGuard::unset(ENV_TRUST_HEADERS);
     let _override = EnvGuard::set(ENV_OVERRIDE, "invalid_value");
-
-    // Invalid override: must not crash; falls through to detection. With
-    // empty headers and trust off, residual default is GenericOpenAi/None.
     let headers = HeaderMap::new();
     let detection = detect_client_profile(&headers);
     assert!(matches!(detection.profile, ClientProfile::GenericOpenAi));

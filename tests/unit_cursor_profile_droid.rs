@@ -1,22 +1,3 @@
-//! Unit tests for the Droid profile renderer.
-//!
-//! Locks the Cursor `ExecKind` x Droid profile cell matrix per the round-5
-//! design at `.omx/research/cursor-phase0/client-profile-design-v3-deltas.md`
-//! and the policy doc at `.omx/research/cursor-phase0/client-profile-policy.md`.
-//!
-//! Droid built-in tool surface citations live in
-//! `.omx/research/cursor-phase0/client-tool-droid.md`:
-//! - `Read`, `LS`, `Grep`, `Execute`, `FetchUrl` from the live capture
-//!   against `factory-cli/0.126.0`.
-//! - MCP namespacing as `<server>___<tool>` (TRIPLE underscore, Droid-
-//!   specific) from the same capture.
-//!
-//! Risk metadata synth defaults (`riskLevel: medium`,
-//! `riskLevelReason: "automated proxy invocation"` for shells;
-//! `riskLevel: high`, `riskLevelReason: "file deletion requested by Cursor exec"`
-//! for delete) are pinned in the Synthesized Defaults section of
-//! `client-profile-policy.md`.
-
 use unified_model_proxy_v2::upstream::cursor::profiles::{droid, refuse_code, RenderedToolCall};
 use unified_model_proxy_v2::upstream::cursor::proto::{
     encode_message_field, encode_string_field, ExecKind, ExecRequest,
@@ -87,7 +68,6 @@ fn droid_ls_emits_uppercase_ls_with_path() {
 
 #[test]
 fn droid_grep_emits_grep() {
-    // GrepArgs `{ pattern = 1, path = 2, output_mode = 3 }`.
     let args = [
         encode_string_field(1, "needle"),
         encode_string_field(2, "/repo"),
@@ -107,7 +87,6 @@ fn droid_grep_emits_grep() {
 
 #[test]
 fn droid_shell_emits_execute_with_medium_risk() {
-    // ShellArgs `{ command = 1, working_directory = 2 }`.
     let args = [
         encode_string_field(1, "ls -la /tmp"),
         encode_string_field(2, "/repo"),
@@ -130,8 +109,6 @@ fn droid_shell_emits_execute_with_medium_risk() {
 
 #[test]
 fn droid_shell_stream_emits_execute_with_medium_risk() {
-    // ShellStream renders identically to Shell — Droid has no streaming
-    // primitive; the risk metadata stays at medium.
     let args = [
         encode_string_field(1, "tail -f log"),
         encode_string_field(2, "/var/log"),
@@ -189,7 +166,6 @@ fn droid_write_shell_stdin_refuses_with_capability_unsupported() {
 
 #[test]
 fn droid_write_refuses_with_missing_required_field() {
-    // Cursor `Write` carries `path` only; Droid `Create` needs `content`.
     let args = encode_string_field(1, "/tmp/out.txt");
     let exec = build_exec(ExecKind::Write, args);
 
@@ -198,7 +174,7 @@ fn droid_write_refuses_with_missing_required_field() {
 
     assert_eq!(exec_id, FIXTURE_EXEC_ID);
     assert!(
-        reason.contains("content") || reason.contains("Live Phase 0"),
+        reason.contains("content"),
         "reason should reference missing content, got {reason}",
     );
 }
@@ -246,9 +222,6 @@ fn droid_diagnostics_refuses_with_shape_unknown() {
 
 #[test]
 fn droid_request_context_refuses_internal() {
-    // RequestContext is proxy-internal; the run engine answers it locally
-    // and never dispatches it to a renderer. If it ever reaches the
-    // renderer the refusal is the safe outcome.
     let exec = build_exec(ExecKind::RequestContext, Vec::new());
 
     let (exec_id, reason) = assert_refuse(
@@ -297,9 +270,6 @@ fn droid_read_mcp_resource_refuses_with_capability_unsupported() {
 
 #[test]
 fn droid_mcp_namespaces_with_triple_underscore() {
-    // McpArgs uses field 5 for the bare tool name, field 4 for the server
-    // identifier, field 3 for the tool_call_id, and a `repeated MapEntry`
-    // arguments list at field 2 (key=1, value=bytes-of-JSON at 2).
     let argument_entry = [
         encode_string_field(1, "query"),
         encode_message_field(2, br#""hello""#),

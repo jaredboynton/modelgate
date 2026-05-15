@@ -1,13 +1,6 @@
 //! CodexCli profile renderer.
 //!
-//! Maps Cursor `ExecRequest` events into Codex CLI built-in tool calls.
-//! Codex CLI built-ins per `.omx/research/cursor-phase0/client-tool-codex.md`:
-//! `shell_command`, `exec_command`, `write_stdin`, `apply_patch`,
-//! `list_mcp_resources`, `read_mcp_resource`, and `mcp__<server>__<tool>`.
-//!
-//! Cells where Cursor's wire bytes do not satisfy Codex's required arg keys
-//! emit `RenderedToolCall::Refuse` with the canonical Refuse codes per
-//! `.omx/research/cursor-phase0/client-profile-policy.md`.
+//! Maps Cursor exec requests to Codex CLI native tool calls.
 
 use super::{refuse_code, RenderedToolCall};
 use crate::upstream::cursor::proto::{
@@ -16,8 +9,6 @@ use crate::upstream::cursor::proto::{
 use serde_json::json;
 
 pub fn render(exec: &ExecRequest) -> RenderedToolCall {
-    // For MCP, decode the inner mcp tool name + args via the existing helper
-    // and namespace it for Codex.
     if matches!(exec.kind, ExecKind::Mcp) {
         return render_mcp(exec);
     }
@@ -38,14 +29,13 @@ pub fn render(exec: &ExecRequest) -> RenderedToolCall {
         ExecKind::WriteShellStdin => emit_write_stdin(exec),
         ExecKind::Write => RenderedToolCall::Refuse {
             exec_id: exec.exec_id.clone(),
-            reason: "Cursor Write exec carries path only; body bytes pending Live Phase 0 capture"
-                .into(),
+            reason: "Cursor Write exec carries path only; body bytes are not decoded".into(),
             code: refuse_code::MISSING_REQUIRED_FIELD,
         },
         ExecKind::Delete => emit_delete_patch(exec),
         ExecKind::Diagnostics => RenderedToolCall::Refuse {
             exec_id: exec.exec_id.clone(),
-            reason: "Cursor Diagnostics exec args shape unknown pending Live Phase 0".into(),
+            reason: "Cursor Diagnostics exec args shape is not decoded".into(),
             code: refuse_code::SHAPE_UNKNOWN_PENDING_LIVE_PHASE0,
         },
         ExecKind::RequestContext => RenderedToolCall::Refuse {
@@ -178,10 +168,6 @@ fn emit_fetch(exec: &ExecRequest) -> RenderedToolCall {
 }
 
 fn render_mcp(exec: &ExecRequest) -> RenderedToolCall {
-    // `decode_exec_public_tool_call` already returns (tool_name, tool_call_id,
-    // args) for MCP. The tool_name is the bare server tool name (McpArgs.tool,
-    // proto field 5). Codex CLI namespaces MCP tool calls as
-    // `mcp__<server>__<tool>`; the server is in McpArgs.server (field 4).
     let (mcp_tool_name, tool_call_id, arguments) = decode_exec_public_tool_call(exec);
     let server = read_string_field(&exec.args, 4).unwrap_or_default();
     let namespaced = if server.is_empty() {
@@ -195,14 +181,6 @@ fn render_mcp(exec: &ExecRequest) -> RenderedToolCall {
         tool_call_id,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Local proto field readers.
-//
-// `proto::decode_string_field` and `proto::decode_u64_field` are private to
-// the proto module; this profile reuses the public `parse_proto_fields` to
-// read the same shape without forcing a visibility change in proto.rs.
-// ---------------------------------------------------------------------------
 
 fn read_string_field(data: &[u8], field_number: u32) -> Option<String> {
     parse_proto_fields(data)

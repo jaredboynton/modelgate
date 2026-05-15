@@ -1,23 +1,6 @@
 //! Droid profile renderer.
 //!
-//! Maps Cursor `ExecRequest` events into Factory Droid built-in tool calls.
-//! Droid built-ins per `.omx/research/cursor-phase0/client-tool-droid.md`:
-//! `Read`, `LS`, `Grep`, `Execute`, `FetchUrl`, plus MCP function names
-//! namespaced as `<server>___<tool>` with TRIPLE underscores.
-//!
-//! Synthesized defaults pinned by
-//! `.omx/research/cursor-phase0/client-profile-policy.md`:
-//! Droid `Execute` requires `riskLevel` + `riskLevelReason`. Cursor
-//! `Shell`/`ShellStream`/`BackgroundShellSpawn` carry neither, so the
-//! renderer fills `riskLevel = "medium"` /
-//! `riskLevelReason = "automated proxy invocation"` and emits
-//! `cursor.synthetic_default = "droid_execute_risk"` tracing on every
-//! Execute emission. Delete renders through `Execute` with the elevated
-//! `riskLevel = "high"` and a deletion-specific reason.
-//!
-//! Cells where Cursor's wire bytes do not satisfy Droid's required arg
-//! keys, or where Droid has no compatible tool, emit
-//! `RenderedToolCall::Refuse` with the canonical Refuse codes.
+//! Maps Cursor exec requests to Factory Droid native tool calls.
 
 use super::{refuse_code, RenderedToolCall};
 use crate::upstream::cursor::proto::{
@@ -44,15 +27,13 @@ pub fn render(exec: &ExecRequest) -> RenderedToolCall {
         },
         ExecKind::Write => RenderedToolCall::Refuse {
             exec_id: exec.exec_id.clone(),
-            reason:
-                "Droid Create requires content; Cursor Write exec carries path only pending Live Phase 0 capture"
-                    .into(),
+            reason: "Droid Create requires content; Cursor Write exec carries path only".into(),
             code: refuse_code::MISSING_REQUIRED_FIELD,
         },
         ExecKind::Delete => emit_execute_delete(exec),
         ExecKind::Diagnostics => RenderedToolCall::Refuse {
             exec_id: exec.exec_id.clone(),
-            reason: "Cursor Diagnostics exec args shape unknown pending Live Phase 0".into(),
+            reason: "Cursor Diagnostics exec args shape is not decoded".into(),
             code: refuse_code::SHAPE_UNKNOWN_PENDING_LIVE_PHASE0,
         },
         ExecKind::RequestContext => RenderedToolCall::Refuse {
@@ -139,10 +120,10 @@ fn emit_execute_shell(exec: &ExecRequest, background: bool) -> RenderedToolCall 
     );
     tracing::debug!(
         target: "cursor.profiles",
-        cursor.synthetic_default = "droid_execute_risk",
-        cursor.exec_kind = ?exec.kind,
-        cursor.tool_call_id = %exec.exec_id,
-        cursor.tool_name_emitted = "Execute",
+        cursor_synthetic_default = "droid_execute_risk",
+        cursor_exec_kind = ?exec.kind,
+        cursor_tool_call_id = %exec.exec_id,
+        cursor_tool_name_emitted = "Execute",
         "synthesized Droid Execute risk metadata",
     );
     RenderedToolCall::Emit {
@@ -162,10 +143,10 @@ fn emit_execute_delete(exec: &ExecRequest) -> RenderedToolCall {
     });
     tracing::debug!(
         target: "cursor.profiles",
-        cursor.synthetic_default = "droid_execute_risk",
-        cursor.exec_kind = ?exec.kind,
-        cursor.tool_call_id = %exec.exec_id,
-        cursor.tool_name_emitted = "Execute",
+        cursor_synthetic_default = "droid_execute_risk",
+        cursor_exec_kind = ?exec.kind,
+        cursor_tool_call_id = %exec.exec_id,
+        cursor_tool_name_emitted = "Execute",
         "synthesized Droid Execute risk metadata for delete",
     );
     RenderedToolCall::Emit {
@@ -185,11 +166,6 @@ fn emit_fetch(exec: &ExecRequest) -> RenderedToolCall {
 }
 
 fn render_mcp(exec: &ExecRequest) -> RenderedToolCall {
-    // `decode_exec_public_tool_call` returns (tool_name, tool_call_id, args)
-    // for MCP. The tool_name is the bare server tool name (McpArgs.tool,
-    // proto field 5). Droid namespaces MCP function calls as
-    // `<server>___<tool>` with TRIPLE underscores; the server is in
-    // McpArgs.server (field 4).
     let (mcp_tool_name, tool_call_id, arguments) = decode_exec_public_tool_call(exec);
     let server = read_string_field(&exec.args, 4).unwrap_or_default();
     let namespaced = if server.is_empty() {
@@ -203,14 +179,6 @@ fn render_mcp(exec: &ExecRequest) -> RenderedToolCall {
         tool_call_id,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Local proto field reader.
-//
-// `proto::decode_string_field` is private to the proto module; this profile
-// reuses the public `parse_proto_fields` to read the same shape without
-// forcing a visibility change in proto.rs.
-// ---------------------------------------------------------------------------
 
 fn read_string_field(data: &[u8], field_number: u32) -> Option<String> {
     parse_proto_fields(data)

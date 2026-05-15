@@ -1,17 +1,6 @@
 //! ClaudeCode profile renderer.
 //!
-//! Cursor `ExecRequest` values map to Claude Code CamelCase native tools per
-//! `.omx/research/cursor-phase0/client-profile-policy.md` Wave 0 and the
-//! Claude Code tool inventory at
-//! `.omx/research/cursor-phase0/client-tool-claude-code.md`. Names are locked
-//! to the binary literals at `/Users/jaredboynton/.local/bin/claude` and the
-//! canonical Tools doc at `code.claude.com/docs/en/tools`.
-//!
-//! Cells where Cursor's wire bytes do not satisfy Claude Code's required arg
-//! keys (or where Claude Code has no compatible native tool) emit
-//! `RenderedToolCall::Refuse` with the canonical Refuse codes per
-//! `.omx/research/cursor-phase0/client-profile-policy.md` Refuse Code
-//! Dictionary.
+//! Maps Cursor exec requests to Claude Code native tool calls.
 
 use super::{refuse_code, RenderedToolCall};
 use crate::upstream::cursor::proto::{
@@ -19,9 +8,6 @@ use crate::upstream::cursor::proto::{
 };
 use serde_json::json;
 
-/// Synthesized default WebFetch prompt per Wave 0 policy. The renderer must
-/// emit `cursor.synthetic_default = "claude_webfetch_prompt"` on the tracing
-/// span so misbehavior can be traced.
 const WEBFETCH_DEFAULT_PROMPT: &str =
     "Summarize the page contents and return the relevant section for the user's request.";
 
@@ -43,9 +29,7 @@ pub fn render(exec: &ExecRequest) -> RenderedToolCall {
         },
         ExecKind::Write => RenderedToolCall::Refuse {
             exec_id: exec.exec_id.clone(),
-            reason:
-                "Claude Code Write requires content; Cursor wire lacks body bytes pending Live Phase 0"
-                    .into(),
+            reason: "Claude Code Write requires content; Cursor wire lacks body bytes".into(),
             code: refuse_code::MISSING_REQUIRED_FIELD,
         },
         ExecKind::Delete => RenderedToolCall::Refuse {
@@ -57,7 +41,7 @@ pub fn render(exec: &ExecRequest) -> RenderedToolCall {
         },
         ExecKind::Diagnostics => RenderedToolCall::Refuse {
             exec_id: exec.exec_id.clone(),
-            reason: "Cursor Diagnostics shape pending Live Phase 0 capture".into(),
+            reason: "Cursor Diagnostics arg shape is not decoded".into(),
             code: refuse_code::SHAPE_UNKNOWN_PENDING_LIVE_PHASE0,
         },
         ExecKind::RequestContext => RenderedToolCall::Refuse {
@@ -169,10 +153,6 @@ fn emit_webfetch(exec: &ExecRequest) -> RenderedToolCall {
 }
 
 fn render_mcp(exec: &ExecRequest) -> RenderedToolCall {
-    // `decode_exec_public_tool_call` returns (tool_name, tool_call_id, args)
-    // for MCP. The tool_name is the bare server tool name (McpArgs.tool,
-    // proto field 5). Claude Code namespaces MCP tool calls as
-    // `mcp__<server>__<tool>`; the server is in McpArgs.server (field 4).
     let (mcp_tool_name, tool_call_id, arguments) = decode_exec_public_tool_call(exec);
     let server = read_string_field(&exec.args, 4).unwrap_or_default();
     let namespaced = if server.is_empty() {
@@ -186,14 +166,6 @@ fn render_mcp(exec: &ExecRequest) -> RenderedToolCall {
         tool_call_id,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Local proto field readers.
-//
-// `proto::decode_string_field` is private; this profile reuses the public
-// `parse_proto_fields` to read the same shape without forcing a visibility
-// change in proto.rs. Mirrors the helper in profiles/codex_cli.rs.
-// ---------------------------------------------------------------------------
 
 fn read_string_field(data: &[u8], field_number: u32) -> Option<String> {
     parse_proto_fields(data)
