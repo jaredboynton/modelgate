@@ -292,6 +292,56 @@ fn droid_mcp_namespaces_with_triple_underscore() {
 }
 
 #[test]
+fn droid_opencode_todo_write_maps_to_native_todo_write() {
+    let todos = r#"[{"content":"verify continuation","status":"pending","priority":"high"}]"#;
+    let todo_entry = [
+        encode_string_field(1, "todos"),
+        encode_message_field(2, todos.as_bytes()),
+    ]
+    .concat();
+    let merge_entry = [
+        encode_string_field(1, "merge"),
+        encode_message_field(2, b"true"),
+    ]
+    .concat();
+    let args = [
+        encode_message_field(2, &todo_entry),
+        encode_message_field(2, &merge_entry),
+        encode_string_field(3, "todo-call-id"),
+        encode_string_field(4, "opencode"),
+        encode_string_field(5, "TodoWrite"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (name, arguments, call_id) = unwrap_emit(droid::render(&exec));
+
+    assert_eq!(name, "TodoWrite");
+    assert_eq!(call_id, "todo-call-id");
+    let actual_todos: serde_json::Value =
+        serde_json::from_str(arguments["todos"].as_str().expect("todos string")).unwrap();
+    let expected_todos: serde_json::Value = serde_json::from_str(todos).unwrap();
+    assert_eq!(actual_todos, expected_todos);
+    assert_eq!(arguments["merge"], true);
+}
+
+#[test]
+fn droid_only_opencode_todo_write_gets_native_mapping() {
+    let args = [
+        encode_string_field(3, "todo-call-id"),
+        encode_string_field(4, "other"),
+        encode_string_field(5, "TodoWrite"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (name, _, call_id) = unwrap_emit(droid::render(&exec));
+
+    assert_eq!(name, "other___TodoWrite");
+    assert_eq!(call_id, "todo-call-id");
+}
+
+#[test]
 fn droid_fetch_emits_fetch_url_with_url() {
     let args = encode_string_field(1, "https://example.com/page");
     let exec = build_exec(ExecKind::Fetch, args);

@@ -656,6 +656,89 @@ fn request_context_encodes_mcp_tool_schema_as_protobuf_value() {
 }
 
 #[test]
+fn agent_run_request_preserves_empty_string_schema_values_as_protobuf_values() {
+    let tools = vec![CursorTool {
+        name: "noop_empty".to_string(),
+        description: Some("No-op tool".to_string()),
+        parameters_schema: serde_json::json!({
+            "type": "object",
+            "description": "",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": ""
+                }
+            },
+            "required": ["path"]
+        }),
+        kind: CursorToolKind::Function,
+    }];
+    let messages = [Message {
+        role: "user".to_string(),
+        text: "hello".to_string(),
+    }];
+
+    let encoded = encode_agent_run_request(AgentRunRequestInput {
+        model: "composer-2-fast",
+        messages: &messages,
+        message_id: "mid",
+        conversation_id: Some("conv"),
+        os_version: "Darwin",
+        workspace_path: "/tmp/workspace",
+        shell: "zsh",
+        tools: &tools,
+    });
+
+    let outer = parse_proto_fields(&encoded);
+    let run_payload = outer
+        .iter()
+        .find(|field| field.number == agent_client_message::RUN_REQUEST)
+        .expect("run request")
+        .value
+        .clone();
+    let run_fields = parse_proto_fields(&run_payload);
+    let mcp_tools = run_fields
+        .iter()
+        .find(|field| field.number == agent_run_request::MCP_TOOLS)
+        .expect("mcp tools")
+        .value
+        .clone();
+    let tool = parse_proto_fields(&mcp_tools)
+        .into_iter()
+        .find(|field| field.number == 1)
+        .expect("tool entry")
+        .value;
+    let input_schema = parse_proto_fields(&tool)
+        .into_iter()
+        .find(|field| field.number == 3)
+        .expect("input schema")
+        .value;
+    let value_fields = parse_proto_fields(&input_schema);
+    let struct_value = value_fields
+        .iter()
+        .find(|field| field.number == 5)
+        .expect("top-level schema encoded as Value.struct_value");
+    let description_entry = parse_proto_fields(&struct_value.value)
+        .into_iter()
+        .find(|entry| {
+            parse_proto_fields(&entry.value)
+                .into_iter()
+                .any(|field| field.number == 1 && field.value == b"description")
+        })
+        .expect("description field entry");
+    let empty_description_value = parse_proto_fields(&description_entry.value)
+        .into_iter()
+        .find(|field| field.number == 2)
+        .expect("description value");
+    let string_value = parse_proto_fields(&empty_description_value.value)
+        .into_iter()
+        .find(|field| field.number == 3)
+        .expect("empty string_value kind must be present");
+
+    assert!(string_value.value.is_empty());
+}
+
+#[test]
 fn agent_run_request_includes_initial_mcp_tools() {
     let tools = vec![CursorTool {
         name: "cursor_codebase_search".to_string(),

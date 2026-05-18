@@ -19,7 +19,7 @@
 	<string>dev.unified-model-proxy-v2</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Users/jaredboynton/__devlocal/amp-research/unified-model-proxy-v2/target/release/unified-model-proxy-v2</string>
+		<string>/Users/jaredboynton/__devlocal/unified-model-proxy-v2/target/release/unified-model-proxy-v2</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -28,6 +28,6 @@
 	<key>StandardOutPath</key>
 	<string>/Users/jaredboynton/Library/Logs/unified-model-proxy-v2.log</string>
 	<key>WorkingDirectory</key>
-	<string>/Users/jaredboynton/__devlocal/amp-research/unified-model-proxy-v2</string>
+	<string>/Users/jaredboynton/__devlocal/unified-model-proxy-v2</string>
 </dict>
 </plist>

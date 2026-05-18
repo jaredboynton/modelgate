@@ -59,6 +59,10 @@ pub fn encode_string_field(field_number: u32, value: &str) -> Vec<u8> {
     if value.is_empty() {
         return Vec::new();
     }
+    encode_string_field_always(field_number, value)
+}
+
+fn encode_string_field_always(field_number: u32, value: &str) -> Vec<u8> {
     let mut out = encode_varint(((field_number << 3) | 2) as u64);
     out.extend(encode_varint(value.len() as u64));
     out.extend_from_slice(value.as_bytes());
@@ -878,7 +882,7 @@ fn encode_protobuf_value(value: &serde_json::Value) -> Vec<u8> {
             .map(|number| encode_double_field_always(protobuf_value::NUMBER_VALUE, number))
             .unwrap_or_default(),
         serde_json::Value::String(value) => {
-            encode_string_field(protobuf_value::STRING_VALUE, value)
+            encode_string_field_always(protobuf_value::STRING_VALUE, value)
         }
         serde_json::Value::Array(values) => {
             let encoded_values: Vec<Vec<u8>> = values.iter().map(encode_protobuf_value).collect();

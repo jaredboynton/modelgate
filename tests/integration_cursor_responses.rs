@@ -152,6 +152,41 @@ async fn cursor_responses_streaming_request_reaches_route_dispatch_for_each_comp
 }
 
 #[tokio::test]
+async fn cursor_responses_accepts_parallel_tool_calls_compat_field() {
+    let homes = common::TestHomes::new();
+    let app = build_router(homes.state.clone());
+    let body = json!({
+        "model": "composer-2-fast",
+        "input": "hello cursor",
+        "stream": true,
+        "parallel_tool_calls": false,
+    });
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v1/responses")
+        .header("host", "localhost")
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_else(|_| json!({}));
+
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "parallel_tool_calls must pass adapter validation and reach Cursor credentials gate: {parsed}",
+    );
+    let error_type = parsed
+        .pointer("/error/type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(error_type, "missing_credential", "{parsed}");
+}
+
+#[tokio::test]
 async fn cursor_responses_reasoning_event_pinned_for_composer_2_family() {
     // Reasoning events are only emitted for the Composer 2-family models.
     // Lane G must emit `response.reasoning_summary_part.added` ->

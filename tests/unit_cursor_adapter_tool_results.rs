@@ -28,6 +28,31 @@ fn responses_adapter_extracts_function_call_output_into_tool_results() {
 }
 
 #[test]
+fn responses_adapter_accepts_parallel_tool_calls_compat_field() {
+    for value in [json!(true), json!(false), json!(null)] {
+        let body = json!({
+        "model": "composer-2-fast",
+        "input": "hi",
+        "parallel_tool_calls": value
+        });
+
+        cursor_responses::build_request(&body).expect("parallel_tool_calls compat field accepted");
+    }
+
+    let body = json!({
+    "model": "composer-2-fast",
+    "input": "hi",
+    "parallel_tool_calls": "false"
+    });
+    let err = cursor_responses::build_request(&body).expect_err("string field rejected");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("parallel_tool_calls"),
+        "error mentions parallel_tool_calls: {msg}",
+    );
+}
+
+#[test]
 fn responses_adapter_maps_canonical_function_call_output_blocks_to_cursor_tool_result() {
     let body = json!({
     "model": "composer-2-fast",

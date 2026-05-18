@@ -163,15 +163,38 @@ async fn execute_cursor_responses(
 
     if stream {
         let events = upstream::cursor::run::run(state, request).await;
+        let state_for_stream = state.clone();
+        let plan_for_stream = plan.clone();
+        let value_for_stream = value.clone();
+        let raw_input_items_for_stream = raw_input_items.clone();
+        let stream_response_id = format!("resp_{}", uuid::Uuid::new_v4().simple());
         let mut ctx = crate::adapter::cursor_events::ResponseContext::new(
             &plan.requested_model,
-            format!("resp_{}", uuid::Uuid::new_v4().simple()),
+            stream_response_id.clone(),
         );
+        let mut finalized = false;
         let stream = events
-            .map(move |event| {
+            .map(move |mut event| {
+                if let crate::cursor_agent::CursorAgentEvent::Done { response_id, .. } = &mut event
+                {
+                    *response_id = stream_response_id.clone();
+                }
                 let mut bytes = Vec::new();
                 for frame in cursor_responses::emit_event(&event, &mut ctx) {
                     bytes.extend_from_slice(frame.to_wire().as_bytes());
+                }
+                if !finalized {
+                    if let Some(response) = cursor_response_from_context_if_done(&ctx) {
+                        store_cursor_response_state(
+                            &state_for_stream,
+                            &plan_for_stream,
+                            &value_for_stream,
+                            response,
+                            raw_input_items_for_stream.clone(),
+                            store_public,
+                        );
+                        finalized = true;
+                    }
                 }
                 Ok::<Bytes, AppError>(Bytes::from(bytes))
             })
@@ -202,34 +225,63 @@ async fn execute_cursor_responses(
 
     let mut response = cursor_responses::collect_non_stream(events)?;
     response["model"] = serde_json::Value::String(plan.requested_model.clone());
-    let response_id = response["id"].as_str().unwrap_or_default().to_string();
     let conversation_id = done
         .as_ref()
         .map(|(_, conversation_id)| conversation_id.clone());
     if let Some(conversation_id) = conversation_id.as_ref() {
-        let key = cursor_continuation_key(
-            CursorRoute::Responses,
-            plan,
-            &value,
-            &response_id,
-            conversation_id,
-        );
-        state.cursor_sessions.store_continuation(
-            &key,
-            crate::upstream::cursor::session::ConversationState {
-                checkpoint: None,
-                pending_tool_calls: cursor_pending_tool_calls(&response["output"]),
-                last_access: std::time::Instant::now(),
-                route: key.route,
-                provider: key.provider,
-                upstream_model: key.upstream_model.clone(),
-                target_format: key.target_format,
-                stable_field_hash: [0u8; 32],
-                response_id: response_id.clone(),
-                conversation_id: conversation_id.clone(),
-                blob_store: HashMap::new(),
-            },
-        );
+        response["conversation_id"] = Value::String(conversation_id.clone());
+    }
+    store_cursor_response_state(
+        state,
+        plan,
+        &value,
+        response.clone(),
+        raw_input_items,
+        store_public,
+    );
+    UpstreamResponse::json("cursor", response).map_err(AppError::from)
+}
+
+fn cursor_response_from_context_if_done(
+    ctx: &crate::adapter::cursor_events::ResponseContext,
+) -> Option<Value> {
+    if !ctx.completed {
+        return None;
+    }
+    let status = ctx.response_status();
+    let mut response = json!({
+        "id": ctx.response_id.clone(),
+        "object": "response",
+        "created_at": 0,
+        "model": ctx.model.clone(),
+        "status": status,
+        "output": ctx.completed_items().to_vec(),
+        "usage": ctx.usage_envelope(),
+    });
+    if let Some(conversation_id) = ctx.conversation_id.as_ref() {
+        response["conversation_id"] = Value::String(conversation_id.clone());
+    }
+    if status == "incomplete" {
+        response["incomplete_details"] = json!({ "reason": "max_output_tokens" });
+    }
+    Some(response)
+}
+
+fn store_cursor_response_state(
+    state: &AppState,
+    plan: &crate::route::dispatch::DispatchPlan,
+    value: &Value,
+    response: Value,
+    raw_input_items: Value,
+    store_public: bool,
+) {
+    let response_id = response["id"].as_str().unwrap_or_default().to_string();
+    let conversation_id = response
+        .get("conversation_id")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    if let Some(conversation_id) = conversation_id.as_ref() {
+        store_cursor_continuation(state, plan, value, &response, &response_id, conversation_id);
     }
     let record = NewResponseStateRecord {
         route: "responses".into(),
@@ -247,7 +299,39 @@ async fn execute_cursor_responses(
     } else {
         state.remember_response_for_continuation(record);
     }
-    UpstreamResponse::json("cursor", response).map_err(AppError::from)
+}
+
+fn store_cursor_continuation(
+    state: &AppState,
+    plan: &crate::route::dispatch::DispatchPlan,
+    value: &Value,
+    response: &Value,
+    response_id: &str,
+    conversation_id: &str,
+) {
+    let key = cursor_continuation_key(
+        CursorRoute::Responses,
+        plan,
+        value,
+        response_id,
+        conversation_id,
+    );
+    state.cursor_sessions.store_continuation(
+        &key,
+        crate::upstream::cursor::session::ConversationState {
+            checkpoint: None,
+            pending_tool_calls: cursor_pending_tool_calls(&response["output"]),
+            last_access: std::time::Instant::now(),
+            route: key.route,
+            provider: key.provider,
+            upstream_model: key.upstream_model.clone(),
+            target_format: key.target_format,
+            stable_field_hash: [0u8; 32],
+            response_id: response_id.to_string(),
+            conversation_id: conversation_id.to_string(),
+            blob_store: HashMap::new(),
+        },
+    );
 }
 
 fn cursor_continuation_key_for_request(
@@ -388,6 +472,10 @@ fn cursor_stable_fields(value: &Value) -> Value {
         "user",
         "prompt_cache_key",
         "prompt_cache_retention",
+        "tools",
+        "tool_choice",
+        "max_tool_calls",
+        "parallel_tool_calls",
     ] {
         object.remove(key);
     }
@@ -713,9 +801,13 @@ async fn google_generate_content_response_to_responses(
 
 #[cfg(test)]
 mod tests {
-    use axum::body::to_bytes;
-
     use super::*;
+    use crate::{
+        compaction::RemoteCompactionPolicy,
+        cursor_agent::{CursorAgentEvent, CursorFinishReason, CursorToolResult},
+        route::dispatch::{DispatchAction, DispatchEdge, RequestFormat},
+    };
+    use axum::body::to_bytes;
 
     #[tokio::test]
     async fn anthropic_non_success_response_bypasses_success_conversion() {
@@ -741,5 +833,134 @@ mod tests {
             body,
             Bytes::from_static(br#"{"error":{"type":"upstream","message":"bad"}}"#)
         );
+    }
+
+    #[test]
+    fn cursor_stream_done_context_stores_resumable_store_false_state() {
+        let (_temp, state) = test_state();
+        let plan = cursor_plan();
+        let request = json!({
+            "model": "composer-2-fast",
+            "stream": true,
+            "store": false,
+            "input": "use lookup",
+            "tools": [{
+                "type": "function",
+                "name": "lookup",
+                "parameters": { "type": "object", "properties": {} }
+            }]
+        });
+        let mut ctx = crate::adapter::cursor_events::ResponseContext::new(
+            "composer-2-fast",
+            "resp_stream_test",
+        );
+        for event in [
+            CursorAgentEvent::ToolCallStarted {
+                call_id: "call_lookup".into(),
+                name: "lookup".into(),
+                kind: crate::cursor_agent::CursorToolKind::Function,
+                argument_index: 0,
+            },
+            CursorAgentEvent::ToolCallArgumentsDelta {
+                call_id: "call_lookup".into(),
+                delta: "{}".into(),
+            },
+            CursorAgentEvent::ToolCallDone {
+                call_id: "call_lookup".into(),
+                arguments: json!({}),
+            },
+            CursorAgentEvent::Done {
+                finish_reason: CursorFinishReason::ToolCalls,
+                response_id: "resp_stream_test".into(),
+                conversation_id: "conv_stream_test".into(),
+            },
+        ] {
+            let _ = cursor_responses::emit_event(&event, &mut ctx);
+        }
+        let response = cursor_response_from_context_if_done(&ctx).expect("Done finalizes response");
+
+        store_cursor_response_state(
+            &state,
+            &plan,
+            &request,
+            response,
+            request["input"].clone(),
+            false,
+        );
+
+        assert!(
+            state.public_response("resp_stream_test").is_none(),
+            "store=false stays private"
+        );
+        assert!(
+            state.continuation_response("resp_stream_test").is_some(),
+            "store=false remains resumable"
+        );
+        let follow_up = json!({
+            "model": "composer-2-fast",
+            "previous_response_id": "resp_stream_test",
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_lookup",
+                "output": "ok"
+            }]
+        });
+        let key = cursor_continuation_key_for_request(&state, &plan, &follow_up)
+            .expect("valid previous_response_id")
+            .expect("continuation key");
+
+        let result = CursorToolResult {
+            call_id: "call_lookup".into(),
+            output: json!("ok"),
+            error: None,
+        };
+        validate_cursor_tool_results(&state, Some(&key), std::slice::from_ref(&result))
+            .expect("first tool result consumes pending call");
+        let duplicate =
+            validate_cursor_tool_results(&state, Some(&key), std::slice::from_ref(&result))
+                .expect_err("duplicate tool result rejected");
+        assert!(
+            format!("{duplicate:?}").contains("unknown call_id"),
+            "duplicate error names call id mismatch: {duplicate:?}"
+        );
+    }
+
+    #[test]
+    fn cursor_stream_context_without_done_does_not_finalize() {
+        let mut ctx = crate::adapter::cursor_events::ResponseContext::new(
+            "composer-2-fast",
+            "resp_incomplete",
+        );
+        let _ = cursor_responses::emit_event(
+            &CursorAgentEvent::TextDelta {
+                delta: "partial".into(),
+                content_index: 0,
+            },
+            &mut ctx,
+        );
+
+        assert!(cursor_response_from_context_if_done(&ctx).is_none());
+    }
+
+    fn test_state() -> (tempfile::TempDir, AppState) {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().to_path_buf();
+        let state = AppState::for_tests(root.join("codex"), root.join("ump"));
+        (temp, state)
+    }
+
+    fn cursor_plan() -> crate::route::dispatch::DispatchPlan {
+        crate::route::dispatch::DispatchPlan {
+            source_format: RequestFormat::Responses,
+            requested_model: "composer-2-fast".into(),
+            target: ResolvedTarget {
+                provider: Provider::Cursor,
+                upstream_model: "composer-2-fast".into(),
+                target_format: TargetFormat::CursorAgent,
+            },
+            remote_compaction_policy: RemoteCompactionPolicy::Local,
+            edge: DispatchEdge::ResponsesToCursorAgentCursor,
+            action: DispatchAction::CursorAgent,
+        }
     }
 }

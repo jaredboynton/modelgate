@@ -215,6 +215,7 @@ const ROUTING_FIELDS: &[&str] = &["model", "stream"];
 const INPUT_FIELDS: &[&str] = &["input", "instructions"];
 const REASONING_FIELDS: &[&str] = &["reasoning"];
 const TOOL_FIELDS: &[&str] = &["tools", "tool_choice", "max_tool_calls"];
+const TOOL_EXECUTION_FIELDS: &[&str] = &["parallel_tool_calls"];
 const CONTINUATION_FIELDS: &[&str] = &["previous_response_id"];
 const STORAGE_FIELDS: &[&str] = &["store"];
 const STREAM_OPTION_FIELDS: &[&str] = &["stream_options"];
@@ -240,13 +241,14 @@ fn enforce_top_level_policy(object: &Map<String, Value>) -> AppResult<()> {
                 "field {key} is not supported for Cursor Composer responses"
             )));
         }
-        if matches!(
-            key.as_str(),
-            "max_output_tokens" | "temperature" | "top_p" | "parallel_tool_calls"
-        ) {
+        if matches!(key.as_str(), "max_output_tokens" | "temperature" | "top_p") {
             return Err(AppError::BadRequest(format!(
                 "field {key} is not mapped for Cursor Composer responses"
             )));
+        }
+        if TOOL_EXECUTION_FIELDS.contains(&key.as_str()) {
+            validate_parallel_tool_calls(value)?;
+            continue;
         }
         if INCLUDE_FIELDS.contains(&key.as_str()) {
             validate_include(value)?;
@@ -296,6 +298,15 @@ fn enforce_top_level_policy(object: &Map<String, Value>) -> AppResult<()> {
     }
 
     Ok(())
+}
+
+fn validate_parallel_tool_calls(value: &Value) -> AppResult<()> {
+    if value.is_null() || value.is_boolean() {
+        return Ok(());
+    }
+    Err(AppError::BadRequest(
+        "parallel_tool_calls must be a boolean".into(),
+    ))
 }
 
 fn validate_reasoning(value: &Value) -> AppResult<()> {
