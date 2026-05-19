@@ -90,6 +90,113 @@ async fn windsurf_chat_stream_returns_sse_chunks_and_done() {
 }
 
 #[tokio::test]
+async fn windsurf_chat_non_stream_converts_droid_style_tool_tags_to_tool_calls() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/exa.api_server_pb.ApiServerService/GetChatMessage"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(windsurf_text_frame(
+            r#"<tool_call>Read{"file_path":"/tmp/README.md"}<tool_call>LS{"directory_path":"/tmp"}"#,
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let (_temp, state) = windsurf_state(&server);
+
+    let response = chat_completions(
+        axum::extract::State(state),
+        HeaderMap::new(),
+        Bytes::from(
+            json!({
+                "model": "swe-1.6",
+                "messages": [{ "role": "user", "content": "read the readme" }],
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "Read",
+                            "parameters": { "type": "object" }
+                        }
+                    },
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "LS",
+                            "parameters": { "type": "object" }
+                        }
+                    }
+                ],
+                "stream": false
+            })
+            .to_string(),
+        ),
+    )
+    .await
+    .unwrap();
+
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.body, usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(body["choices"][0]["finish_reason"], "tool_calls");
+    let calls = body["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .unwrap();
+    assert_eq!(calls[0]["function"]["name"], "Read");
+    assert_eq!(
+        calls[0]["function"]["arguments"],
+        r#"{"file_path":"/tmp/README.md"}"#
+    );
+    assert_eq!(calls[1]["function"]["name"], "LS");
+    assert_eq!(
+        calls[1]["function"]["arguments"],
+        r#"{"directory_path":"/tmp"}"#
+    );
+}
+
+#[tokio::test]
+async fn windsurf_chat_stream_converts_droid_style_tool_tags_to_tool_calls() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/exa.api_server_pb.ApiServerService/GetChatMessage"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_bytes(windsurf_text_frame(
+                r#"<tool_call>Read{"file_path":"/tmp/README.md"}"#,
+            )),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let (_temp, state) = windsurf_state(&server);
+
+    let response = chat_completions(
+        axum::extract::State(state),
+        HeaderMap::new(),
+        Bytes::from(
+            json!({
+                "model": "swe-1.6",
+                "messages": [{ "role": "user", "content": "read the readme" }],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "Read",
+                        "parameters": { "type": "object" }
+                    }
+                }],
+                "stream": true
+            })
+            .to_string(),
+        ),
+    )
+    .await
+    .unwrap();
+
+    let body =
+        String::from_utf8(to_bytes(response.body, usize::MAX).await.unwrap().to_vec()).unwrap();
+    assert!(body.contains(r#""tool_calls""#));
+    assert!(body.contains(r#""name":"Read""#));
+    assert!(body.contains(r#""finish_reason":"tool_calls""#));
+    assert!(body.contains("data: [DONE]"));
+}
+
+#[tokio::test]
 async fn windsurf_responses_tool_call_then_tool_result_continues_with_previous_response_id() {
     let first_server = MockServer::start().await;
     let second_server = MockServer::start().await;
@@ -166,6 +273,50 @@ async fn windsurf_responses_tool_call_then_tool_result_continues_with_previous_r
     let second_request = String::from_utf8_lossy(&requests[0].body);
     assert!(second_request.contains("ASSISTANT TOOL_CALLS"));
     assert!(second_request.contains("TOOL RESULT"));
+}
+
+#[tokio::test]
+async fn windsurf_responses_converts_droid_style_tool_tags_to_function_call() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/exa.api_server_pb.ApiServerService/GetChatMessage"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_bytes(windsurf_text_frame(
+                r#"<tool_call>Read{"file_path":"/tmp/README.md"}"#,
+            )),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let (_temp, state) = windsurf_state(&server);
+
+    let response = execute_responses_request(
+        &state,
+        HeaderMap::new(),
+        json!({
+            "model": "swe-1.6",
+            "input": "read the readme",
+            "tools": [{
+                "type": "function",
+                "name": "Read",
+                "parameters": { "type": "object" }
+            }]
+        }),
+        ExecuteResponsesOptions::default(),
+    )
+    .await
+    .unwrap();
+
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.body, usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(body["output"][0]["type"], "function_call");
+    assert_eq!(body["output"][0]["name"], "Read");
+    assert_eq!(
+        body["output"][0]["arguments"],
+        r#"{"file_path":"/tmp/README.md"}"#
+    );
+    let response_id = body["id"].as_str().unwrap();
+    assert!(state.continuation_response(response_id).is_some());
 }
 
 #[tokio::test]

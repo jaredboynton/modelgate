@@ -95,37 +95,135 @@ pub fn parse_tool_plan(output: &str) -> Option<ToolPlan> {
         }
     }
 
-    let start = output.find('{')?;
-    let end = output.rfind('}')?;
-    if end <= start {
-        return None;
-    }
-    let parsed: Value = serde_json::from_str(&output[start..=end]).ok()?;
-    let object = parsed.as_object()?;
-
-    if object.get("action").and_then(Value::as_str) == Some("final") {
-        if let Some(content) = object.get("content").and_then(Value::as_str) {
-            return Some(ToolPlan::Final(content.to_string()));
+    if let (Some(start), Some(end)) = (output.find('{'), output.rfind('}')) {
+        if end > start {
+            if let Ok(parsed) = serde_json::from_str::<Value>(&output[start..=end]) {
+                if let Some(object) = parsed.as_object() {
+                    if object.get("action").and_then(Value::as_str) == Some("final") {
+                        if let Some(content) = object.get("content").and_then(Value::as_str) {
+                            return Some(ToolPlan::Final(content.to_string()));
+                        }
+                    }
+                    if let Some(call) = tool_call_from_value(&parsed) {
+                        return Some(ToolPlan::ToolCalls(vec![call]));
+                    }
+                    if let Some(calls) =
+                        object
+                            .get("tool_calls")
+                            .and_then(Value::as_array)
+                            .map(|calls| {
+                                calls
+                                    .iter()
+                                    .filter_map(tool_call_from_value)
+                                    .collect::<Vec<_>>()
+                            })
+                    {
+                        if !calls.is_empty() {
+                            return Some(ToolPlan::ToolCalls(calls));
+                        }
+                    }
+                }
+            }
         }
     }
-    if let Some(call) = tool_call_from_value(&parsed) {
-        return Some(ToolPlan::ToolCalls(vec![call]));
+
+    parse_droid_style_tool_call_tags(output)
+}
+
+fn parse_droid_style_tool_call_tags(output: &str) -> Option<ToolPlan> {
+    const TAG: &str = "<tool_call>";
+
+    let mut calls = Vec::new();
+    let mut offset = skip_whitespace(output, 0);
+    while offset < output.len() {
+        if !output[offset..].starts_with(TAG) {
+            return None;
+        }
+        offset += TAG.len();
+
+        let name_start = offset;
+        while offset < output.len() && is_tool_name_continue(output.as_bytes()[offset]) {
+            offset += 1;
+        }
+        if name_start == offset {
+            return None;
+        }
+        let name = &output[name_start..offset];
+        if !is_tool_name_start(name.as_bytes()[0]) {
+            return None;
+        }
+
+        if !output[offset..].starts_with('{') {
+            return None;
+        }
+        let object_end = balanced_json_object_end(output, offset)?;
+        let arguments: Value = serde_json::from_str(&output[offset..object_end]).ok()?;
+        if !arguments.is_object() {
+            return None;
+        }
+        calls.push(ToolCallPlan {
+            name: name.to_string(),
+            arguments,
+        });
+        offset = skip_whitespace(output, object_end);
     }
-    if let Some(calls) = object
-        .get("tool_calls")
-        .and_then(Value::as_array)
-        .map(|calls| {
-            calls
-                .iter()
-                .filter_map(tool_call_from_value)
-                .collect::<Vec<_>>()
-        })
-    {
-        if !calls.is_empty() {
-            return Some(ToolPlan::ToolCalls(calls));
+
+    if calls.is_empty() {
+        None
+    } else {
+        Some(ToolPlan::ToolCalls(calls))
+    }
+}
+
+fn balanced_json_object_end(input: &str, start: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (relative_index, ch) in input[start..].char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(start + relative_index + ch.len_utf8());
+                }
+            }
+            _ => {}
         }
     }
     None
+}
+
+fn skip_whitespace(input: &str, mut offset: usize) -> usize {
+    while offset < input.len() {
+        let byte = input.as_bytes()[offset];
+        if !byte.is_ascii_whitespace() {
+            break;
+        }
+        offset += 1;
+    }
+    offset
+}
+
+fn is_tool_name_start(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || byte == b'_'
+}
+
+fn is_tool_name_continue(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
 }
 
 pub fn non_stream_text_response(model: &str, content: impl Into<String>) -> Value {
@@ -423,6 +521,54 @@ mod tests {
                 name: "lookup".into(),
                 arguments: json!({ "q": "x" })
             }]))
+        );
+    }
+
+    #[test]
+    fn tool_plan_parser_accepts_droid_style_tool_call_tags() {
+        assert_eq!(
+            parse_tool_plan(r#"<tool_call>Read{"file_path":"/tmp/README.md"}"#),
+            Some(ToolPlan::ToolCalls(vec![ToolCallPlan {
+                name: "Read".into(),
+                arguments: json!({ "file_path": "/tmp/README.md" })
+            }]))
+        );
+        assert_eq!(
+            parse_tool_plan(
+                r#"<tool_call>Read{"file_path":"/tmp/README.md"}
+                  <tool_call>LS{"directory_path":"/tmp"}"#
+            ),
+            Some(ToolPlan::ToolCalls(vec![
+                ToolCallPlan {
+                    name: "Read".into(),
+                    arguments: json!({ "file_path": "/tmp/README.md" })
+                },
+                ToolCallPlan {
+                    name: "LS".into(),
+                    arguments: json!({ "directory_path": "/tmp" })
+                }
+            ]))
+        );
+    }
+
+    #[test]
+    fn tool_plan_parser_rejects_unsafe_droid_style_tags() {
+        assert_eq!(
+            parse_tool_plan(r#"I'll read it. <tool_call>Read{"file_path":"/tmp/README.md"}"#),
+            None
+        );
+        assert_eq!(
+            parse_tool_plan(r#"<tool_call>Read{"file_path":"/tmp/README.md"} done"#),
+            None
+        );
+        assert_eq!(
+            parse_tool_plan(r#"<tool_call>Read{"file_path":"/tmp""#),
+            None
+        );
+        assert_eq!(parse_tool_plan(r#"<tool_call>Read"/tmp/README.md""#), None);
+        assert_eq!(
+            parse_tool_plan(r#"<tool_call>Read["/tmp/README.md"]"#),
+            None
         );
     }
 
