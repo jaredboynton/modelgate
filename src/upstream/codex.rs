@@ -20,6 +20,24 @@ use crate::{
 pub const CODEX_RESPONSES_WSS_URL: &str = "wss://chatgpt.com/backend-api/codex/responses";
 pub const CODEX_RESPONSES_HTTP_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
 const CODEX_REMOTE_COMPACTION_V2_FEATURE: &str = "remote_compaction_v2";
+const CODEX_RESPONSES_ALLOWED_FIELDS: &[&str] = &[
+    "model",
+    "instructions",
+    "previous_response_id",
+    "input",
+    "tools",
+    "tool_choice",
+    "parallel_tool_calls",
+    "reasoning",
+    "store",
+    "stream",
+    "include",
+    "service_tier",
+    "prompt_cache_key",
+    "text",
+    "generate",
+    "client_metadata",
+];
 
 pub type CodexResponseStream = Pin<Box<dyn Stream<Item = AppResult<Bytes>> + Send>>;
 
@@ -81,10 +99,10 @@ where
     }
     body["model"] = serde_json::Value::String(alias.upstream_model);
     if let Some(object) = body.as_object_mut() {
-        object.remove("prompt_cache_retention");
-        reject_lossy_request_fields(object)?;
         reject_unsupported_input_items(object.get("input"))?;
         reject_unsupported_tools(object.get("tools"))?;
+        retain_codex_responses_allowed_fields(object);
+        normalize_codex_service_tier(object);
 
         object.insert("stream".into(), serde_json::Value::Bool(true));
         object.insert("store".into(), serde_json::Value::Bool(false));
@@ -131,32 +149,17 @@ where
     Ok(body)
 }
 
-fn reject_lossy_request_fields(
-    object: &serde_json::Map<String, serde_json::Value>,
-) -> AppResult<()> {
-    for field in [
-        "background",
-        "context_management",
-        "conversation",
-        "max_tool_calls",
-        "max_output_tokens",
-        "max_tokens",
-        "prompt",
-        "top_logprobs",
-        "truncation",
-    ] {
-        if object.contains_key(field) {
-            return Err(AppError::BadRequest(format!(
-                "{field} is not supported for Codex responses"
-            )));
-        }
+fn retain_codex_responses_allowed_fields(object: &mut serde_json::Map<String, serde_json::Value>) {
+    object.retain(|key, _| CODEX_RESPONSES_ALLOWED_FIELDS.contains(&key.as_str()));
+}
+
+fn normalize_codex_service_tier(object: &mut serde_json::Map<String, serde_json::Value>) {
+    if object
+        .get("service_tier")
+        .is_some_and(|value| !matches!(value.as_str(), Some("priority" | "default")))
+    {
+        object.insert("service_tier".into(), Value::String("priority".into()));
     }
-    if object.get("store").and_then(Value::as_bool) == Some(true) {
-        return Err(AppError::BadRequest(
-            "store:true is not supported for Codex responses".into(),
-        ));
-    }
-    Ok(())
 }
 
 fn normalize_input(object: &mut serde_json::Map<String, serde_json::Value>) -> AppResult<()> {

@@ -69,7 +69,7 @@ fn unit_codex_normalizes_string_input_to_list_message() {
 }
 
 #[test]
-fn unit_codex_strips_prompt_cache_retention_hint() {
+fn unit_codex_keeps_prompt_cache_key_but_strips_retention_hint() {
     let body = serde_json::json!({
         "model": "openai:gpt-5.5",
         "input": "hello",
@@ -113,7 +113,9 @@ fn unit_codex_response_create_event_payload_uses_flat_ws_shape() {
         "type": "response.create",
         "model": "openai:gpt-5.5",
         "stream": false,
-        "input": "hello"
+        "input": "hello",
+        "safety_identifier": "droid-user",
+        "temperature": 0.4
     });
 
     let payload = codex::prepare_response_create_event_payload_with_resolver(
@@ -127,6 +129,8 @@ fn unit_codex_response_create_event_payload_uses_flat_ws_shape() {
     assert_eq!(payload["stream"], true);
     assert_eq!(payload["store"], false);
     assert!(payload.get("response").is_none());
+    assert!(payload.get("safety_identifier").is_none());
+    assert!(payload.get("temperature").is_none());
     assert_eq!(payload["input"][0]["content"][0]["text"], "hello");
 }
 
@@ -154,7 +158,7 @@ fn unit_codex_nested_response_create_payload_is_explicit_compatibility_shape() {
 }
 
 #[test]
-fn unit_codex_rejects_lossy_request_semantics() {
+fn unit_codex_strips_fields_outside_backend_allowlist() {
     for (field, value) in [
         ("background", serde_json::json!(true)),
         (
@@ -166,27 +170,32 @@ fn unit_codex_rejects_lossy_request_semantics() {
         ("max_output_tokens", serde_json::json!(100)),
         ("max_tokens", serde_json::json!(100)),
         ("prompt", serde_json::json!({ "id": "pmpt_123" })),
+        ("safety_identifier", serde_json::json!("safe-user")),
+        (
+            "stream_options",
+            serde_json::json!({ "include_obfuscation": true }),
+        ),
+        ("temperature", serde_json::json!(0.4)),
         ("top_logprobs", serde_json::json!(1)),
+        ("top_p", serde_json::json!(0.9)),
         ("truncation", serde_json::json!("auto")),
+        ("unknown_future_field", serde_json::json!("future")),
     ] {
         let mut body = serde_json::json!({ "model": "openai:gpt-5.5" });
         body[field] = value;
-        let error = codex::prepare_responses_body(body).unwrap_err();
+        let prepared = codex::prepare_responses_body(body).unwrap();
         assert!(
-            matches!(&error, AppError::BadRequest(message) if message.contains(field)),
-            "unexpected error for {field}: {error}"
+            prepared.get(field).is_none(),
+            "{field} should not be forwarded: {prepared}"
         );
     }
 
-    let error = codex::prepare_responses_body(serde_json::json!({
+    let prepared = codex::prepare_responses_body(serde_json::json!({
         "model": "openai:gpt-5.5",
         "store": true
     }))
-    .unwrap_err();
-    assert!(matches!(
-        error,
-        AppError::BadRequest(message) if message.contains("store:true")
-    ));
+    .unwrap();
+    assert_eq!(prepared["store"], false);
 }
 
 #[test]
@@ -194,27 +203,43 @@ fn unit_codex_preserves_supported_request_controls() {
     let body = serde_json::json!({
         "model": "openai:gpt-5.5",
         "input": "hello",
+        "client_metadata": { "client": "droid" },
+        "generate": false,
+        "include": ["file_search_call.results"],
         "parallel_tool_calls": true,
         "prompt_cache_key": "cache-key",
-        "safety_identifier": "safe-user",
         "service_tier": "default",
-        "stream_options": { "include_obfuscation": true },
-        "temperature": 0.4,
         "text": { "format": { "type": "json_object" } },
         "tool_choice": "auto",
-        "top_p": 0.9
+        "tools": [{ "type": "function", "name": "lookup" }]
     });
 
     let prepared = codex::prepare_responses_body(body).unwrap();
+    assert_eq!(prepared["client_metadata"]["client"], "droid");
+    assert_eq!(prepared["generate"], false);
+    assert!(prepared["include"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "file_search_call.results"));
     assert_eq!(prepared["parallel_tool_calls"], true);
     assert_eq!(prepared["prompt_cache_key"], "cache-key");
-    assert_eq!(prepared["safety_identifier"], "safe-user");
     assert_eq!(prepared["service_tier"], "default");
-    assert_eq!(prepared["stream_options"]["include_obfuscation"], true);
-    assert_eq!(prepared["temperature"], 0.4);
     assert_eq!(prepared["text"]["format"]["type"], "json_object");
     assert_eq!(prepared["tool_choice"], "auto");
-    assert_eq!(prepared["top_p"], 0.9);
+    assert_eq!(prepared["tools"][0]["name"], "lookup");
+}
+
+#[test]
+fn unit_codex_normalizes_unsupported_service_tier() {
+    let prepared = codex::prepare_responses_body(serde_json::json!({
+        "model": "openai:gpt-5.5",
+        "input": "hello",
+        "service_tier": "auto"
+    }))
+    .unwrap();
+
+    assert_eq!(prepared["service_tier"], "priority");
 }
 
 #[test]

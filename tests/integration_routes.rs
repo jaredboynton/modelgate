@@ -1167,18 +1167,19 @@ async fn integration_routes_disabled_remote_compaction_returns_conflict() {
 }
 
 #[tokio::test]
-async fn integration_routes_known_gpt_messages_route_rejects_lossy_token_cap_before_auth() {
+async fn integration_routes_known_gpt_messages_route_strips_lossy_token_cap_before_auth() {
     let gpt_messages = serde_json::json!({
         "model": "openai:gpt-5.5",
         "max_tokens": 64,
         "messages": [{ "role": "user", "content": "hello" }]
     });
     let (status, body) = request_json("POST", "/v1/messages", Some(gpt_messages)).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(body["error"]["type"], "invalid_request_error");
-    assert_eq!(body["error"]["code"], "unsupported_feature");
-    let message = body["error"]["message"].as_str().unwrap();
-    assert!(message.contains("max_tokens") || message.contains("max_output_tokens"));
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["type"], "authentication_error");
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("~/.codex/auth.json"));
 }
 
 #[test]
@@ -2236,7 +2237,7 @@ async fn integration_routes_hidden_catalog_model_fails_before_auth() {
 }
 
 #[tokio::test]
-async fn integration_routes_unsupported_codex_fields_fail_before_auth_and_catalog() {
+async fn integration_routes_unsupported_codex_fields_are_stripped_before_auth() {
     let body = serde_json::json!({
         "model": "openai:gpt-5.5",
         "input": "hello",
@@ -2244,14 +2245,9 @@ async fn integration_routes_unsupported_codex_fields_fail_before_auth_and_catalo
     });
     let (status, response) = request_json("POST", "/v1/responses", Some(body)).await;
 
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(response["error"]["type"], "invalid_request_error");
-    assert_eq!(response["error"]["code"], "unsupported_feature");
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(response["error"]["type"], "authentication_error");
     assert!(response["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("max_output_tokens"));
-    assert!(!response["error"]["message"]
         .as_str()
         .unwrap()
         .contains("~/.codex/auth.json"));
