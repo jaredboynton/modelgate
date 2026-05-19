@@ -2,9 +2,8 @@
 //!
 //! Wraps the unary `GetUsableModels` transport call with a token-keyed
 //! cache (10 minute TTL, 16-hex SHA-256 prefix). On any error path we fall
-//! back to the pinned `composer-1.5`, `composer-2`, and `composer-2-fast`
-//! rows tagged `discovery=Fallback` so callers always get a complete row
-//! set even when discovery is unreachable.
+//! back to the pinned Composer rows tagged `discovery=Fallback` so callers
+//! always get a complete row set even when discovery is unreachable.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -56,6 +55,16 @@ pub static FALLBACK_MODELS: &[FallbackModel] = &[
     FallbackModel {
         id: "composer-2",
         upstream_id: "composer-2",
+        supports_reasoning: true,
+    },
+    FallbackModel {
+        id: "composer-2.5",
+        upstream_id: "composer-2.5",
+        supports_reasoning: true,
+    },
+    FallbackModel {
+        id: "composer-2.5-fast",
+        upstream_id: "composer-2.5",
         supports_reasoning: true,
     },
     FallbackModel {

@@ -1,6 +1,8 @@
 use unified_model_proxy_v2::{
     error::AppResult,
-    model_alias::{resolve_model, Provider, ResolvedModel, TargetFormat, KNOWN_MODELS},
+    model_alias::{
+        resolve_model, resolve_model_required, Provider, ResolvedModel, TargetFormat, KNOWN_MODELS,
+    },
     route::chat::{route_for_chat_model, route_for_chat_model_with_resolver, ChatRoute},
     route::messages::{
         route_for_messages_model, route_for_messages_model_with_resolver, MessagesRoute,
@@ -69,6 +71,14 @@ fn maps_known_aliases() {
     assert_eq!(alias.provider, Provider::Cursor);
     assert_eq!(alias.upstream_model, "composer-2");
 
+    let alias = resolve_model("composer-2.5").unwrap();
+    assert_eq!(alias.provider, Provider::Cursor);
+    assert_eq!(alias.upstream_model, "composer-2.5");
+
+    let alias = resolve_model("composer-2.5-fast").unwrap();
+    assert_eq!(alias.provider, Provider::Cursor);
+    assert_eq!(alias.upstream_model, "composer-2.5");
+
     let alias = resolve_model("composer-2-fast").unwrap();
     assert_eq!(alias.provider, Provider::Cursor);
     assert_eq!(alias.upstream_model, "composer-2-fast");
@@ -88,6 +98,29 @@ fn maps_known_aliases() {
     let alias = resolve_model("adaptive").unwrap();
     assert_eq!(alias.provider, Provider::Windsurf);
     assert_eq!(alias.upstream_model, "adaptive");
+}
+
+#[test]
+fn maps_future_composer_slugs_to_cursor_dynamically() {
+    let alias = resolve_model_required("composer-3").unwrap();
+    assert_eq!(alias.provider, Provider::Cursor);
+    assert_eq!(alias.upstream_model, "composer-3");
+
+    let alias = resolve_model_required("composer-3-fast").unwrap();
+    assert_eq!(alias.provider, Provider::Cursor);
+    assert_eq!(alias.upstream_model, "composer-3");
+
+    let route = route_for_responses_model(&serde_json::json!({
+        "model": "composer-3-fast",
+        "input": "ping"
+    }))
+    .unwrap();
+    assert_eq!(
+        route,
+        ResponsesRoute::CursorAgent {
+            upstream_model: "composer-3".to_string(),
+        },
+    );
 }
 
 #[test]

@@ -9,7 +9,8 @@
 //! ```
 //!
 //! Per ralplan Section "Test Specification" -> "Live Tests":
-//! - 3 models (`composer-1.5`, `composer-2`, `composer-2-fast`)
+//! - Composer models (`composer-1.5`, `composer-2`, `composer-2.5`,
+//!   `composer-2.5-fast`, `composer-2-fast`)
 //! - 3 endpoints (`/v1/responses`, `/v1/chat/completions`, `/v1/messages`)
 //! - stream + non-stream
 //! - tools (function call + tool result continuation)
@@ -32,7 +33,13 @@ use std::env;
 const LIVE_CURSOR_OPT_IN: &str = "UMP_LIVE_CURSOR";
 const LIVE_CI_OPT_IN: &str = "UMP_V2_ALLOW_LIVE_TESTS_IN_CI";
 
-const COMPOSER_MODELS: &[&str] = &["composer-1.5", "composer-2", "composer-2-fast"];
+const COMPOSER_MODELS: &[&str] = &[
+    "composer-1.5",
+    "composer-2",
+    "composer-2.5",
+    "composer-2.5-fast",
+    "composer-2-fast",
+];
 
 struct LiveGuard {
     test_name: String,

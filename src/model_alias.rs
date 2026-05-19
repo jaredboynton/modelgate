@@ -392,6 +392,18 @@ pub const KNOWN_MODELS: &[KnownModel] = &[
         accepts_dated_snapshots: false,
     },
     KnownModel {
+        id: "composer-2.5",
+        provider: Provider::Cursor,
+        upstream_model: "composer-2.5",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "composer-2.5-fast",
+        provider: Provider::Cursor,
+        upstream_model: "composer-2.5",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
         id: "composer-2-fast",
         provider: Provider::Cursor,
         upstream_model: "composer-2-fast",
@@ -490,9 +502,16 @@ pub fn resolve_model(input: &str) -> Option<ModelAlias> {
 }
 
 pub fn resolve_model_required(input: &str) -> AppResult<ResolvedModel> {
-    resolve_model(input)
-        .map(ResolvedModel::from)
-        .ok_or_else(|| AppError::ModelNotSupported(input.into()))
+    if let Some(alias) = resolve_model(input) {
+        return Ok(ResolvedModel::from(alias));
+    }
+    if let Some(upstream_model) = resolve_dynamic_cursor_composer_model(input) {
+        return Ok(ResolvedModel {
+            provider: Provider::Cursor,
+            upstream_model,
+        });
+    }
+    Err(AppError::ModelNotSupported(input.into()))
 }
 
 pub fn resolve_target_required(input: &str) -> AppResult<ResolvedTarget> {
@@ -507,6 +526,19 @@ fn lookup_exact(input: &str) -> Option<ModelAlias> {
             provider: model.provider,
             upstream_model: model.upstream_model,
         })
+}
+
+fn resolve_dynamic_cursor_composer_model(input: &str) -> Option<String> {
+    let composer_slug = input.strip_prefix("composer-")?;
+    if composer_slug.is_empty() {
+        return None;
+    }
+    if let Some(base) = input.strip_suffix("-fast") {
+        if base != "composer-" {
+            return Some(base.to_string());
+        }
+    }
+    Some(input.to_string())
 }
 
 /// Strip a trailing `-YYYYMMDD` if present. Returns None on no match.

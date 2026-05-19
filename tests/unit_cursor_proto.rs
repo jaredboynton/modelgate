@@ -28,8 +28,10 @@ use unified_model_proxy_v2::upstream::cursor::{
         encode_int32_field, encode_int64_field, encode_message_field, encode_repeated_string_field,
         encode_request_context_result, encode_string_field, encode_varint,
         get_usable_models_response, interaction_update, model_details, parse_proto_fields,
-        request_context, request_context_env, user_message, user_message_action,
-        AgentRunRequestInput, ExecKind, ExecRequest, InteractionEvent, KvKind, Message, ProtoField,
+        request_context, request_context_env, requested_model, requested_model_parameter,
+        user_message, user_message_action, AgentRunRequestInput, ExecKind, ExecRequest,
+        InteractionEvent, KvKind, Message, ProtoField, RequestedModelInput,
+        RequestedModelParameter,
     },
 };
 
@@ -254,6 +256,7 @@ fn agent_run_request_basic_encodes_byte_stable_against_committed_fixture() {
 
     let encoded = encode_agent_run_request(AgentRunRequestInput {
         model: "composer-2-fast",
+        requested_model: None,
         messages: &messages,
         message_id: "msg-fixture-0001",
         conversation_id: Some("conv-fixture-0001"),
@@ -331,6 +334,7 @@ fn agent_run_request_encodes_workspace_env_and_model_field_paths() {
     }];
     let encoded = encode_agent_run_request(AgentRunRequestInput {
         model: "composer-1.5",
+        requested_model: None,
         messages: &messages,
         message_id: "mid",
         conversation_id: None,
@@ -417,6 +421,91 @@ fn agent_run_request_encodes_workspace_env_and_model_field_paths() {
     // richer DTO, this test should re-key on the new type. Pinning the
     // Phase 0 wire shape now keeps Phase 1 honest.
     let _ = user_message::TEXT;
+}
+
+#[test]
+fn agent_run_request_encodes_requested_model_for_composer_fast_variant() {
+    let messages = [Message {
+        role: "user".to_string(),
+        text: "ping".to_string(),
+    }];
+    let parameters = [RequestedModelParameter {
+        id: "fast",
+        value: "true",
+    }];
+    let encoded = encode_agent_run_request(AgentRunRequestInput {
+        model: "composer-2.5-fast",
+        requested_model: Some(RequestedModelInput {
+            model_id: "composer-2.5",
+            max_mode: false,
+            parameters: &parameters,
+        }),
+        messages: &messages,
+        message_id: "mid",
+        conversation_id: Some("conv"),
+        os_version: "Darwin",
+        workspace_path: "/tmp/workspace",
+        shell: "zsh",
+        tools: &[],
+    });
+
+    let outer = parse_proto_fields(&encoded);
+    let run_payload = outer
+        .iter()
+        .find(|field| field.number == agent_client_message::RUN_REQUEST)
+        .expect("run request")
+        .value
+        .clone();
+    let run_fields = parse_proto_fields(&run_payload);
+
+    let model_payload = run_fields
+        .iter()
+        .find(|field| field.number == agent_run_request::MODEL_DETAILS)
+        .expect("ModelDetails present")
+        .value
+        .clone();
+    let model_id = parse_proto_fields(&model_payload)
+        .into_iter()
+        .find(|field| field.number == model_details::MODEL_ID)
+        .map(|field| String::from_utf8_lossy(&field.value).into_owned())
+        .expect("ModelDetails.model_id present");
+    assert_eq!(model_id, "composer-2.5-fast");
+
+    let requested_payload = run_fields
+        .iter()
+        .find(|field| field.number == agent_run_request::REQUESTED_MODEL)
+        .expect("RequestedModel present")
+        .value
+        .clone();
+    let requested_fields = parse_proto_fields(&requested_payload);
+    let requested_model_id = requested_fields
+        .iter()
+        .find(|field| field.number == requested_model::MODEL_ID)
+        .map(|field| String::from_utf8_lossy(&field.value).into_owned())
+        .expect("RequestedModel.model_id present");
+    assert_eq!(requested_model_id, "composer-2.5");
+
+    let parameter_payload = requested_fields
+        .iter()
+        .find(|field| field.number == requested_model::PARAMETERS)
+        .expect("RequestedModel.parameters present")
+        .value
+        .clone();
+    let parameter_fields = parse_proto_fields(&parameter_payload);
+    let parameter_id = parameter_fields
+        .iter()
+        .find(|field| field.number == requested_model_parameter::ID)
+        .map(|field| String::from_utf8_lossy(&field.value).into_owned())
+        .expect("parameter id present");
+    let parameter_value = parameter_fields
+        .iter()
+        .find(|field| field.number == requested_model_parameter::VALUE)
+        .map(|field| String::from_utf8_lossy(&field.value).into_owned())
+        .expect("parameter value present");
+    assert_eq!(
+        (parameter_id.as_str(), parameter_value.as_str()),
+        ("fast", "true")
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -680,6 +769,7 @@ fn agent_run_request_preserves_empty_string_schema_values_as_protobuf_values() {
 
     let encoded = encode_agent_run_request(AgentRunRequestInput {
         model: "composer-2-fast",
+        requested_model: None,
         messages: &messages,
         message_id: "mid",
         conversation_id: Some("conv"),
@@ -756,6 +846,7 @@ fn agent_run_request_includes_initial_mcp_tools() {
     }];
     let encoded = encode_agent_run_request(AgentRunRequestInput {
         model: "composer-2-fast",
+        requested_model: None,
         messages: &messages,
         message_id: "mid",
         conversation_id: Some("conv"),

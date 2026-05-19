@@ -36,7 +36,7 @@ use crate::{
             decode_agent_server_message, decode_exec_public_tool_call, decode_get_blob_args,
             decode_set_blob_args, encode_agent_run_request, encode_get_blob_result,
             encode_request_context_result, encode_set_blob_result, AgentRunRequestInput,
-            InteractionEvent, KvKind, Message,
+            InteractionEvent, KvKind, Message, RequestedModelInput, RequestedModelParameter,
         },
         session::ConversationState,
         transport::open_streaming_run,
@@ -87,8 +87,17 @@ pub async fn run(
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     let os_version = std::env::consts::OS.to_string();
 
+    let requested_parameters =
+        cursor_requested_model_parameters(&request.model, &request.upstream_model);
+    let requested_model = RequestedModelInput {
+        model_id: &request.upstream_model,
+        max_mode: false,
+        parameters: &requested_parameters,
+    };
+
     let body = encode_agent_run_request(AgentRunRequestInput {
-        model: &request.upstream_model,
+        model: &request.model,
+        requested_model: Some(requested_model),
         messages: &proto_messages,
         message_id: &message_id,
         conversation_id: Some(conversation_id_out.as_str()),
@@ -364,6 +373,25 @@ pub async fn run(
     });
 
     receiver_into_stream(rx)
+}
+
+fn cursor_requested_model_parameters(
+    model: &str,
+    upstream_model: &str,
+) -> Vec<RequestedModelParameter<'static>> {
+    if model == "composer-2.5" {
+        return vec![RequestedModelParameter {
+            id: "fast",
+            value: "false",
+        }];
+    }
+    if model.starts_with("composer-") && model.ends_with("-fast") && model != upstream_model {
+        return vec![RequestedModelParameter {
+            id: "fast",
+            value: "true",
+        }];
+    }
+    Vec::new()
 }
 
 async fn maybe_cursor_codebase_search_result(

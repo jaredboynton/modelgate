@@ -264,6 +264,7 @@ pub mod agent_run_request {
     pub const MODEL_DETAILS: u32 = 3;
     pub const MCP_TOOLS: u32 = 4;
     pub const CONVERSATION_ID: u32 = 5;
+    pub const REQUESTED_MODEL: u32 = 9;
 }
 
 /// Field tags inside `ConversationAction` (proto index 54).
@@ -292,6 +293,19 @@ pub mod model_details {
     pub const DISPLAY_NAME: u32 = 4;
     pub const DISPLAY_NAME_SHORT: u32 = 5;
     pub const ALIASES: u32 = 6;
+}
+
+/// Field tags inside `RequestedModel` (proto index 89).
+pub mod requested_model {
+    pub const MODEL_ID: u32 = 1;
+    pub const MAX_MODE: u32 = 2;
+    pub const PARAMETERS: u32 = 3;
+}
+
+/// Field tags inside `RequestedModel.ModelParameter` (proto index 90).
+pub mod requested_model_parameter {
+    pub const ID: u32 = 1;
+    pub const VALUE: u32 = 2;
 }
 
 /// Field tags inside `RequestContext` (proto index 342).
@@ -439,6 +453,7 @@ pub struct Message {
 
 pub struct AgentRunRequestInput<'a> {
     pub model: &'a str,
+    pub requested_model: Option<RequestedModelInput<'a>>,
     pub messages: &'a [Message],
     pub message_id: &'a str,
     pub conversation_id: Option<&'a str>,
@@ -446,6 +461,19 @@ pub struct AgentRunRequestInput<'a> {
     pub workspace_path: &'a str,
     pub shell: &'a str,
     pub tools: &'a [crate::cursor_agent::CursorTool],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RequestedModelParameter<'a> {
+    pub id: &'a str,
+    pub value: &'a str,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RequestedModelInput<'a> {
+    pub model_id: &'a str,
+    pub max_mode: bool,
+    pub parameters: &'a [RequestedModelParameter<'a>],
 }
 
 /// Heartbeat encoder. Returns the framed `AgentClientMessage` body bytes
@@ -502,8 +530,38 @@ pub fn encode_agent_run_request(input: AgentRunRequestInput<'_>) -> Vec<u8> {
     if let Some(id) = input.conversation_id {
         run_parts.push(encode_string_field(agent_run_request::CONVERSATION_ID, id));
     }
+    if let Some(requested_model) = input.requested_model {
+        run_parts.push(encode_message_field(
+            agent_run_request::REQUESTED_MODEL,
+            &encode_requested_model(requested_model),
+        ));
+    }
     let run_request_bytes = concat_bytes(&run_parts);
     encode_message_field(agent_client_message::RUN_REQUEST, &run_request_bytes)
+}
+
+fn encode_requested_model(input: RequestedModelInput<'_>) -> Vec<u8> {
+    let parameter_messages = input
+        .parameters
+        .iter()
+        .map(|parameter| {
+            concat_bytes(&[
+                encode_string_field(requested_model_parameter::ID, parameter.id),
+                encode_string_field(requested_model_parameter::VALUE, parameter.value),
+            ])
+        })
+        .collect::<Vec<_>>();
+
+    let mut parts = vec![
+        encode_string_field(requested_model::MODEL_ID, input.model_id),
+        encode_bool_field(requested_model::MAX_MODE, input.max_mode),
+    ];
+    parts.extend(
+        parameter_messages
+            .iter()
+            .map(|message| encode_message_field(requested_model::PARAMETERS, message)),
+    );
+    concat_bytes(&parts)
 }
 
 /// Render the message log as a single user-prompt string. Mirrors the

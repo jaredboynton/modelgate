@@ -24,7 +24,13 @@ use serde_json::json;
 use tower::ServiceExt;
 use unified_model_proxy_v2::build_router;
 
-const COMPOSER_MODELS: &[&str] = &["composer-1.5", "composer-2", "composer-2-fast"];
+const COMPOSER_MODELS: &[&str] = &[
+    "composer-1.5",
+    "composer-2",
+    "composer-2.5",
+    "composer-2.5-fast",
+    "composer-2-fast",
+];
 
 fn lane_g_landed() -> bool {
     // Lane G flips this to true once the Cursor Responses adapter is
