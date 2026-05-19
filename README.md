@@ -1,9 +1,15 @@
-# Unified Model Proxy v2
+# ModelGate
 
-Unified Model Proxy v2 is a local Rust/Axum proxy for agent clients. It binds
+ModelGate is a local Rust/Axum gateway for agent clients. It binds
 `127.0.0.1:18743` by default and presents OpenAI-compatible, Anthropic-compatible,
 Google-compatible, Cursor-backed, and Amp-local compatibility surfaces from one
 process.
+
+Use it to put provider-specific models behind clients that understand
+OpenAI-compatible APIs or Amp's local compatibility surface. Amp, Factory Droid,
+Codex CLI, and similar tools can select Bedrock, Codex/ChatGPT OAuth, Google
+Gemini, or Cursor Composer models by pointing at the local proxy and choosing a
+model ID from `/v1/models`.
 
 Routing is explicit and catalog-driven. Requests resolve the submitted model to a
 known provider before any credential lookup or upstream call; unknown models and
@@ -86,6 +92,108 @@ Use the printed ephemeral address, wait for `/health`, then open `/config` and
 verify the route map, typed editor, diagnostics, validate, preview, and save
 controls.
 
+## Client Setup
+
+### Amp
+
+Amp uses the root proxy URL. Change the URL to this repo's local listener:
+
+```sh
+export AMP_URL=http://127.0.0.1:18743
+amp -x "say hi"
+```
+
+Select models using ModelGate model IDs, for example `claude-sonnet-4-6` for Bedrock,
+`gpt-5.5` for Codex/ChatGPT OAuth, `gemini-3.1-flash-lite` for Google, or
+`composer-2-fast` for Cursor.
+
+### Factory Droid
+
+Droid can use the OpenAI-compatible facade. Add custom models to
+`~/.factory/settings.json`, preserving any existing settings and custom model
+rows:
+
+```json
+{
+  "customModels": [
+    {
+      "id": "custom:Bedrock-Claude-Sonnet-4-6",
+      "model": "claude-sonnet-4-6",
+      "displayName": "Bedrock Claude Sonnet 4.6",
+      "provider": "openai",
+      "baseUrl": "http://127.0.0.1:18743/v1",
+      "apiKey": "not-used",
+      "maxContextLimit": 200000,
+      "maxOutputTokens": 64000,
+      "noImageSupport": true
+    },
+    {
+      "id": "custom:Cursor-Composer-2-Fast",
+      "model": "composer-2-fast",
+      "displayName": "Cursor Composer 2 Fast",
+      "provider": "openai",
+      "baseUrl": "http://127.0.0.1:18743/v1",
+      "apiKey": "not-used",
+      "maxContextLimit": 200000,
+      "maxOutputTokens": 64000,
+      "noImageSupport": true
+    },
+    {
+      "id": "custom:Gemini-3.1-Flash-Lite",
+      "model": "gemini-3.1-flash-lite",
+      "displayName": "Gemini 3.1 Flash Lite",
+      "provider": "openai",
+      "baseUrl": "http://127.0.0.1:18743/v1",
+      "apiKey": "not-used",
+      "maxContextLimit": 1000000,
+      "maxOutputTokens": 64000,
+      "noImageSupport": true
+    }
+  ]
+}
+```
+
+Use `provider: "openai"` because Droid is talking to ModelGate's
+OpenAI-compatible facade, even when ModelGate routes the request to Bedrock,
+Cursor, Google, or Codex.
+Use any supported model from `/v1/models`; repeat the Cursor row with
+`composer-2` or `composer-1.5` if you want those Droid choices too.
+
+### Other OpenAI-Compatible CLIs
+
+For clients that accept a base URL and API key, use:
+
+- Base URL: `http://127.0.0.1:18743/v1`
+- API key: any non-empty placeholder if the client requires one
+- Model: any model returned by `curl -fsS http://127.0.0.1:18743/v1/models`
+
+### Cursor Indexing From Other CLIs
+
+Cursor-backed Composer routes can expose a `cursor_codebase_search` tool so a
+non-Cursor client can get workspace context through ModelGate. Provide a
+workspace and an allowlist:
+
+```sh
+export UMP_CURSOR_WORKSPACE_DIR=/path/to/repo
+export UMP_CURSOR_WORKSPACE_ALLOWLIST=/path/to/repo
+```
+
+Clients that can set per-request headers may use `x-ump-cursor-workspace`,
+`x-ump-cursor-worktree`, and `x-ump-cursor-session` instead of
+`UMP_CURSOR_WORKSPACE_DIR`. The allowlist env is still required.
+
+By default, indexing uses the bounded local fallback. Cursor cloud index RPCs
+are opt-in:
+
+```sh
+export UMP_CURSOR_INDEX_CLOUD=1
+export UMP_CURSOR_INDEX_BOOTSTRAP=1
+export UMP_CURSOR_INDEX_METADATA_FILE=/path/to/cursor-index-metadata.json
+```
+
+Indexing failures do not fail normal chat; they only reduce or remove injected
+workspace context.
+
 ## Runtime Config
 
 Common environment variables:
@@ -104,7 +212,6 @@ Common environment variables:
 - `UMP_V2_CODEX_HOME`, default `~/.codex`
 - `UMP_V2_AUTH_HOME`, default `~/.ump`
 - `UMP_V2_CONFIG`, default `~/.ump/config.json`; re-read on each request
-- `UMP_AMP_THREAD_STORE`, default `~/.unified-model-proxy/amp-threads`
 - Cursor knobs: `CURSOR_ACCESS_TOKEN`, `CURSOR_REFRESH_URL`,
   `CURSOR_CLIENT_VERSION`, `UMP_CURSOR_CLIENT_PROFILE_OVERRIDE`,
   `UMP_CURSOR_TRUST_CLIENT_HEADERS`, `UMP_CURSOR_WORKSPACE_DIR`,
@@ -170,7 +277,7 @@ and Cursor targets use provider-specific bridges and normalized downstream event
 ## Codex CLI
 
 Codex only accepts Responses API providers, so point `~/.codex/config.toml` at
-the proxy's `/v1` base URL. Use an absolute path for `model_catalog_json`.
+ModelGate's `/v1` base URL. Use an absolute path for `model_catalog_json`.
 
 ```toml
 [features]
@@ -196,9 +303,10 @@ model_catalog_json = "/Users/<you>/.codex/model-catalog-ump-v2.json"
 model_reasoning_effort = "high"
 ```
 
-Keep `remote_compaction_v2 = false` for mixed-provider profiles until UMP owns
-provider-aware compaction end to end. A Codex-only profile may enable native
-remote compaction when every routed model stays in the Codex/OpenAI family.
+Keep `remote_compaction_v2 = false` for mixed-provider profiles until ModelGate
+owns provider-aware compaction end to end. A Codex-only profile may enable
+native remote compaction when every routed model stays in the Codex/OpenAI
+family.
 
 Useful model choices:
 
