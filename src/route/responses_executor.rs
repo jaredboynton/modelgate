@@ -77,7 +77,9 @@ pub async fn execute_responses_request(
                 })
             })?;
             validate_codex_catalog_request(state, &prepared, &upstream_model).await?;
-            codex_response_bytes(upstream::codex::responses_prepared(state, prepared).await?)
+            codex_response_stream(
+                upstream::codex::responses_prepared_stream(state, prepared).await?,
+            )
         }
         DispatchAction::BedrockAnthropicMessages => {
             if options.force_stream {
@@ -942,17 +944,19 @@ pub fn required_model(value: &serde_json::Value) -> AppResult<&str> {
         .ok_or_else(|| AppError::BadRequest("missing model".into()))
 }
 
-fn codex_response_bytes(body: Bytes) -> AppResult<UpstreamResponse> {
+fn codex_response_stream(
+    stream: upstream::codex::CodexResponseStream,
+) -> AppResult<UpstreamResponse> {
     let mut headers = HeaderMap::new();
     headers.insert(
         header::CONTENT_TYPE,
-        HeaderValue::from_static("application/json"),
+        HeaderValue::from_static("text/event-stream"),
     );
-    Ok(UpstreamResponse::bytes(
+    Ok(UpstreamResponse::stream(
         "codex",
         StatusCode::OK,
         headers,
-        body,
+        stream,
     ))
 }
 

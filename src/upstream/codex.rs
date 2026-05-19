@@ -1,7 +1,12 @@
 use axum::http::{HeaderMap, StatusCode};
 use bytes::Bytes;
+use futures::{
+    stream::{self, BoxStream},
+    Stream, StreamExt,
+};
 use serde_json::{json, Value};
 use specter::Message;
+use std::pin::Pin;
 
 use crate::{
     auth::codex::{load_codex_auth, refresh_codex_auth, CODEX_OPENAI_BETA, CODEX_ORIGINATOR},
@@ -15,6 +20,8 @@ use crate::{
 pub const CODEX_RESPONSES_WSS_URL: &str = "wss://chatgpt.com/backend-api/codex/responses";
 pub const CODEX_RESPONSES_HTTP_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
 const CODEX_REMOTE_COMPACTION_V2_FEATURE: &str = "remote_compaction_v2";
+
+pub type CodexResponseStream = Pin<Box<dyn Stream<Item = AppResult<Bytes>> + Send>>;
 
 pub fn codex_headers(state: &AppState) -> AppResult<HeaderMap> {
     let auth = load_codex_auth(state)?;
@@ -349,6 +356,19 @@ pub async fn responses_prepared(state: &AppState, body: serde_json::Value) -> Ap
     .await
 }
 
+pub async fn responses_prepared_stream(
+    state: &AppState,
+    body: serde_json::Value,
+) -> AppResult<CodexResponseStream> {
+    responses_prepared_stream_with_endpoints(
+        state,
+        body,
+        &state.runtime.codex_responses_wss_url,
+        &state.runtime.codex_responses_http_url,
+    )
+    .await
+}
+
 async fn responses_prepared_with_endpoints(
     state: &AppState,
     body: serde_json::Value,
@@ -372,6 +392,31 @@ async fn responses_prepared_with_endpoints(
     }
 }
 
+async fn responses_prepared_stream_with_endpoints(
+    state: &AppState,
+    body: serde_json::Value,
+    wss_url: &str,
+    http_url: &str,
+) -> AppResult<CodexResponseStream> {
+    match state.runtime.codex_transport {
+        CodexTransport::Wss => send_wss_stream_with_refresh(state, wss_url, &body).await,
+        CodexTransport::Http => send_http_stream_with_refresh(state, http_url, &body).await,
+        CodexTransport::WssThenHttp if state.codex_wss_latched() => {
+            send_http_stream_with_refresh(state, http_url, &body).await
+        }
+        CodexTransport::WssThenHttp => {
+            match send_wss_stream_with_refresh(state, wss_url, &body).await {
+                Ok(stream) => Ok(stream),
+                Err(wss_error) => {
+                    state.record_codex_wss_failure();
+                    tracing::warn!(error = %wss_error, "Codex WSS failed; using HTTP fallback");
+                    send_http_stream_with_refresh(state, http_url, &body).await
+                }
+            }
+        }
+    }
+}
+
 async fn send_wss_with_refresh(
     state: &AppState,
     wss_url: &str,
@@ -381,6 +426,20 @@ async fn send_wss_with_refresh(
         Err(err) if maybe_auth_failure(&err) => {
             refresh_codex_auth(state).await?;
             send_wss(state, wss_url, body).await
+        }
+        result => result,
+    }
+}
+
+async fn send_wss_stream_with_refresh(
+    state: &AppState,
+    wss_url: &str,
+    body: &serde_json::Value,
+) -> AppResult<CodexResponseStream> {
+    match send_wss_stream(state, wss_url, body).await {
+        Err(err) if maybe_auth_failure(&err) => {
+            refresh_codex_auth(state).await?;
+            send_wss_stream(state, wss_url, body).await
         }
         result => result,
     }
@@ -418,6 +477,74 @@ async fn send_wss(state: &AppState, wss_url: &str, body: &serde_json::Value) -> 
         }
     }
     Ok(normalize_sse(stream))
+}
+
+async fn send_wss_stream(
+    state: &AppState,
+    wss_url: &str,
+    body: &serde_json::Value,
+) -> AppResult<CodexResponseStream> {
+    let mut ws = connect_responses_wss_for_body(state, wss_url, body).await?;
+    ws.send_text(flat_response_create_event(body.clone()).to_string())
+        .await
+        .map_err(|err| AppError::Upstream(format!("Codex WSS send failed: {err}")))?;
+
+    Ok(Box::pin(stream::unfold(
+        (ws, CodexSseNormalizer::default(), false),
+        |(mut ws, mut normalizer, done)| async move {
+            if done {
+                return None;
+            }
+            loop {
+                let message = match ws.next().await {
+                    Ok(Some(message)) => message,
+                    Ok(None) => {
+                        let bytes = normalizer.finish();
+                        if bytes.is_empty() {
+                            return None;
+                        }
+                        return Some((Ok(bytes), (ws, normalizer, true)));
+                    }
+                    Err(err) => {
+                        return Some((
+                            Err(AppError::Upstream(format!("Codex WSS read failed: {err}"))),
+                            (ws, normalizer, true),
+                        ));
+                    }
+                };
+                match message {
+                    Message::Text(text) => {
+                        let terminal = contains_terminal_response_event(&text);
+                        let bytes = normalizer.push_response_text(&text);
+                        if terminal {
+                            return Some((
+                                Ok(join_chunks(bytes, normalizer.finish())),
+                                (ws, normalizer, true),
+                            ));
+                        }
+                        if !bytes.is_empty() {
+                            return Some((Ok(bytes), (ws, normalizer, false)));
+                        }
+                    }
+                    Message::Binary(bytes) => {
+                        let text = String::from_utf8_lossy(&bytes);
+                        let terminal = contains_terminal_response_event(&text);
+                        let bytes = normalizer.push_response_text(&text);
+                        if terminal {
+                            return Some((
+                                Ok(join_chunks(bytes, normalizer.finish())),
+                                (ws, normalizer, true),
+                            ));
+                        }
+                        if !bytes.is_empty() {
+                            return Some((Ok(bytes), (ws, normalizer, false)));
+                        }
+                    }
+                    Message::Ping(_) | Message::Pong(_) | Message::Close(_) => {}
+                }
+            }
+        },
+    )))
 }
 
 pub async fn connect_responses_wss(
@@ -489,6 +616,19 @@ async fn send_http_with_refresh(
     first.into_result_bytes()
 }
 
+async fn send_http_stream_with_refresh(
+    state: &AppState,
+    http_url: &str,
+    body: &serde_json::Value,
+) -> AppResult<CodexResponseStream> {
+    let first = send_http_stream(state, http_url, body).await?;
+    if first.status() == StatusCode::UNAUTHORIZED {
+        refresh_codex_auth(state).await?;
+        return response_to_stream(send_http_stream(state, http_url, body).await?).await;
+    }
+    response_to_stream(first).await
+}
+
 async fn send_http(
     state: &AppState,
     http_url: &str,
@@ -506,6 +646,30 @@ async fn send_http(
     let status = response.status();
     let bytes = response.into_body();
     Ok(CodexHttpResponse { status, bytes })
+}
+
+async fn send_http_stream(
+    state: &AppState,
+    http_url: &str,
+    body: &serde_json::Value,
+) -> AppResult<reqwest::Response> {
+    let headers = codex_headers_for_body(state, body)?;
+    let mut request = state.http.post(http_url).json(body);
+    for (name, value) in headers.iter() {
+        request = request.header(name, value);
+    }
+    request
+        .send()
+        .await
+        .map_err(|err| AppError::Upstream(format!("Codex HTTP request failed: {err}")))
+}
+
+async fn response_to_stream(response: reqwest::Response) -> AppResult<CodexResponseStream> {
+    let status = response.status();
+    if !status.is_success() {
+        return Err(AppError::Upstream(format!("Codex HTTP returned {status}")));
+    }
+    Ok(normalize_sse_stream(response.bytes_stream().boxed()))
 }
 
 fn has_remote_compaction_v2_trigger(value: &serde_json::Value) -> bool {
@@ -544,6 +708,174 @@ impl CodexHttpResponse {
 
 fn normalize_sse(input: String) -> Bytes {
     Bytes::from(filter_codex_events(&splice_completed_event(&input)))
+}
+
+fn normalize_sse_stream(
+    input: BoxStream<'static, Result<Bytes, reqwest::Error>>,
+) -> CodexResponseStream {
+    Box::pin(stream::unfold(
+        (input, CodexSseNormalizer::default(), false),
+        |(mut input, mut normalizer, done)| async move {
+            if done {
+                return None;
+            }
+            loop {
+                match input.next().await {
+                    Some(Ok(bytes)) => {
+                        let text = String::from_utf8_lossy(&bytes);
+                        let bytes = normalizer.push_sse_text(&text);
+                        if bytes.is_empty() {
+                            continue;
+                        }
+                        return Some((Ok(bytes), (input, normalizer, false)));
+                    }
+                    Some(Err(err)) => {
+                        return Some((
+                            Err(AppError::Upstream(format!(
+                                "Codex HTTP stream failed: {err}"
+                            ))),
+                            (input, normalizer, true),
+                        ));
+                    }
+                    None => {
+                        let bytes = normalizer.finish();
+                        if bytes.is_empty() {
+                            return None;
+                        }
+                        return Some((Ok(bytes), (input, normalizer, true)));
+                    }
+                }
+            }
+        },
+    ))
+}
+
+#[derive(Default)]
+struct CodexSseNormalizer {
+    pending: String,
+    output_items: Vec<serde_json::Value>,
+}
+
+impl CodexSseNormalizer {
+    fn push_response_text(&mut self, text: &str) -> Bytes {
+        let mut chunk = String::new();
+        append_response_stream_chunk(&mut chunk, text);
+        self.push_sse_text(&chunk)
+    }
+
+    fn push_sse_text(&mut self, text: &str) -> Bytes {
+        self.pending.push_str(text);
+        let mut output = String::new();
+        while let Some(index) = self.pending.find("\n\n") {
+            let block = self.pending.drain(..index + 2).collect::<String>();
+            output.push_str(&self.process_block(&block));
+        }
+        Bytes::from(output)
+    }
+
+    fn finish(&mut self) -> Bytes {
+        if self.pending.is_empty() {
+            return Bytes::new();
+        }
+        let block = std::mem::take(&mut self.pending);
+        Bytes::from(self.process_block(&block))
+    }
+
+    fn process_block(&mut self, block: &str) -> String {
+        let Some(event) = sse_event_name(block) else {
+            return block.to_string();
+        };
+        if event.starts_with("codex.") {
+            return String::new();
+        }
+        match event.as_str() {
+            "response.output_item.done" => {
+                if let Some(item) = sse_event_data_json(block).and_then(extract_output_item) {
+                    self.output_items.push(item);
+                }
+                block.to_string()
+            }
+            "response.completed" if !self.output_items.is_empty() => {
+                let Some(mut data) = sse_event_data_json(block) else {
+                    return block.to_string();
+                };
+                splice_output_items(&mut data, &self.output_items);
+                rewrite_sse_data(block, &data)
+            }
+            _ => block.to_string(),
+        }
+    }
+}
+
+fn join_chunks(first: Bytes, second: Bytes) -> Bytes {
+    if first.is_empty() {
+        return second;
+    }
+    if second.is_empty() {
+        return first;
+    }
+    let mut output = Vec::with_capacity(first.len() + second.len());
+    output.extend_from_slice(&first);
+    output.extend_from_slice(&second);
+    Bytes::from(output)
+}
+
+fn sse_event_name(block: &str) -> Option<String> {
+    block.lines().find_map(|line| {
+        line.strip_prefix("event:")
+            .map(str::trim_start)
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn sse_event_data_json(block: &str) -> Option<serde_json::Value> {
+    let data = block
+        .lines()
+        .filter_map(|line| line.strip_prefix("data:").map(str::trim_start))
+        .collect::<Vec<_>>()
+        .join("\n");
+    serde_json::from_str(&data).ok()
+}
+
+fn extract_output_item(mut data: serde_json::Value) -> Option<serde_json::Value> {
+    data.get_mut("item").map(std::mem::take).or_else(|| {
+        if data.get("type").is_some() || data.get("id").is_some() {
+            Some(data)
+        } else {
+            None
+        }
+    })
+}
+
+fn splice_output_items(data: &mut serde_json::Value, output_items: &[serde_json::Value]) {
+    let items = serde_json::Value::Array(output_items.to_vec());
+    if let Some(response) = data
+        .get_mut("response")
+        .and_then(|value| value.as_object_mut())
+    {
+        response.insert("output".into(), items);
+    } else if let Some(response) = data.as_object_mut() {
+        response.insert("output".into(), items);
+    }
+}
+
+fn rewrite_sse_data(block: &str, data: &serde_json::Value) -> String {
+    let mut rewritten = String::new();
+    let mut wrote_data = false;
+    for line in block.lines() {
+        if line.strip_prefix("data:").is_some() {
+            if !wrote_data {
+                rewritten.push_str("data: ");
+                rewritten.push_str(&data.to_string());
+                rewritten.push('\n');
+                wrote_data = true;
+            }
+        } else {
+            rewritten.push_str(line);
+            rewritten.push('\n');
+        }
+    }
+    rewritten
 }
 
 fn append_response_stream_chunk(stream: &mut String, text: &str) {

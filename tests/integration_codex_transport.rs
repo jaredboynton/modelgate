@@ -6,11 +6,20 @@ use std::{
     },
 };
 
+use axum::{
+    body::to_bytes,
+    http::{header, HeaderMap},
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
 };
-use unified_model_proxy_v2::{upstream::codex, AppState};
+use unified_model_proxy_v2::{
+    route::responses_executor::{execute_responses_request, ExecuteResponsesOptions},
+    state::CodexTransport,
+    upstream::codex,
+    AppState,
+};
 use wiremock::{
     matchers::{header, method, path},
     Mock, MockServer, ResponseTemplate,
@@ -75,6 +84,68 @@ async fn codex_wss_failure_uses_http_fallback_and_normalizes_sse() {
     assert!(text.contains(r#""output":[{"id":"call_1","type":"function_call"}]"#));
 }
 
+#[tokio::test]
+async fn codex_rest_responses_return_sse_stream_response() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        codex_home.path().join("auth.json"),
+        serde_json::json!({
+            "access_token": "access-token",
+            "account_id": "account-123"
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut state = AppState::for_tests(
+        codex_home.path().to_path_buf(),
+        auth_home.path().to_path_buf(),
+    );
+    state.runtime.codex_transport = CodexTransport::Http;
+
+    let http = MockServer::start().await;
+    state.runtime.codex_responses_http_url = format!("{}/backend-api/codex/responses", http.uri());
+    seed_codex_catalog(&state, &["gpt-5.5".to_string()]);
+
+    Mock::given(method("POST"))
+        .and(path("/backend-api/codex/responses"))
+        .and(header("originator", "codex_cli_rs"))
+        .and(header("OpenAI-Beta", "responses_websockets=2026-02-06"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(concat!(
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n",
+            "\n",
+            "event: response.completed\n",
+            "data: {\"response\":{\"id\":\"resp_1\",\"status\":\"completed\"}}\n",
+            "\n",
+        )))
+        .mount(&http)
+        .await;
+
+    let response = execute_responses_request(
+        &state,
+        HeaderMap::new(),
+        serde_json::json!({
+            "model": "openai:gpt-5.5",
+            "input": "hello",
+            "prompt_cache_retention": "24h"
+        }),
+        ExecuteResponsesOptions::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(response.provider, "codex");
+    assert_eq!(
+        response.headers.get(header::CONTENT_TYPE).unwrap(),
+        "text/event-stream"
+    );
+    let body = to_bytes(response.body, usize::MAX).await.unwrap();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(text.contains("event: response.output_text.delta"));
+    assert!(text.contains("event: response.completed"));
+}
+
 #[test]
 fn codex_headers_advertise_remote_compaction_beta_without_dropping_websocket_beta() {
     let codex_home = tempfile::tempdir().unwrap();
@@ -122,4 +193,36 @@ async fn rejecting_ws_server() -> (String, Arc<AtomicUsize>) {
         format!("ws://{addr}/backend-api/codex/responses"),
         handshakes,
     )
+}
+
+fn seed_codex_catalog(state: &AppState, models: &[String]) {
+    state
+        .codex_catalog
+        .store_validated(&serde_json::json!({
+            "models": models
+                .iter()
+                .map(|slug| {
+                    serde_json::json!({
+                        "slug": slug,
+                        "display_name": slug,
+                        "visibility": "list",
+                        "supported_in_api": true,
+                        "supported_reasoning_levels": [
+                            { "effort": "low", "description": "Low" },
+                            { "effort": "medium", "description": "Medium" },
+                            { "effort": "high", "description": "High" },
+                            { "effort": "xhigh", "description": "XHigh" }
+                        ],
+                        "service_tiers": [
+                            { "id": "auto", "name": "Auto", "description": "Default" }
+                        ],
+                        "support_verbosity": true,
+                        "truncation_policy": { "mode": "tokens", "limit": 12345 },
+                        "input_modalities": ["text", "image"],
+                        "output_modalities": ["text"]
+                    })
+                })
+                .collect::<Vec<_>>()
+        }))
+        .unwrap();
 }
