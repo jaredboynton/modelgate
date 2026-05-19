@@ -3,7 +3,7 @@ use axum::{
     extract::State,
     http::{header, HeaderMap, HeaderValue, StatusCode},
 };
-use futures::StreamExt;
+use futures::{stream, StreamExt};
 
 use crate::{
     adapter::{
@@ -26,6 +26,7 @@ pub enum ChatRoute {
     CodexResponses,
     BedrockMessages,
     CursorAgent { upstream_model: String },
+    WindsurfChat { upstream_model: String },
 }
 
 pub async fn chat_completions(
@@ -59,6 +60,7 @@ pub async fn chat_completions(
             Err(AppError::ModelNotSupported(plan.requested_model))
         }
         DispatchAction::CursorAgent => execute_cursor_chat(&state, &headers, &plan, value).await,
+        DispatchAction::WindsurfChat => execute_windsurf_chat(&state, &plan, value).await,
     }
 }
 
@@ -122,6 +124,171 @@ async fn execute_cursor_chat(
     UpstreamResponse::json("cursor", response).map_err(AppError::from)
 }
 
+async fn execute_windsurf_chat(
+    state: &AppState,
+    plan: &crate::route::dispatch::DispatchPlan,
+    value: serde_json::Value,
+) -> AppResult<UpstreamResponse> {
+    crate::adapter::windsurf_chat::validate_request(&value)?;
+    upstream::windsurf::ensure_credentials(state).await?;
+
+    let stream_response = crate::adapter::windsurf_chat::is_stream_request(&value);
+    if crate::adapter::windsurf_chat::has_tool_context(&value) {
+        let planning = crate::adapter::windsurf_chat::tool_planning_request(
+            &value,
+            &plan.target.upstream_model,
+        )?;
+        let content =
+            upstream::windsurf::collect_chat_text(state, &planning, &plan.target.upstream_model)
+                .await?;
+        let requested_model = plan_request_model(&value)?;
+        let tool_plan = crate::adapter::windsurf_chat::parse_tool_plan(&content)
+            .unwrap_or(crate::adapter::windsurf_chat::ToolPlan::Final(content));
+        return match tool_plan {
+            crate::adapter::windsurf_chat::ToolPlan::Final(content) => {
+                if stream_response {
+                    Ok(windsurf_chat_text_stream(&requested_model, content))
+                } else {
+                    UpstreamResponse::json(
+                        "windsurf",
+                        crate::adapter::windsurf_chat::non_stream_text_response(
+                            &requested_model,
+                            content,
+                        ),
+                    )
+                    .map_err(AppError::from)
+                }
+            }
+            crate::adapter::windsurf_chat::ToolPlan::ToolCalls(calls) => {
+                if stream_response {
+                    Ok(windsurf_chat_tool_stream(&requested_model, calls))
+                } else {
+                    UpstreamResponse::json(
+                        "windsurf",
+                        crate::adapter::windsurf_chat::non_stream_tool_response(
+                            &requested_model,
+                            &calls,
+                        ),
+                    )
+                    .map_err(AppError::from)
+                }
+            }
+        };
+    }
+
+    if stream_response {
+        let chunks =
+            upstream::windsurf::stream_chat_text(state, &value, &plan.target.upstream_model)
+                .await?;
+        let id = crate::adapter::windsurf_chat::chat_completion_id();
+        let created = crate::adapter::windsurf_chat::created_timestamp();
+        let model = plan.requested_model.clone();
+        let initial = crate::adapter::windsurf_chat::initial_stream_frame(&id, created, &model);
+        let finish =
+            crate::adapter::windsurf_chat::finish_stream_frame(&id, created, &model, "stop");
+        let id_for_chunks = id.clone();
+        let model_for_chunks = model.clone();
+        let content_stream = chunks.map(move |chunk| {
+            Ok::<Bytes, AppError>(match chunk {
+                Ok(delta) => crate::adapter::windsurf_chat::content_stream_frame(
+                    &id_for_chunks,
+                    created,
+                    &model_for_chunks,
+                    &delta,
+                ),
+                Err(error) => crate::adapter::windsurf_chat::error_stream_frame(
+                    &id_for_chunks,
+                    created,
+                    &model_for_chunks,
+                    &error,
+                ),
+            })
+        });
+        let stream = stream::once(async move { Ok::<Bytes, AppError>(initial) })
+            .chain(content_stream)
+            .chain(stream::once(async move { Ok::<Bytes, AppError>(finish) }));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/event-stream"),
+        );
+        return Ok(UpstreamResponse::stream(
+            "windsurf",
+            StatusCode::OK,
+            headers,
+            stream,
+        ));
+    }
+
+    let content =
+        upstream::windsurf::collect_chat_text(state, &value, &plan.target.upstream_model).await?;
+    UpstreamResponse::json(
+        "windsurf",
+        crate::adapter::windsurf_chat::non_stream_text_response(&plan.requested_model, content),
+    )
+    .map_err(AppError::from)
+}
+
+fn windsurf_chat_text_stream(model: &str, content: String) -> UpstreamResponse {
+    let id = crate::adapter::windsurf_chat::chat_completion_id();
+    let created = crate::adapter::windsurf_chat::created_timestamp();
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&crate::adapter::windsurf_chat::initial_stream_frame(
+        &id, created, model,
+    ));
+    bytes.extend_from_slice(&crate::adapter::windsurf_chat::content_stream_frame(
+        &id, created, model, &content,
+    ));
+    bytes.extend_from_slice(&crate::adapter::windsurf_chat::finish_stream_frame(
+        &id, created, model, "stop",
+    ));
+    windsurf_static_sse(bytes)
+}
+
+fn windsurf_chat_tool_stream(
+    model: &str,
+    calls: Vec<crate::adapter::windsurf_chat::ToolCallPlan>,
+) -> UpstreamResponse {
+    let id = crate::adapter::windsurf_chat::chat_completion_id();
+    let created = crate::adapter::windsurf_chat::created_timestamp();
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&crate::adapter::windsurf_chat::initial_stream_frame(
+        &id, created, model,
+    ));
+    bytes.extend_from_slice(&crate::adapter::windsurf_chat::tool_calls_stream_frame(
+        &id, created, model, &calls,
+    ));
+    bytes.extend_from_slice(&crate::adapter::windsurf_chat::finish_stream_frame(
+        &id,
+        created,
+        model,
+        "tool_calls",
+    ));
+    windsurf_static_sse(bytes)
+}
+
+fn windsurf_static_sse(bytes: Vec<u8>) -> UpstreamResponse {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/event-stream"),
+    );
+    UpstreamResponse::stream(
+        "windsurf",
+        StatusCode::OK,
+        headers,
+        stream::once(async move { Ok::<Bytes, AppError>(Bytes::from(bytes)) }),
+    )
+}
+
+fn plan_request_model(value: &serde_json::Value) -> AppResult<String> {
+    value
+        .get("model")
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| AppError::BadRequest("missing model".into()))
+}
+
 pub fn route_for_chat_model(value: &serde_json::Value) -> AppResult<ChatRoute> {
     route_for_chat_model_with_resolver(value, resolve_model_required)
 }
@@ -145,6 +312,9 @@ fn route_from_plan(plan: crate::route::dispatch::DispatchPlan) -> AppResult<Chat
         DispatchEdge::ChatCompletionsToResponsesCodex => Ok(ChatRoute::CodexResponses),
         DispatchEdge::ChatCompletionsToAnthropicMessagesBedrock => Ok(ChatRoute::BedrockMessages),
         DispatchEdge::ChatCompletionsToCursorAgentCursor => Ok(ChatRoute::CursorAgent {
+            upstream_model: plan.target.upstream_model,
+        }),
+        DispatchEdge::ChatCompletionsToWindsurfChatWindsurf => Ok(ChatRoute::WindsurfChat {
             upstream_model: plan.target.upstream_model,
         }),
         _ => Err(AppError::ModelNotSupported(plan.requested_model)),

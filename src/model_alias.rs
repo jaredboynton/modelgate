@@ -9,6 +9,7 @@ pub enum Provider {
     Codex,
     Cursor,
     Google,
+    Windsurf,
     Unsupported,
 }
 
@@ -42,6 +43,7 @@ pub enum TargetFormat {
     GoogleGenerateContent,
     OpenaiImages,
     CursorAgent,
+    WindsurfChat,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize)]
@@ -76,6 +78,7 @@ impl Provider {
             Provider::Codex => Some(TargetFormat::Responses),
             Provider::Cursor => Some(TargetFormat::CursorAgent),
             Provider::Google => Some(TargetFormat::GoogleGenerateContent),
+            Provider::Windsurf => Some(TargetFormat::WindsurfChat),
             Provider::Unsupported => None,
         }
     }
@@ -101,6 +104,7 @@ impl TargetFormat {
             Self::GoogleGenerateContent => "google_generate_content",
             Self::OpenaiImages => "openai_images",
             Self::CursorAgent => "cursor_agent",
+            Self::WindsurfChat => "windsurf_chat",
         }
     }
 }
@@ -130,6 +134,7 @@ pub const fn default_remote_compaction_policy(
     match (provider, target_format) {
         (Provider::Codex, TargetFormat::Responses) => RemoteCompactionPolicy::Native,
         (Provider::Cursor, TargetFormat::CursorAgent) => RemoteCompactionPolicy::Local,
+        (Provider::Windsurf, TargetFormat::WindsurfChat) => RemoteCompactionPolicy::Local,
         (Provider::Unsupported, _) => RemoteCompactionPolicy::Off,
         _ => RemoteCompactionPolicy::Local,
     }
@@ -390,6 +395,72 @@ pub const KNOWN_MODELS: &[KnownModel] = &[
         id: "composer-2-fast",
         provider: Provider::Cursor,
         upstream_model: "composer-2-fast",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "swe-1.6-fast",
+        provider: Provider::Windsurf,
+        upstream_model: "swe-1-6-fast",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "swe-1-6-fast",
+        provider: Provider::Windsurf,
+        upstream_model: "swe-1-6-fast",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "windsurf/swe-1.6-fast",
+        provider: Provider::Windsurf,
+        upstream_model: "swe-1-6-fast",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "swe-1.6",
+        provider: Provider::Windsurf,
+        upstream_model: "swe-1-6",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "swe-1-6",
+        provider: Provider::Windsurf,
+        upstream_model: "swe-1-6",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "windsurf/swe-1.6",
+        provider: Provider::Windsurf,
+        upstream_model: "swe-1-6",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "swe-1.5-fast",
+        provider: Provider::Windsurf,
+        upstream_model: "swe-1-5",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "swe-1-5-fast",
+        provider: Provider::Windsurf,
+        upstream_model: "swe-1-5",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "windsurf/swe-1.5-fast",
+        provider: Provider::Windsurf,
+        upstream_model: "swe-1-5",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "adaptive",
+        provider: Provider::Windsurf,
+        upstream_model: "adaptive",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "windsurf/adaptive",
+        provider: Provider::Windsurf,
+        upstream_model: "adaptive",
         accepts_dated_snapshots: false,
     },
     KnownModel {

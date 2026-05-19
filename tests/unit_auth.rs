@@ -8,6 +8,7 @@ use unified_model_proxy_v2::{
         codex::refresh_codex_auth_with_endpoint,
         codex::{load_codex_auth, parse_codex_auth, CODEX_ORIGINATOR},
         google::api_key as google_api_key,
+        windsurf::api_key as windsurf_api_key,
     },
     AppError, AppState,
 };
@@ -374,6 +375,71 @@ fn google_resolves_auth_home_api_key_then_env_and_fails_closed_without_either() 
                         let state = AppState::from_env();
                         assert_eq!(google_api_key(&state).unwrap(), "env_google_key");
                     });
+                },
+            )
+        },
+    );
+}
+
+#[test]
+fn windsurf_resolves_auth_home_api_key_legacy_file_then_env_and_fails_closed() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let codex_home = tempdir().unwrap();
+    let auth_home = tempdir().unwrap();
+
+    with_env(
+        "UMP_V2_CODEX_HOME",
+        Some(codex_home.path().as_os_str()),
+        || {
+            with_env(
+                "UMP_V2_AUTH_HOME",
+                Some(auth_home.path().as_os_str()),
+                || {
+                    with_env("WINDSURF_API_KEY", None, || {
+                        let state = AppState::from_env();
+                        assert!(matches!(
+                            windsurf_api_key(&state).unwrap_err(),
+                            AppError::MissingCredential("WINDSURF_API_KEY")
+                        ));
+                    });
+
+                    fs::write(
+                        auth_home.path().join("auth.json"),
+                        r#"{"windsurf":{"api_key":"file_windsurf_key"}}"#,
+                    )
+                    .unwrap();
+
+                    with_env(
+                        "WINDSURF_API_KEY",
+                        Some("env_windsurf_key".as_ref()),
+                        || {
+                            let state = AppState::from_env();
+                            assert_eq!(windsurf_api_key(&state).unwrap(), "file_windsurf_key");
+                        },
+                    );
+
+                    fs::write(auth_home.path().join("auth.json"), r#"{"windsurf":{}}"#).unwrap();
+                    fs::create_dir_all(auth_home.path().join("windsurf")).unwrap();
+                    fs::write(
+                        auth_home.path().join("windsurf/auth.json"),
+                        r#"{"apiKey":"legacy_windsurf_key"}"#,
+                    )
+                    .unwrap();
+
+                    with_env("WINDSURF_API_KEY", None, || {
+                        let state = AppState::from_env();
+                        assert_eq!(windsurf_api_key(&state).unwrap(), "legacy_windsurf_key");
+                    });
+
+                    fs::remove_file(auth_home.path().join("windsurf/auth.json")).unwrap();
+                    with_env(
+                        "WINDSURF_API_KEY",
+                        Some("env_windsurf_key".as_ref()),
+                        || {
+                            let state = AppState::from_env();
+                            assert_eq!(windsurf_api_key(&state).unwrap(), "env_windsurf_key");
+                        },
+                    );
                 },
             )
         },

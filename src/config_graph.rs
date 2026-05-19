@@ -1186,6 +1186,7 @@ fn provider_slug(provider: Provider) -> &'static str {
         Provider::Codex => "codex",
         Provider::Cursor => "cursor",
         Provider::Google => "google",
+        Provider::Windsurf => "windsurf",
         Provider::Unsupported => "unsupported",
     }
 }

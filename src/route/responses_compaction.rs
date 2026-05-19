@@ -54,7 +54,8 @@ pub async fn compact_responses(
             DispatchAction::CodexResponses => compact_codex_responses(state, headers, value).await,
             DispatchAction::BedrockAnthropicMessages
             | DispatchAction::GoogleGenerateContent
-            | DispatchAction::CursorAgent => Err(CompactionHttpError::new(
+            | DispatchAction::CursorAgent
+            | DispatchAction::WindsurfChat => Err(CompactionHttpError::new(
                 StatusCode::BAD_REQUEST,
                 "unsupported_compaction_item_for_target",
                 "invalid_request",

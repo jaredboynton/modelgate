@@ -207,6 +207,7 @@ fn provider_name(provider: Provider) -> &'static str {
         Provider::Codex => "codex",
         Provider::Google => "google",
         Provider::Cursor => "cursor",
+        Provider::Windsurf => "windsurf",
         Provider::Unsupported => "unsupported",
     }
 }
@@ -370,6 +371,7 @@ mod tests {
                 Provider::Codex => "codex",
                 Provider::Google => "google",
                 Provider::Cursor => "cursor",
+                Provider::Windsurf => "windsurf",
                 Provider::Unsupported => "unsupported",
             }
             .into(),

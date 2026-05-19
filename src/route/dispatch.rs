@@ -29,6 +29,7 @@ pub enum DispatchAction {
     BedrockAnthropicMessages,
     GoogleGenerateContent,
     CursorAgent,
+    WindsurfChat,
 }
 
 impl DispatchAction {
@@ -38,6 +39,7 @@ impl DispatchAction {
             Self::BedrockAnthropicMessages => "anthropic_messages/bedrock",
             Self::GoogleGenerateContent => "google_generate_content/google",
             Self::CursorAgent => "cursor_agent/cursor",
+            Self::WindsurfChat => "windsurf_chat/windsurf",
         }
     }
 }
@@ -54,6 +56,8 @@ pub enum DispatchEdge {
     ResponsesToCursorAgentCursor,
     ChatCompletionsToCursorAgentCursor,
     AnthropicMessagesToCursorAgentCursor,
+    ResponsesToWindsurfChatWindsurf,
+    ChatCompletionsToWindsurfChatWindsurf,
 }
 
 impl DispatchEdge {
@@ -75,6 +79,10 @@ impl DispatchEdge {
             Self::ResponsesToCursorAgentCursor => "responses->cursor_agent/Cursor",
             Self::ChatCompletionsToCursorAgentCursor => "chat_completions->cursor_agent/Cursor",
             Self::AnthropicMessagesToCursorAgentCursor => "anthropic_messages->cursor_agent/Cursor",
+            Self::ResponsesToWindsurfChatWindsurf => "responses->windsurf_chat/Windsurf",
+            Self::ChatCompletionsToWindsurfChatWindsurf => {
+                "chat_completions->windsurf_chat/Windsurf"
+            }
         }
     }
 }
@@ -209,6 +217,14 @@ pub fn plan_for_target_with_remote_compaction_policy(
             DispatchEdge::AnthropicMessagesToCursorAgentCursor,
             DispatchAction::CursorAgent,
         ),
+        (RequestFormat::Responses, Provider::Windsurf, TargetFormat::WindsurfChat) => (
+            DispatchEdge::ResponsesToWindsurfChatWindsurf,
+            DispatchAction::WindsurfChat,
+        ),
+        (RequestFormat::ChatCompletions, Provider::Windsurf, TargetFormat::WindsurfChat) => (
+            DispatchEdge::ChatCompletionsToWindsurfChatWindsurf,
+            DispatchAction::WindsurfChat,
+        ),
         _ => return Err(AppError::ModelNotSupported(requested_model.to_string())),
     };
 
@@ -234,6 +250,8 @@ pub fn plan_for_target_with_remote_compaction_policy(
     responses -> cursor_agent/Cursor
     chat_completions -> cursor_agent/Cursor
     anthropic_messages -> cursor_agent/Cursor
+    responses -> windsurf_chat/Windsurf
+    chat_completions -> windsurf_chat/Windsurf
 */
 #[allow(dead_code)]
 fn _phase_one_matrix_reference() {
@@ -248,6 +266,8 @@ fn _phase_one_matrix_reference() {
         DispatchEdge::ResponsesToCursorAgentCursor,
         DispatchEdge::ChatCompletionsToCursorAgentCursor,
         DispatchEdge::AnthropicMessagesToCursorAgentCursor,
+        DispatchEdge::ResponsesToWindsurfChatWindsurf,
+        DispatchEdge::ChatCompletionsToWindsurfChatWindsurf,
     );
 }
 

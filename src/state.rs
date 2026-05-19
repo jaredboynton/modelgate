@@ -22,6 +22,7 @@ use crate::{
 const CODEX_RESPONSES_WSS_URL: &str = "wss://chatgpt.com/backend-api/codex/responses";
 const CODEX_RESPONSES_HTTP_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
 const GOOGLE_GENERATE_BASE_URL: &str = "https://generativelanguage.googleapis.com";
+const WINDSURF_CLOUD_BASE_URL: &str = "https://server.codeium.com";
 const TEST_CODEX_RESPONSES_WSS_URL: &str = "ws://127.0.0.1:1/backend-api/codex/responses";
 const TEST_CODEX_RESPONSES_HTTP_URL: &str = "http://127.0.0.1:1/backend-api/codex/responses";
 
@@ -55,6 +56,7 @@ pub struct RuntimeConfig {
     pub codex_catalog_client_version: String,
     pub codex_catalog_ttl: Duration,
     pub google_generate_base_url: String,
+    pub windsurf_cloud_base_url: String,
     pub bedrock_discovery_timeout: Duration,
 }
 
@@ -369,6 +371,8 @@ impl RuntimeConfig {
             codex_catalog_ttl: codex_catalog_config.ttl,
             google_generate_base_url: var("UMP_V2_GOOGLE_GENERATE_BASE_URL")
                 .unwrap_or_else(|_| GOOGLE_GENERATE_BASE_URL.to_string()),
+            windsurf_cloud_base_url: var("UMP_V2_WINDSURF_CLOUD_BASE_URL")
+                .unwrap_or_else(|_| WINDSURF_CLOUD_BASE_URL.to_string()),
             bedrock_discovery_timeout: duration_ms_env(
                 &mut var,
                 "UMP_V2_BEDROCK_DISCOVERY_TIMEOUT_MS",
@@ -406,6 +410,7 @@ impl Default for RuntimeConfig {
             codex_catalog_client_version: CodexCatalogConfig::default().client_version,
             codex_catalog_ttl: CodexCatalogConfig::default().ttl,
             google_generate_base_url: GOOGLE_GENERATE_BASE_URL.to_string(),
+            windsurf_cloud_base_url: WINDSURF_CLOUD_BASE_URL.to_string(),
             bedrock_discovery_timeout: Duration::from_millis(5000),
         }
     }
@@ -508,6 +513,7 @@ mod tests {
             config.google_generate_base_url,
             "https://generativelanguage.googleapis.com"
         );
+        assert_eq!(config.windsurf_cloud_base_url, "https://server.codeium.com");
         assert_eq!(
             config.bedrock_discovery_timeout,
             Duration::from_millis(5000)
@@ -525,6 +531,7 @@ mod tests {
             ("UMP_V2_CODEX_MAX_CONCURRENT", "7"),
             ("UMP_V2_CODEX_HANDSHAKES_PER_MIN", "9"),
             ("UMP_V2_GOOGLE_GENERATE_BASE_URL", "http://127.0.0.1:9999"),
+            ("UMP_V2_WINDSURF_CLOUD_BASE_URL", "http://127.0.0.1:19999"),
             ("UMP_V2_BEDROCK_DISCOVERY_TIMEOUT_MS", "125"),
         ])
         .unwrap();
@@ -537,6 +544,7 @@ mod tests {
         assert_eq!(config.codex_max_concurrent, 7);
         assert_eq!(config.codex_handshakes_per_min, 9);
         assert_eq!(config.google_generate_base_url, "http://127.0.0.1:9999");
+        assert_eq!(config.windsurf_cloud_base_url, "http://127.0.0.1:19999");
         assert_eq!(config.bedrock_discovery_timeout, Duration::from_millis(125));
     }
 

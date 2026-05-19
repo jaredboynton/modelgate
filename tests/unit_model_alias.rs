@@ -72,6 +72,22 @@ fn maps_known_aliases() {
     let alias = resolve_model("composer-2-fast").unwrap();
     assert_eq!(alias.provider, Provider::Cursor);
     assert_eq!(alias.upstream_model, "composer-2-fast");
+
+    let alias = resolve_model("swe-1.6").unwrap();
+    assert_eq!(alias.provider, Provider::Windsurf);
+    assert_eq!(alias.upstream_model, "swe-1-6");
+
+    let alias = resolve_model("swe-1.6-fast").unwrap();
+    assert_eq!(alias.provider, Provider::Windsurf);
+    assert_eq!(alias.upstream_model, "swe-1-6-fast");
+
+    let alias = resolve_model("windsurf/swe-1.5-fast").unwrap();
+    assert_eq!(alias.provider, Provider::Windsurf);
+    assert_eq!(alias.upstream_model, "swe-1-5");
+
+    let alias = resolve_model("adaptive").unwrap();
+    assert_eq!(alias.provider, Provider::Windsurf);
+    assert_eq!(alias.upstream_model, "adaptive");
 }
 
 #[test]
@@ -142,6 +158,10 @@ fn provider_defaults_select_expected_target_formats() {
         Provider::Cursor.default_target_format(),
         Some(TargetFormat::CursorAgent)
     );
+    assert_eq!(
+        Provider::Windsurf.default_target_format(),
+        Some(TargetFormat::WindsurfChat)
+    );
     assert_eq!(Provider::Unsupported.default_target_format(), None);
 }
 
@@ -184,6 +204,13 @@ fn chat_route_planner_allows_only_codex_gpt_and_bedrock_claude() {
             }),
         ),
         (
+            Provider::Windsurf,
+            "swe-1-6",
+            Ok(ChatRoute::WindsurfChat {
+                upstream_model: "swe-1-6".to_string(),
+            }),
+        ),
+        (
             Provider::Unsupported,
             "gpt-image-2",
             Err("model_not_supported"),
@@ -222,6 +249,7 @@ fn messages_route_planner_allows_only_bedrock_and_codex_gpt() {
                 upstream_model: "composer-2".to_string(),
             }),
         ),
+        (Provider::Windsurf, "swe-1-6", Err("model_not_supported")),
         (
             Provider::Unsupported,
             "gpt-image-2",
@@ -262,6 +290,13 @@ fn responses_route_planner_allows_codex_bedrock_and_google_only() {
             "composer-1.5",
             Ok(ResponsesRoute::CursorAgent {
                 upstream_model: "composer-1.5".to_string(),
+            }),
+        ),
+        (
+            Provider::Windsurf,
+            "swe-1-6",
+            Ok(ResponsesRoute::WindsurfChat {
+                upstream_model: "swe-1-6".to_string(),
             }),
         ),
         (
@@ -371,6 +406,14 @@ fn responses_route_helper_selects_supported_provider_routes() {
 
     let unknown = serde_json::json!({ "model": "claude-sonnet-4-7", "input": "hello" });
     assert!(route_for_responses_model(&unknown).is_err());
+
+    let swe = serde_json::json!({ "model": "swe-1.6", "input": "hello" });
+    assert_eq!(
+        route_for_responses_model(&swe).unwrap(),
+        ResponsesRoute::WindsurfChat {
+            upstream_model: "swe-1-6".to_string()
+        }
+    );
 }
 
 #[test]
@@ -383,7 +426,7 @@ fn known_model_catalog_exposes_provider_aware_remote_compaction_policy() {
             .unwrap_or_else(|| panic!("{} missing remote_compaction_policy", model.id));
         let expected = match model.provider {
             Provider::Codex => "native",
-            Provider::Bedrock | Provider::Google | Provider::Cursor => "local",
+            Provider::Bedrock | Provider::Google | Provider::Cursor | Provider::Windsurf => "local",
             Provider::Unsupported => "off",
         };
 

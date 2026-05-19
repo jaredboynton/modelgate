@@ -2,9 +2,12 @@ use axum::{
     body::{to_bytes, Bytes},
     http::{header, HeaderMap, HeaderValue, StatusCode},
 };
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
-use futures::StreamExt;
+use futures::{stream, StreamExt};
 use serde_json::{json, Value};
 
 use crate::{
@@ -47,6 +50,7 @@ pub enum ResponsesRoute {
     BedrockMessages,
     GoogleGenerateContent { upstream_model: String },
     CursorAgent { upstream_model: String },
+    WindsurfChat { upstream_model: String },
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
@@ -125,6 +129,7 @@ pub async fn execute_responses_request(
         DispatchAction::CursorAgent => {
             execute_cursor_responses(state, &headers, &plan, value).await
         }
+        DispatchAction::WindsurfChat => execute_windsurf_responses(state, &plan, value).await,
     }
 }
 
@@ -240,6 +245,270 @@ async fn execute_cursor_responses(
         store_public,
     );
     UpstreamResponse::json("cursor", response).map_err(AppError::from)
+}
+
+async fn execute_windsurf_responses(
+    state: &AppState,
+    plan: &crate::route::dispatch::DispatchPlan,
+    value: Value,
+) -> AppResult<UpstreamResponse> {
+    upstream::windsurf::ensure_credentials(state).await?;
+    let store_public = value.get("store").and_then(Value::as_bool).unwrap_or(true);
+    let prior = windsurf_prior_response_for_request(state, plan, &value)?;
+    validate_windsurf_tool_results(prior.as_ref(), &value)?;
+    let adapter_prior =
+        prior.as_ref().map(
+            |record| crate::adapter::windsurf_responses::PriorWindsurfResponse {
+                raw_response: record.raw_response.clone(),
+                raw_input_items: record.raw_input_items.clone(),
+            },
+        );
+    let (chat_request, raw_input_items) = crate::adapter::windsurf_responses::build_chat_request(
+        &value,
+        &plan.target.upstream_model,
+        adapter_prior.as_ref(),
+    )?;
+
+    if crate::adapter::windsurf_chat::has_tool_context(&chat_request) {
+        let planning = crate::adapter::windsurf_chat::tool_planning_request(
+            &chat_request,
+            &plan.target.upstream_model,
+        )?;
+        let content =
+            upstream::windsurf::collect_chat_text(state, &planning, &plan.target.upstream_model)
+                .await?;
+        let tool_plan = crate::adapter::windsurf_chat::parse_tool_plan(&content)
+            .unwrap_or(crate::adapter::windsurf_chat::ToolPlan::Final(content));
+        let response = match tool_plan {
+            crate::adapter::windsurf_chat::ToolPlan::Final(content) => {
+                crate::adapter::windsurf_responses::response_from_text(
+                    &plan.requested_model,
+                    content,
+                )
+            }
+            crate::adapter::windsurf_chat::ToolPlan::ToolCalls(calls) => {
+                crate::adapter::windsurf_responses::response_from_tool_calls(
+                    &plan.requested_model,
+                    &calls,
+                )
+            }
+        };
+        store_windsurf_response_state(state, plan, response.clone(), raw_input_items, store_public);
+        if chat_request
+            .get("stream")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return Ok(windsurf_static_responses_sse(response));
+        }
+        return UpstreamResponse::json("windsurf", response).map_err(AppError::from);
+    }
+
+    if chat_request
+        .get("stream")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        let response_id = crate::adapter::windsurf_responses::response_id();
+        let chunks =
+            upstream::windsurf::stream_chat_text(state, &chat_request, &plan.target.upstream_model)
+                .await?;
+        let buffer = Arc::new(Mutex::new(String::new()));
+        let buffer_for_chunks = Arc::clone(&buffer);
+        let content_stream = chunks.map(move |chunk| {
+            Ok::<Bytes, AppError>(match chunk {
+                Ok(delta) => {
+                    buffer_for_chunks
+                        .lock()
+                        .expect("Windsurf stream buffer mutex poisoned")
+                        .push_str(&delta);
+                    crate::adapter::windsurf_responses::text_delta_frame(&delta)
+                }
+                Err(error) => crate::adapter::windsurf_responses::error_stream_frame(&error),
+            })
+        });
+        let start = crate::adapter::windsurf_responses::text_stream_start(
+            &response_id,
+            &plan.requested_model,
+        );
+        let state_for_finish = state.clone();
+        let plan_for_finish = plan.clone();
+        let requested_model = plan.requested_model.clone();
+        let raw_input_items_for_finish = raw_input_items.clone();
+        let finish = stream::once(async move {
+            let content = buffer
+                .lock()
+                .expect("Windsurf stream buffer mutex poisoned")
+                .clone();
+            let response = crate::adapter::windsurf_responses::response_from_text_with_id(
+                &response_id,
+                &requested_model,
+                content,
+            );
+            store_windsurf_response_state(
+                &state_for_finish,
+                &plan_for_finish,
+                response.clone(),
+                raw_input_items_for_finish,
+                store_public,
+            );
+            Ok::<Bytes, AppError>(crate::adapter::windsurf_responses::text_stream_finish(
+                &response,
+            ))
+        });
+        let stream = stream::once(async move { Ok::<Bytes, AppError>(start) })
+            .chain(content_stream)
+            .chain(finish);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/event-stream"),
+        );
+        return Ok(UpstreamResponse::stream(
+            "windsurf",
+            StatusCode::OK,
+            headers,
+            stream,
+        ));
+    }
+
+    let content =
+        upstream::windsurf::collect_chat_text(state, &chat_request, &plan.target.upstream_model)
+            .await?;
+    let response =
+        crate::adapter::windsurf_responses::response_from_text(&plan.requested_model, content);
+    store_windsurf_response_state(state, plan, response.clone(), raw_input_items, store_public);
+    UpstreamResponse::json("windsurf", response).map_err(AppError::from)
+}
+
+fn windsurf_static_responses_sse(response: Value) -> UpstreamResponse {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/event-stream"),
+    );
+    UpstreamResponse::stream(
+        "windsurf",
+        StatusCode::OK,
+        headers,
+        stream::once(async move {
+            Ok::<Bytes, AppError>(crate::adapter::windsurf_responses::static_response_sse(
+                &response,
+            ))
+        }),
+    )
+}
+
+fn windsurf_prior_response_for_request(
+    state: &AppState,
+    plan: &crate::route::dispatch::DispatchPlan,
+    value: &Value,
+) -> AppResult<Option<ResponseStateRecord>> {
+    let Some(previous) = value.get("previous_response_id") else {
+        return Ok(None);
+    };
+    if previous.is_null() {
+        return Ok(None);
+    }
+    let previous_response_id = previous.as_str().ok_or_else(|| AppError::BadRequestCode {
+        code: "previous_response_field_mismatch",
+        message: "previous_response_id must be a string".into(),
+    })?;
+    let prior = state
+        .continuation_response(previous_response_id)
+        .ok_or_else(|| AppError::BadRequestCode {
+            code: "unknown_previous_response_id",
+            message: "unknown previous_response_id".into(),
+        })?;
+    validate_windsurf_prior_response(plan, &prior)?;
+    Ok(Some(prior))
+}
+
+fn validate_windsurf_prior_response(
+    plan: &crate::route::dispatch::DispatchPlan,
+    prior: &ResponseStateRecord,
+) -> AppResult<()> {
+    if prior.provider != "windsurf" {
+        return Err(AppError::BadRequestCode {
+            code: "previous_response_target_format_mismatch",
+            message: format!(
+                "previous_response_id belongs to {}, not windsurf",
+                prior.provider
+            ),
+        });
+    }
+    if prior.route != "responses" {
+        return Err(AppError::BadRequestCode {
+            code: "previous_response_route_mismatch",
+            message: format!(
+                "previous_response_id belongs to {}, not responses",
+                prior.route
+            ),
+        });
+    }
+    if prior.upstream_model != plan.target.upstream_model {
+        return Err(AppError::BadRequestCode {
+            code: "previous_response_model_mismatch",
+            message: format!(
+                "previous_response_id belongs to {}, not {}",
+                prior.upstream_model, plan.target.upstream_model
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn validate_windsurf_tool_results(
+    prior: Option<&ResponseStateRecord>,
+    value: &Value,
+) -> AppResult<()> {
+    let tool_results = crate::adapter::windsurf_responses::tool_result_call_ids(value)?;
+    if tool_results.is_empty() {
+        return Ok(());
+    }
+    let Some(prior) = prior else {
+        return Err(AppError::BadRequestCode {
+            code: "unknown_previous_response_id",
+            message: "tool result requires previous_response_id".into(),
+        });
+    };
+    let pending =
+        crate::adapter::windsurf_responses::response_function_call_ids(&prior.raw_response);
+    for call_id in tool_results {
+        if !pending.contains(&call_id) {
+            return Err(AppError::BadRequestCode {
+                code: "previous_response_field_mismatch",
+                message: format!("tool result references unknown call_id {call_id}"),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn store_windsurf_response_state(
+    state: &AppState,
+    plan: &crate::route::dispatch::DispatchPlan,
+    response: Value,
+    raw_input_items: Value,
+    store_public: bool,
+) {
+    let response_id = response["id"].as_str().unwrap_or_default().to_string();
+    let record = NewResponseStateRecord {
+        route: "responses".into(),
+        provider: "windsurf".into(),
+        upstream_model: plan.target.upstream_model.clone(),
+        upstream_response_id: response_id.clone(),
+        adapter_response_id: response_id,
+        conversation_id: None,
+        raw_response: response,
+        raw_input_items,
+        upstream_codex_minted: false,
+    };
+    if store_public {
+        state.store_public_response(record);
+    } else {
+        state.remember_response_for_continuation(record);
+    }
 }
 
 fn cursor_response_from_context_if_done(
@@ -640,7 +909,8 @@ pub fn ensure_codex_model(value: &serde_json::Value) -> AppResult<()> {
         ResponsesRoute::CodexResponses => Ok(()),
         ResponsesRoute::BedrockMessages
         | ResponsesRoute::GoogleGenerateContent { .. }
-        | ResponsesRoute::CursorAgent { .. } => Err(AppError::ModelNotSupported(
+        | ResponsesRoute::CursorAgent { .. }
+        | ResponsesRoute::WindsurfChat { .. } => Err(AppError::ModelNotSupported(
             required_model(value)?.to_string(),
         )),
     }
@@ -656,6 +926,9 @@ fn route_from_plan(plan: crate::route::dispatch::DispatchPlan) -> AppResult<Resp
             })
         }
         DispatchEdge::ResponsesToCursorAgentCursor => Ok(ResponsesRoute::CursorAgent {
+            upstream_model: plan.target.upstream_model,
+        }),
+        DispatchEdge::ResponsesToWindsurfChatWindsurf => Ok(ResponsesRoute::WindsurfChat {
             upstream_model: plan.target.upstream_model,
         }),
         _ => Err(AppError::ModelNotSupported(plan.requested_model)),

@@ -133,3 +133,27 @@ async fn http_responses_handler_returns_missing_cursor_credential_for_composer_w
     assert_eq!(error.status(), axum::http::StatusCode::UNAUTHORIZED);
     assert_eq!(error.error_type(), "missing_credential");
 }
+
+#[tokio::test]
+async fn shared_executor_returns_missing_windsurf_credential_for_swe_without_auth() {
+    let homes = common::TestHomes::new();
+    let error = match execute_responses_request(
+        &homes.state,
+        HeaderMap::new(),
+        json!({
+            "model": "swe-1.6",
+            "input": "hello"
+        }),
+        ExecuteResponsesOptions {
+            force_stream: false,
+        },
+    )
+    .await
+    {
+        Ok(_) => panic!("Windsurf route should require credentials in isolated test homes"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status(), axum::http::StatusCode::UNAUTHORIZED);
+    assert_eq!(error.error_type(), "missing_credential");
+}

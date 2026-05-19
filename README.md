@@ -8,8 +8,8 @@ process.
 Use it to put provider-specific models behind clients that understand
 OpenAI-compatible APIs or Amp's local compatibility surface. Amp, Factory Droid,
 Codex CLI, and similar tools can select Bedrock, Codex/ChatGPT OAuth, Google
-Gemini, or Cursor Composer models by pointing at the local proxy and choosing a
-model ID from `/v1/models`.
+Gemini, Cursor Composer, or Windsurf SWE models by pointing at the local proxy
+and choosing a model ID from `/v1/models`.
 
 Routing is explicit and catalog-driven. Requests resolve the submitted model to a
 known provider before any credential lookup or upstream call; unknown models and
@@ -39,6 +39,7 @@ secret or best-effort provider.
 | Codex | GPT/Codex aliases such as `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.3-codex` | ChatGPT Codex OAuth from `~/.codex/auth.json`; Responses over HTTP or WSS |
 | Google | Gemini aliases such as `gemini-3.1-flash-lite`, `gemini-3.1-pro-preview`, and image-capable Gemini IDs | `gemini.api_key` in `~/.ump/auth.json` or `GOOGLE_API_KEY`; GenerateContent plus Responses bridge |
 | Cursor | `composer-1.5`, `composer-2`, `composer-2-fast`, plus live usable-model discovery when credentials work | Cursor AgentService over h2/Connect; auth from `CURSOR_ACCESS_TOKEN`, system secret store, or `<UMP_V2_AUTH_HOME>/.cursor/auth.json` |
+| Windsurf | `swe-1.6-fast`, `swe-1.6`, `swe-1.5-fast`, and `adaptive` | Windsurf Cloud Connect/proto chat transport; auth from `windsurf.api_key` in `~/.ump/auth.json`, `<UMP_V2_AUTH_HOME>/windsurf/auth.json`, `~/.windsurf/auth.json`, or `WINDSURF_API_KEY` |
 
 The canonical static allowlist lives in `src/model_alias.rs`; `/v1/models` also
 includes hot-route models and any live Cursor models discovered at request time.
@@ -105,7 +106,7 @@ amp -x "say hi"
 
 Select models using ModelGate model IDs, for example `claude-sonnet-4-6` for Bedrock,
 `gpt-5.5` for Codex/ChatGPT OAuth, `gemini-3.1-flash-lite` for Google, or
-`composer-2-fast` for Cursor.
+`composer-2-fast` for Cursor, or `swe-1.6` for Windsurf.
 
 ### Factory Droid
 
@@ -139,6 +140,17 @@ rows:
       "noImageSupport": true
     },
     {
+      "id": "custom:Windsurf-SWE-1-6",
+      "model": "swe-1.6",
+      "displayName": "Windsurf SWE 1.6",
+      "provider": "openai",
+      "baseUrl": "http://127.0.0.1:18743/v1",
+      "apiKey": "not-used",
+      "maxContextLimit": 200000,
+      "maxOutputTokens": 64000,
+      "noImageSupport": true
+    },
+    {
       "id": "custom:Gemini-3.1-Flash-Lite",
       "model": "gemini-3.1-flash-lite",
       "displayName": "Gemini 3.1 Flash Lite",
@@ -155,7 +167,7 @@ rows:
 
 Use `provider: "openai"` because Droid is talking to ModelGate's
 OpenAI-compatible facade, even when ModelGate routes the request to Bedrock,
-Cursor, Google, or Codex.
+Cursor, Google, Windsurf, or Codex.
 Use any supported model from `/v1/models`; repeat the Cursor row with
 `composer-2` or `composer-1.5` if you want those Droid choices too.
 
@@ -208,6 +220,7 @@ Common environment variables:
 - `UMP_V2_CODEX_CLIENT_VERSION`, default from `src/codex_catalog.rs`
 - `UMP_V2_CODEX_CATALOG_TTL_SECS`, default `600`
 - `UMP_V2_GOOGLE_GENERATE_BASE_URL`, default `https://generativelanguage.googleapis.com`
+- `UMP_V2_WINDSURF_CLOUD_BASE_URL`, default `https://server.codeium.com`
 - `UMP_V2_BEDROCK_DISCOVERY_TIMEOUT_MS`, default `5000`
 - `UMP_V2_CODEX_HOME`, default `~/.codex`
 - `UMP_V2_AUTH_HOME`, default `~/.ump`
@@ -232,6 +245,9 @@ Provider auth file shape under `~/.ump/auth.json`:
   },
   "gemini": {
     "api_key": "AIza..."
+  },
+  "windsurf": {
+    "api_key": "wsk_..."
   }
 }
 ```
@@ -239,6 +255,8 @@ Provider auth file shape under `~/.ump/auth.json`:
 `google.api_key` is accepted as a compatibility alias for `gemini.api_key`.
 Codex OAuth remains in `~/.codex/auth.json`. Cursor auth is resolved separately
 from `CURSOR_ACCESS_TOKEN`, system secret stores, or `<UMP_V2_AUTH_HOME>/.cursor/auth.json`.
+Windsurf auth is also accepted from the legacy `~/.windsurf/auth.json` file used
+by Windsurf tooling.
 
 ## Hot Routing
 
@@ -272,7 +290,8 @@ While a response is in flight, another `response.create` is rejected with
 `response_already_in_flight`. `previous_response_id` is connection-local and must
 match the prior route/model fingerprint; it never authorizes a cross-provider
 continuation. Codex targets use upstream Responses WSS, while Bedrock, Google,
-and Cursor targets use provider-specific bridges and normalized downstream events.
+Cursor, and Windsurf targets use provider-specific HTTP bridges and normalized
+downstream events.
 
 ## Codex CLI
 
@@ -314,6 +333,7 @@ Useful model choices:
 - `claude-sonnet-4-6` and `claude-sonnet-4-6-max` route through Bedrock.
 - `gemini-3.1-flash-lite` routes through Google GenerateContent.
 - `composer-2-fast` routes through the Cursor AgentService bridge.
+- `swe-1.6` routes through Windsurf Cloud.
 
 ## Development and Validation
 

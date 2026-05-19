@@ -676,7 +676,8 @@ fn ensure_responses_websocket_capable(state: &AppState, value: &Value) -> AppRes
         DispatchAction::CodexResponses => Ok(()),
         DispatchAction::BedrockAnthropicMessages
         | DispatchAction::GoogleGenerateContent
-        | DispatchAction::CursorAgent => Err(AppError::ModelNotSupported(plan.requested_model)),
+        | DispatchAction::CursorAgent
+        | DispatchAction::WindsurfChat => Err(AppError::ModelNotSupported(plan.requested_model)),
     }
 }
 
@@ -834,6 +835,9 @@ async fn resolve_bridge_route(
         DispatchAction::CursorAgent => {
             return Err(AppError::ModelNotSupported(plan.requested_model))
         }
+        DispatchAction::WindsurfChat => {
+            return Err(AppError::ModelNotSupported(plan.requested_model))
+        }
     };
     let target_format = plan.target.target_format.as_str().to_string();
     Ok(BridgeRouteFingerprint {
@@ -970,6 +974,18 @@ async fn execute_bridge_response_create(
             .await?;
             return Ok(BridgeResponseOutcome::Continue);
         }
+        ResponsesRoute::WindsurfChat { .. } => {
+            send_ws_json(
+                client,
+                websocket_request_error(
+                    StatusCode::BAD_REQUEST,
+                    "unsupported_route",
+                    "windsurf_chat route is not supported over the Responses WebSocket bridge",
+                ),
+            )
+            .await?;
+            return Ok(BridgeResponseOutcome::Continue);
+        }
     };
     let Some(result) = result else {
         return Ok(BridgeResponseOutcome::Closed);
@@ -1086,6 +1102,7 @@ fn bridge_route_lane(route: &ResponsesRoute) -> &'static str {
         ResponsesRoute::BedrockMessages => "bedrock",
         ResponsesRoute::GoogleGenerateContent { .. } => "google",
         ResponsesRoute::CursorAgent { .. } => "cursor",
+        ResponsesRoute::WindsurfChat { .. } => "windsurf",
     }
 }
 
@@ -1920,6 +1937,7 @@ fn bridge_route_provider(route: &ResponsesRoute) -> &'static str {
         ResponsesRoute::BedrockMessages => "bedrock",
         ResponsesRoute::GoogleGenerateContent { .. } => "google",
         ResponsesRoute::CursorAgent { .. } => "cursor",
+        ResponsesRoute::WindsurfChat { .. } => "windsurf",
     }
 }
 
@@ -1975,6 +1993,7 @@ fn bridge_route_provider_enum(route: &ResponsesRoute) -> Provider {
         ResponsesRoute::BedrockMessages => Provider::Bedrock,
         ResponsesRoute::GoogleGenerateContent { .. } => Provider::Google,
         ResponsesRoute::CursorAgent { .. } => Provider::Cursor,
+        ResponsesRoute::WindsurfChat { .. } => Provider::Windsurf,
     }
 }
 

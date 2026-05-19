@@ -5,3 +5,4 @@ pub mod google;
 pub mod openai_audio;
 pub mod openai_public;
 pub mod openai_realtime;
+pub mod windsurf;

@@ -6,6 +6,7 @@ pub mod bedrock;
 pub mod codex;
 pub mod cursor;
 pub mod google;
+pub mod windsurf;
 
 pub(crate) fn read_json_string(path: &Path, keys: &[&str]) -> AppResult<Option<String>> {
     if !path.exists() {

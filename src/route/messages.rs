@@ -41,6 +41,7 @@ pub async fn messages(
         DispatchAction::GoogleGenerateContent => {
             Err(AppError::ModelNotSupported(plan.requested_model))
         }
+        DispatchAction::WindsurfChat => Err(AppError::ModelNotSupported(plan.requested_model)),
         DispatchAction::CursorAgent => {
             execute_cursor_messages(&state, &headers, &plan, value).await
         }
