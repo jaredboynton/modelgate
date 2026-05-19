@@ -547,11 +547,9 @@ fn is_forbidden_key(key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::{ffi::OsString, sync::Mutex};
+    use std::ffi::OsString;
 
     use super::*;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct EnvRestore {
         key: &'static str,
@@ -882,7 +880,7 @@ mod tests {
 
     #[test]
     fn hot_config_rejects_proxy_visible_without_runtime_keys() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
         let _keys = EnvRestore::clear("UMP_COMPACTION_KEYS_JSON");
         let _instance = EnvRestore::clear("UMP_COMPACTION_INSTANCE_ID");
         let error = parse_config_value(serde_json::json!({
@@ -903,7 +901,7 @@ mod tests {
 
     #[test]
     fn hot_config_rejects_proxy_visible_with_privacy_off() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
         let _keys = EnvRestore::set(
             "UMP_COMPACTION_KEYS_JSON",
             r#"{"current":"fixture","keys":{"fixture":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}}"#,
@@ -930,7 +928,7 @@ mod tests {
 
     #[test]
     fn hot_config_disabled_proxy_visible_route_does_not_force_env_validation() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
         let _keys = EnvRestore::clear("UMP_COMPACTION_KEYS_JSON");
         let _instance = EnvRestore::clear("UMP_COMPACTION_INSTANCE_ID");
 

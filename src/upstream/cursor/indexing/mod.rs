@@ -253,11 +253,8 @@ pub struct RenderedSearch {
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
-    use std::sync::Mutex;
 
     use super::*;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct EnvRestore {
         key: &'static str,
@@ -289,14 +286,18 @@ mod tests {
 
     #[test]
     fn cloud_enabled_env_defaults_off() {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let _restore = EnvRestore::unset(ENV_INDEX_CLOUD);
         assert!(!cloud_enabled_env());
     }
 
     #[test]
     fn bootstrap_enabled_env_requires_explicit_one() {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let _restore = EnvRestore::set(ENV_INDEX_BOOTSTRAP, "true");
         assert!(!bootstrap_enabled_env());
         std::env::set_var(ENV_INDEX_BOOTSTRAP, "1");

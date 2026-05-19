@@ -10,8 +10,7 @@ fn websocket_docs_describe_mixed_downstream_contract() {
     let readme = read_doc("README.md");
     let websocket = read_doc("docs/golden-principles/WEBSOCKET_RESPONSES.md");
     let provider = read_doc("docs/golden-principles/PROVIDER_BOUNDARIES.md");
-    let planning = read_doc("PLANNING/websocket-provider-switch-fix.md");
-    let combined = format!("{readme}\n{websocket}\n{provider}\n{planning}");
+    let combined = format!("{readme}\n{websocket}\n{provider}");
 
     for required in [
         "mixed-provider facade",

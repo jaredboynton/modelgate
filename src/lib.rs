@@ -18,6 +18,9 @@ pub mod state;
 pub mod upstream;
 pub mod upstream_response;
 
+#[cfg(test)]
+pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub use error::{AppError, AppResult};
 pub use router::build_router;
 pub use state::{AppState, RuntimeConfig};

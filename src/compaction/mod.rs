@@ -213,14 +213,12 @@ fn provider_name(provider: Provider) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use std::{ffi::OsString, sync::Mutex};
+    use std::ffi::OsString;
 
     use serde_json::json;
 
     use super::*;
     use crate::model_alias::TargetFormat;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct EnvRestore {
         key: &'static str,
@@ -310,7 +308,7 @@ mod tests {
 
     #[test]
     fn ump_pack_expands_for_non_codex_target() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
         let _key_env = EnvRestore::set(
             "UMP_COMPACTION_KEYS_JSON",
             r#"{"current":"fixture","keys":{"fixture":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}}"#,

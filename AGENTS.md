@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-Unified Model Proxy v2 = Rust HTTP proxy for Amp. Binary binds `127.0.0.1:18743`, exposes local OpenAI/Anthropic-compatible routes, fans out to Bedrock Mantle, Codex/ChatGPT OAuth, Google Gemini direct.
+Unified Model Proxy v2 = Rust HTTP proxy for Amp and agent clients. Binary binds `127.0.0.1:18743`, exposes local OpenAI/Anthropic/Google-compatible routes, and fans out to Bedrock Mantle, Codex/ChatGPT OAuth, Google Gemini direct, and Cursor AgentService.
 
-Keep changes small, provider-aware. `README.md` = short product summary; `PLANNING/v2-plan.md` = implementation contract. Other `PLANNING/` files = durable design notes, active feature plans.
+Keep changes small and provider-aware. `README.md` = current product summary and operator guide. Durable architecture notes live under `docs/`.
 
 ## Tech Stack
 
@@ -24,7 +24,6 @@ README.md              short product summary and local listen address
 LAYERS.md              short layer map; links to canonical docs
 docs/architecture/     layer contracts and forbidden edges
 docs/guides/           local validation and distribution readiness
-PLANNING/              durable plans and adapter design notes
 launchd/               local service launch assets
 src/main.rs            tracing setup, env state, bind/serve entrypoint
 src/lib.rs             public module exports for tests and integration
@@ -78,7 +77,7 @@ Route layer parse/validate request shape, enforce provider/model fit, call relev
 - New provider forwarding → `src/upstream/<provider>.rs`
 - New provider credential logic → `src/auth/<provider>.rs`
 - New shared request/response translation starts near owning route
-- New durable design notes → `PLANNING/`
+- New durable design notes → `docs/architecture/` or `docs/guides/`
 - Local runtime state/logs/agent scratch → ignored paths, not tracked source
 
 ## Safe-Change Rules
