@@ -23,7 +23,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    cursor_agent::{CursorContinuationKey, CursorRoute, CursorToolCall},
+    cursor_agent::{CursorClientProfile, CursorContinuationKey, CursorRoute, CursorToolCall},
     model_alias::{Provider, TargetFormat},
 };
 
@@ -53,6 +53,7 @@ pub struct ConversationState {
     pub provider: Provider,
     pub upstream_model: String,
     pub target_format: TargetFormat,
+    pub client_profile: CursorClientProfile,
     pub stable_field_hash: [u8; 32],
     pub response_id: String,
     pub conversation_id: String,
@@ -129,6 +130,23 @@ impl StoreInner {
 pub struct CursorSessionStore {
     inner: Arc<RwLock<StoreInner>>,
     config: CursorSessionConfig,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum PendingToolContinuationLookup {
+    Found(CursorContinuationKey),
+    NotFound,
+    Ambiguous,
+}
+
+pub struct PendingToolContinuationQuery<'a> {
+    pub route: CursorRoute,
+    pub provider: Provider,
+    pub upstream_model: &'a str,
+    pub target_format: TargetFormat,
+    pub client_profile: CursorClientProfile,
+    pub stable_request_fields: &'a serde_json::Value,
+    pub call_ids: &'a [String],
 }
 
 impl CursorSessionStore {
@@ -259,6 +277,68 @@ impl CursorSessionStore {
         Some(call)
     }
 
+    /// Resolve a continuation by pending tool-call IDs when a replaying
+    /// client omitted `previous_response_id`. The lookup succeeds only when
+    /// exactly one active entry matches the route/provider/model/target/stable
+    /// request tuple and contains every submitted call ID.
+    pub fn find_pending_tool_continuation(
+        &self,
+        query: PendingToolContinuationQuery<'_>,
+    ) -> PendingToolContinuationLookup {
+        if query.call_ids.is_empty() {
+            return PendingToolContinuationLookup::NotFound;
+        }
+        let expected_stable = stable_field_hash_value(query.stable_request_fields);
+        let mut guard = self.write();
+        let matches: Vec<(ContinuationHash, CursorContinuationKey)> = guard
+            .map
+            .iter()
+            .filter_map(|(hash, state)| {
+                if state.route != query.route
+                    || state.provider != query.provider
+                    || state.upstream_model != query.upstream_model
+                    || state.target_format != query.target_format
+                    || state.client_profile != query.client_profile
+                    || state.stable_field_hash != expected_stable
+                {
+                    return None;
+                }
+                if !query.call_ids.iter().all(|call_id| {
+                    state
+                        .pending_tool_calls
+                        .iter()
+                        .any(|pending| pending.id == *call_id)
+                }) {
+                    return None;
+                }
+                Some((
+                    *hash,
+                    CursorContinuationKey {
+                        route: query.route,
+                        provider: query.provider,
+                        upstream_model: state.upstream_model.clone(),
+                        target_format: query.target_format,
+                        stable_request_fields: query.stable_request_fields.clone(),
+                        response_id: state.response_id.clone(),
+                        conversation_id: state.conversation_id.clone(),
+                    },
+                ))
+            })
+            .collect();
+
+        match matches.as_slice() {
+            [] => PendingToolContinuationLookup::NotFound,
+            [(hash, key)] => {
+                if let Some(entry) = guard.map.get_mut(hash) {
+                    entry.last_access = Instant::now();
+                }
+                guard.touch(hash);
+                PendingToolContinuationLookup::Found(key.clone())
+            }
+            _ => PendingToolContinuationLookup::Ambiguous,
+        }
+    }
+
     /// Drop entries older than `max_age`. Public so tests can drive cleanup
     /// without waiting on the background task.
     pub fn cleanup_expired(&self, max_age: Duration) {
@@ -338,7 +418,11 @@ fn continuation_hash(key: &CursorContinuationKey) -> ContinuationHash {
 }
 
 fn stable_field_hash(key: &CursorContinuationKey) -> [u8; 32] {
-    let canonical = canonicalize_stable_fields(&key.stable_request_fields);
+    stable_field_hash_value(&key.stable_request_fields)
+}
+
+fn stable_field_hash_value(value: &serde_json::Value) -> [u8; 32] {
+    let canonical = canonicalize_stable_fields(value);
     let bytes = serde_json::to_vec(&canonical).unwrap_or_default();
     let mut hasher = Sha256::new();
     hasher.update(&bytes);

@@ -4,6 +4,10 @@
 <dict>
 	<key>EnvironmentVariables</key>
 	<dict>
+		<key>AWS_DEFAULT_REGION</key>
+		<string>us-west-2</string>
+		<key>AWS_REGION</key>
+		<string>us-west-2</string>
 		<key>RUST_LOG</key>
 		<string>info</string>
 		<key>UMP_AMP_WORKSPACE_FILTER</key>

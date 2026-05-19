@@ -3,7 +3,7 @@ use axum::{
     http::{header, HeaderMap, HeaderValue, StatusCode},
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
@@ -28,7 +28,7 @@ use crate::{
         validate_compaction_carriers, CompactionHttpError, CompactionLimits,
         RemoteCompactionPolicy,
     },
-    cursor_agent::{CursorContinuationKey, CursorRoute, CursorToolCall},
+    cursor_agent::{CursorClientProfile, CursorContinuationKey, CursorRoute, CursorToolCall},
     model_alias::{resolve_model_required, Provider, ResolvedTarget, TargetFormat},
     route::{
         dispatch::{
@@ -41,7 +41,11 @@ use crate::{
         },
     },
     state::{NewResponseStateRecord, ResponseStateRecord},
-    upstream, AppError, AppResult, AppState, UpstreamResponse,
+    upstream::{
+        self,
+        cursor::session::{PendingToolContinuationLookup, PendingToolContinuationQuery},
+    },
+    AppError, AppResult, AppState, UpstreamResponse,
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -159,6 +163,15 @@ async fn execute_cursor_responses(
     let detection = crate::upstream::cursor::client_profile::detect_client_profile(headers);
     request.client_profile = detection.profile.into();
     request.continuation_key = cursor_continuation_key_for_request(state, plan, &value)?;
+    if request.continuation_key.is_none() {
+        request.continuation_key = infer_cursor_tool_result_continuation(
+            state,
+            plan,
+            &value,
+            request.client_profile,
+            &request.tool_results,
+        )?;
+    }
     crate::upstream::cursor::workspace::attach_to_request(&mut request, headers).await;
 
     crate::upstream::cursor::ensure_credentials(state).await?;
@@ -167,6 +180,7 @@ async fn execute_cursor_responses(
         request.continuation_key.as_ref(),
         &request.tool_results,
     )?;
+    let client_profile = request.client_profile;
 
     if stream {
         let events = upstream::cursor::run::run(state, request).await;
@@ -174,6 +188,7 @@ async fn execute_cursor_responses(
         let plan_for_stream = plan.clone();
         let value_for_stream = value.clone();
         let raw_input_items_for_stream = raw_input_items.clone();
+        let client_profile_for_stream = client_profile;
         let stream_response_id = format!("resp_{}", uuid::Uuid::new_v4().simple());
         let mut ctx = crate::adapter::cursor_events::ResponseContext::new(
             &plan.requested_model,
@@ -199,6 +214,7 @@ async fn execute_cursor_responses(
                             response,
                             raw_input_items_for_stream.clone(),
                             store_public,
+                            client_profile_for_stream,
                         );
                         finalized = true;
                     }
@@ -245,6 +261,7 @@ async fn execute_cursor_responses(
         response.clone(),
         raw_input_items,
         store_public,
+        client_profile,
     );
     UpstreamResponse::json("cursor", response).map_err(AppError::from)
 }
@@ -545,6 +562,7 @@ fn store_cursor_response_state(
     response: Value,
     raw_input_items: Value,
     store_public: bool,
+    client_profile: CursorClientProfile,
 ) {
     let response_id = response["id"].as_str().unwrap_or_default().to_string();
     let conversation_id = response
@@ -552,7 +570,15 @@ fn store_cursor_response_state(
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
     if let Some(conversation_id) = conversation_id.as_ref() {
-        store_cursor_continuation(state, plan, value, &response, &response_id, conversation_id);
+        store_cursor_continuation(
+            state,
+            plan,
+            value,
+            &response,
+            &response_id,
+            conversation_id,
+            client_profile,
+        );
     }
     let record = NewResponseStateRecord {
         route: "responses".into(),
@@ -579,6 +605,7 @@ fn store_cursor_continuation(
     response: &Value,
     response_id: &str,
     conversation_id: &str,
+    client_profile: CursorClientProfile,
 ) {
     let key = cursor_continuation_key(
         CursorRoute::Responses,
@@ -597,6 +624,7 @@ fn store_cursor_continuation(
             provider: key.provider,
             upstream_model: key.upstream_model.clone(),
             target_format: key.target_format,
+            client_profile,
             stable_field_hash: [0u8; 32],
             response_id: response_id.to_string(),
             conversation_id: conversation_id.to_string(),
@@ -683,6 +711,66 @@ fn validate_cursor_prior_response(
         });
     }
     Ok(())
+}
+
+fn infer_cursor_tool_result_continuation(
+    state: &AppState,
+    plan: &crate::route::dispatch::DispatchPlan,
+    value: &Value,
+    client_profile: CursorClientProfile,
+    tool_results: &[crate::cursor_agent::CursorToolResult],
+) -> AppResult<Option<CursorContinuationKey>> {
+    if tool_results.is_empty() {
+        return Ok(None);
+    }
+    if value.get("previous_response_id").is_some() {
+        return Err(tool_result_requires_previous_response_id());
+    }
+    if client_profile != CursorClientProfile::Droid {
+        return Err(tool_result_requires_previous_response_id());
+    }
+
+    let mut seen = HashSet::new();
+    let mut call_ids = Vec::with_capacity(tool_results.len());
+    for result in tool_results {
+        if !seen.insert(result.call_id.as_str()) {
+            return Err(AppError::BadRequestCode {
+                code: "previous_response_field_mismatch",
+                message: format!("duplicate tool result call_id {}", result.call_id),
+            });
+        }
+        call_ids.push(result.call_id.clone());
+    }
+
+    let stable_request_fields = cursor_stable_fields(value);
+    match state
+        .cursor_sessions
+        .find_pending_tool_continuation(PendingToolContinuationQuery {
+            route: CursorRoute::Responses,
+            provider: Provider::Cursor,
+            upstream_model: &plan.target.upstream_model,
+            target_format: TargetFormat::CursorAgent,
+            client_profile,
+            stable_request_fields: &stable_request_fields,
+            call_ids: &call_ids,
+        }) {
+        PendingToolContinuationLookup::Found(key) => Ok(Some(key)),
+        PendingToolContinuationLookup::NotFound => Err(AppError::BadRequestCode {
+            code: "unknown_previous_response_id",
+            message: "tool result requires previous_response_id or an active Droid Cursor tool continuation".into(),
+        }),
+        PendingToolContinuationLookup::Ambiguous => Err(AppError::BadRequestCode {
+            code: "unknown_previous_response_id",
+            message: "ambiguous Droid Cursor tool continuation".into(),
+        }),
+    }
+}
+
+fn tool_result_requires_previous_response_id() -> AppError {
+    AppError::BadRequestCode {
+        code: "unknown_previous_response_id",
+        message: "tool result requires previous_response_id".into(),
+    }
 }
 
 fn validate_cursor_tool_results(
@@ -1163,6 +1251,7 @@ mod tests {
             response,
             request["input"].clone(),
             false,
+            CursorClientProfile::GenericOpenAi,
         );
 
         assert!(

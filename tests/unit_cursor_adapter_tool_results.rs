@@ -95,6 +95,58 @@ fn responses_adapter_rejects_orphan_tool_result_without_previous_response_id() {
 }
 
 #[test]
+fn responses_adapter_accepts_replayed_tool_result_with_prior_function_call() {
+    let body = json!({
+    "model": "composer-2-fast",
+    "store": false,
+    "input": [
+    { "type": "message", "role": "user", "content": "search the repo" },
+    {
+    "type": "function_call",
+    "call_id": "call_lookup",
+    "name": "Grep",
+    "arguments": "{\"pattern\":\"needle\"}"
+    },
+    {
+    "type": "function_call_output",
+    "call_id": "call_lookup",
+    "output": "needle found"
+    }
+    ]
+    });
+    let request = cursor_responses::build_request(&body).expect("replayed tool result accepted");
+    assert_eq!(request.tool_results.len(), 1);
+    assert_eq!(request.tool_results[0].call_id, "call_lookup");
+}
+
+#[test]
+fn responses_adapter_rejects_replayed_tool_result_with_unmatched_call_id() {
+    let body = json!({
+    "model": "composer-2-fast",
+    "input": [
+    {
+    "type": "function_call",
+    "call_id": "call_lookup",
+    "name": "Grep",
+    "arguments": "{}"
+    },
+    {
+    "type": "function_call_output",
+    "call_id": "call_other",
+    "output": "result"
+    }
+    ]
+    });
+    let err = cursor_responses::build_request(&body)
+        .expect_err("unmatched replayed tool result rejected");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("previous_response_id"),
+        "error mentions previous_response_id: {msg}",
+    );
+}
+
+#[test]
 fn responses_adapter_extracts_custom_tool_call_output() {
     let body = json!({
     "model": "composer-2-fast",

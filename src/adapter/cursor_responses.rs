@@ -12,6 +12,8 @@
 //! finishReason detection, v1 Codex-style allowlist) are deliberately not
 //! replicated here.
 
+use std::collections::HashSet;
+
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
@@ -70,7 +72,7 @@ pub fn build_request(public_json: &Value) -> AppResult<CursorAgentRequest> {
     if !tool_results.is_empty() {
         let prior = object.get("previous_response_id");
         let has_prior = matches!(prior, Some(Value::String(value)) if !value.is_empty());
-        if !has_prior {
+        if !has_prior && !tool_results_match_replayed_tool_calls(&messages, &tool_results) {
             return Err(AppError::BadRequest(
                 "tool result requires previous_response_id".into(),
             ));
@@ -658,6 +660,23 @@ fn collect_tool_results(input: Option<&Value>) -> AppResult<Vec<CursorToolResult
         });
     }
     Ok(results)
+}
+
+fn tool_results_match_replayed_tool_calls(
+    messages: &[CursorMessage],
+    tool_results: &[CursorToolResult],
+) -> bool {
+    let mut call_ids = HashSet::new();
+    for message in messages {
+        if let CursorMessage::Assistant { tool_calls, .. } = message {
+            call_ids.extend(tool_calls.iter().map(|call| call.id.as_str()));
+        }
+    }
+
+    !call_ids.is_empty()
+        && tool_results
+            .iter()
+            .all(|result| call_ids.contains(result.call_id.as_str()))
 }
 
 fn extract_tool_result_error(object: &Map<String, Value>, output: &Value) -> Option<String> {

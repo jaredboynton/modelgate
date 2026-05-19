@@ -11,7 +11,7 @@ use std::{collections::HashMap, time::Instant};
 use tower::ServiceExt;
 use unified_model_proxy_v2::{
     build_router,
-    cursor_agent::{CursorContinuationKey, CursorRoute},
+    cursor_agent::{CursorClientProfile, CursorContinuationKey, CursorRoute, CursorToolCall},
     model_alias::{Provider, TargetFormat},
     state::NewResponseStateRecord,
     upstream::cursor::session::ConversationState,
@@ -64,11 +64,165 @@ async fn cursor_continuation_happy_path_reaches_cursor_auth_gate() {
     assert_eq!(error_type(&parsed.1), "missing_credential");
 }
 
+#[tokio::test]
+async fn cursor_droid_replayed_tool_result_without_previous_response_id_reaches_auth_gate() {
+    let homes = common::TestHomes::new();
+    prime_cursor_continuation_with_pending(
+        &homes.state,
+        "resp_prior",
+        "conv_prior",
+        "composer-2-fast",
+        CursorClientProfile::Droid,
+        vec![CursorToolCall {
+            id: "call_lookup".into(),
+            name: "Grep".into(),
+            arguments: json!({ "pattern": "needle" }),
+        }],
+    );
+    let app = build_router(homes.state.clone());
+    let body = json!({
+        "model": "composer-2-fast",
+        "store": false,
+        "input": [
+            { "type": "message", "role": "user", "content": "search the repo" },
+            {
+                "type": "function_call",
+                "call_id": "call_lookup",
+                "name": "Grep",
+                "arguments": "{\"pattern\":\"needle\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_lookup",
+                "output": "needle found"
+            }
+        ],
+    });
+
+    let parsed = post_responses_with_user_agent(app, body, "factory-cli/0.129.0").await;
+    assert_eq!(parsed.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(error_type(&parsed.1), "missing_credential");
+}
+
+#[tokio::test]
+async fn cursor_generic_replayed_tool_result_without_previous_response_id_stays_strict() {
+    let homes = common::TestHomes::new();
+    prime_cursor_continuation_with_pending(
+        &homes.state,
+        "resp_prior",
+        "conv_prior",
+        "composer-2-fast",
+        CursorClientProfile::Droid,
+        vec![CursorToolCall {
+            id: "call_lookup".into(),
+            name: "Grep".into(),
+            arguments: json!({}),
+        }],
+    );
+    let app = build_router(homes.state.clone());
+    let body = json!({
+        "model": "composer-2-fast",
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_lookup",
+                "name": "Grep",
+                "arguments": "{}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_lookup",
+                "output": "ok"
+            }
+        ],
+    });
+
+    let parsed = post_responses(app, body).await;
+    assert_eq!(parsed.0, StatusCode::BAD_REQUEST);
+    assert_eq!(error_code(&parsed.1), "unknown_previous_response_id");
+}
+
+#[tokio::test]
+async fn cursor_droid_replayed_tool_result_without_unique_pending_call_fails_closed() {
+    let homes = common::TestHomes::new();
+    prime_cursor_continuation_with_pending(
+        &homes.state,
+        "resp_prior_a",
+        "conv_prior_a",
+        "composer-2-fast",
+        CursorClientProfile::Droid,
+        vec![CursorToolCall {
+            id: "call_lookup".into(),
+            name: "Grep".into(),
+            arguments: json!({}),
+        }],
+    );
+    prime_cursor_continuation_with_pending(
+        &homes.state,
+        "resp_prior_b",
+        "conv_prior_b",
+        "composer-2-fast",
+        CursorClientProfile::Droid,
+        vec![CursorToolCall {
+            id: "call_lookup".into(),
+            name: "Grep".into(),
+            arguments: json!({}),
+        }],
+    );
+    let app = build_router(homes.state.clone());
+    let body = replayed_tool_result_body("call_lookup");
+
+    let parsed = post_responses_with_user_agent(app, body, "factory-cli/0.129.0").await;
+    assert_eq!(parsed.0, StatusCode::BAD_REQUEST);
+    assert_eq!(error_code(&parsed.1), "unknown_previous_response_id");
+}
+
+#[tokio::test]
+async fn cursor_droid_replayed_tool_result_without_matching_pending_call_fails_closed() {
+    let homes = common::TestHomes::new();
+    prime_cursor_continuation_with_pending(
+        &homes.state,
+        "resp_prior",
+        "conv_prior",
+        "composer-2-fast",
+        CursorClientProfile::Droid,
+        vec![CursorToolCall {
+            id: "call_lookup".into(),
+            name: "Grep".into(),
+            arguments: json!({}),
+        }],
+    );
+    let app = build_router(homes.state.clone());
+    let body = replayed_tool_result_body("call_other");
+
+    let parsed = post_responses_with_user_agent(app, body, "factory-cli/0.129.0").await;
+    assert_eq!(parsed.0, StatusCode::BAD_REQUEST);
+    assert_eq!(error_code(&parsed.1), "unknown_previous_response_id");
+}
+
 fn prime_cursor_continuation(
     state: &unified_model_proxy_v2::AppState,
     response_id: &str,
     conversation_id: &str,
     upstream_model: &str,
+) {
+    prime_cursor_continuation_with_pending(
+        state,
+        response_id,
+        conversation_id,
+        upstream_model,
+        CursorClientProfile::GenericOpenAi,
+        Vec::new(),
+    );
+}
+
+fn prime_cursor_continuation_with_pending(
+    state: &unified_model_proxy_v2::AppState,
+    response_id: &str,
+    conversation_id: &str,
+    upstream_model: &str,
+    client_profile: CursorClientProfile,
+    pending_tool_calls: Vec<CursorToolCall>,
 ) {
     let stable = json!({ "model": upstream_model });
     let key = CursorContinuationKey {
@@ -84,12 +238,13 @@ fn prime_cursor_continuation(
         &key,
         ConversationState {
             checkpoint: None,
-            pending_tool_calls: Vec::new(),
+            pending_tool_calls,
             last_access: Instant::now(),
             route: CursorRoute::Responses,
             provider: Provider::Cursor,
             upstream_model: upstream_model.to_string(),
             target_format: TargetFormat::CursorAgent,
+            client_profile,
             stable_field_hash: [0; 32],
             response_id: response_id.to_string(),
             conversation_id: conversation_id.to_string(),
@@ -109,12 +264,40 @@ fn prime_cursor_continuation(
     });
 }
 
+fn replayed_tool_result_body(call_id: &str) -> Value {
+    json!({
+        "model": "composer-2-fast",
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": call_id,
+                "name": "Grep",
+                "arguments": "{}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": "ok"
+            }
+        ],
+    })
+}
+
 async fn post_responses(app: axum::Router, body: Value) -> (StatusCode, Value) {
+    post_responses_with_user_agent(app, body, "openai-rust/0.1.0").await
+}
+
+async fn post_responses_with_user_agent(
+    app: axum::Router,
+    body: Value,
+    user_agent: &str,
+) -> (StatusCode, Value) {
     let request = Request::builder()
         .method("POST")
         .uri("/v1/responses")
         .header("host", "localhost")
         .header("content-type", "application/json")
+        .header("user-agent", user_agent)
         .body(Body::from(body.to_string()))
         .unwrap();
     let response = app.oneshot(request).await.unwrap();

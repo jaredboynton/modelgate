@@ -25,6 +25,7 @@ const GOOGLE_GENERATE_BASE_URL: &str = "https://generativelanguage.googleapis.co
 const WINDSURF_CLOUD_BASE_URL: &str = "https://server.codeium.com";
 const TEST_CODEX_RESPONSES_WSS_URL: &str = "ws://127.0.0.1:1/backend-api/codex/responses";
 const TEST_CODEX_RESPONSES_HTTP_URL: &str = "http://127.0.0.1:1/backend-api/codex/responses";
+const DEFAULT_BEDROCK_REGION: &str = "us-west-2";
 
 #[derive(Clone)]
 pub struct AppState {
@@ -140,7 +141,7 @@ impl AppState {
         let bedrock_region = Arc::<str>::from(
             env::var("AWS_REGION")
                 .or_else(|_| env::var("AWS_DEFAULT_REGION"))
-                .unwrap_or_else(|_| "us-east-1".to_string()),
+                .unwrap_or_else(|_| DEFAULT_BEDROCK_REGION.to_string()),
         );
         let routing_config = HotRoutingConfig::from_env(&auth_home);
         let codex_catalog = CodexCatalogCache::new(runtime.codex_catalog_config());
@@ -177,7 +178,7 @@ impl AppState {
             codex_home,
             auth_home,
             google_api_key: None,
-            bedrock_region: Arc::<str>::from("us-east-1"),
+            bedrock_region: Arc::<str>::from(DEFAULT_BEDROCK_REGION),
             runtime,
             routing_config,
             codex_catalog,
