@@ -69,6 +69,20 @@ fn unit_codex_normalizes_string_input_to_list_message() {
 }
 
 #[test]
+fn unit_codex_strips_prompt_cache_retention_hint() {
+    let body = serde_json::json!({
+        "model": "openai:gpt-5.5",
+        "input": "hello",
+        "prompt_cache_key": "factory-droid",
+        "prompt_cache_retention": "24h"
+    });
+
+    let prepared = codex::prepare_responses_body(body).unwrap();
+    assert!(prepared.get("prompt_cache_retention").is_none());
+    assert_eq!(prepared["prompt_cache_key"], "factory-droid");
+}
+
+#[test]
 fn unit_codex_response_create_payload_is_flat_http_body() {
     let body = serde_json::json!({
         "model": "openai/gpt-5.4",
@@ -152,7 +166,6 @@ fn unit_codex_rejects_lossy_request_semantics() {
         ("max_output_tokens", serde_json::json!(100)),
         ("max_tokens", serde_json::json!(100)),
         ("prompt", serde_json::json!({ "id": "pmpt_123" })),
-        ("prompt_cache_retention", serde_json::json!("24h")),
         ("top_logprobs", serde_json::json!(1)),
         ("truncation", serde_json::json!("auto")),
     ] {

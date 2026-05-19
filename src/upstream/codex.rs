@@ -74,6 +74,7 @@ where
     }
     body["model"] = serde_json::Value::String(alias.upstream_model);
     if let Some(object) = body.as_object_mut() {
+        object.remove("prompt_cache_retention");
         reject_lossy_request_fields(object)?;
         reject_unsupported_input_items(object.get("input"))?;
         reject_unsupported_tools(object.get("tools"))?;
@@ -134,7 +135,6 @@ fn reject_lossy_request_fields(
         "max_output_tokens",
         "max_tokens",
         "prompt",
-        "prompt_cache_retention",
         "top_logprobs",
         "truncation",
     ] {
