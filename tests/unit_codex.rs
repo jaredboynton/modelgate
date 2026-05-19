@@ -114,6 +114,7 @@ fn unit_codex_response_create_event_payload_uses_flat_ws_shape() {
         "model": "openai:gpt-5.5",
         "stream": false,
         "input": "hello",
+        "previous_response_id": "resp_previous",
         "safety_identifier": "droid-user",
         "temperature": 0.4
     });
@@ -129,6 +130,7 @@ fn unit_codex_response_create_event_payload_uses_flat_ws_shape() {
     assert_eq!(payload["stream"], true);
     assert_eq!(payload["store"], false);
     assert!(payload.get("response").is_none());
+    assert!(payload.get("previous_response_id").is_none());
     assert!(payload.get("safety_identifier").is_none());
     assert!(payload.get("temperature").is_none());
     assert_eq!(payload["input"][0]["content"][0]["text"], "hello");
@@ -161,14 +163,11 @@ fn unit_codex_nested_response_create_payload_is_explicit_compatibility_shape() {
 fn unit_codex_strips_fields_outside_backend_allowlist() {
     for (field, value) in [
         ("background", serde_json::json!(true)),
-        (
-            "context_management",
-            serde_json::json!({ "strategy": "auto" }),
-        ),
         ("conversation", serde_json::json!({ "id": "conv_123" })),
         ("max_tool_calls", serde_json::json!(2)),
         ("max_output_tokens", serde_json::json!(100)),
         ("max_tokens", serde_json::json!(100)),
+        ("previous_response_id", serde_json::json!("resp_previous")),
         ("prompt", serde_json::json!({ "id": "pmpt_123" })),
         ("safety_identifier", serde_json::json!("safe-user")),
         (
@@ -204,6 +203,7 @@ fn unit_codex_preserves_supported_request_controls() {
         "model": "openai:gpt-5.5",
         "input": "hello",
         "client_metadata": { "client": "droid" },
+        "context_management": [{ "type": "compaction", "compact_threshold": 1000 }],
         "generate": false,
         "include": ["file_search_call.results"],
         "parallel_tool_calls": true,
@@ -216,6 +216,7 @@ fn unit_codex_preserves_supported_request_controls() {
 
     let prepared = codex::prepare_responses_body(body).unwrap();
     assert_eq!(prepared["client_metadata"]["client"], "droid");
+    assert_eq!(prepared["context_management"][0]["type"], "compaction");
     assert_eq!(prepared["generate"], false);
     assert!(prepared["include"]
         .as_array()

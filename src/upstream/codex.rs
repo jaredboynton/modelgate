@@ -23,8 +23,8 @@ const CODEX_REMOTE_COMPACTION_V2_FEATURE: &str = "remote_compaction_v2";
 const CODEX_RESPONSES_ALLOWED_FIELDS: &[&str] = &[
     "model",
     "instructions",
-    "previous_response_id",
     "input",
+    "context_management",
     "tools",
     "tool_choice",
     "parallel_tool_calls",
