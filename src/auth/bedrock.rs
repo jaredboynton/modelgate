@@ -5,7 +5,6 @@ use crate::{auth::read_json_string, AppError, AppResult, AppState};
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum BedrockAuth {
     Bearer { token: String, source: &'static str },
-    Profile { name: String },
 }
 
 pub fn resolve_bedrock_auth(state: &AppState) -> AppResult<BedrockAuth> {
@@ -15,9 +14,6 @@ pub fn resolve_bedrock_auth(state: &AppState) -> AppResult<BedrockAuth> {
             token,
             source: "bearer_file",
         });
-    }
-    if let Some(name) = read_json_string(&auth_json, &["bedrock", "profile"])? {
-        return Ok(BedrockAuth::Profile { name });
     }
 
     if let Ok(token) = env::var("AWS_BEARER_TOKEN_BEDROCK") {
@@ -29,5 +25,5 @@ pub fn resolve_bedrock_auth(state: &AppState) -> AppResult<BedrockAuth> {
         }
     }
 
-    Err(AppError::MissingCredential("Bedrock bearer/profile"))
+    Err(AppError::MissingCredential("Bedrock bearer"))
 }

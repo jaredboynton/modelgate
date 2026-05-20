@@ -1,7 +1,5 @@
 use std::sync::Arc;
-use std::time::SystemTime;
 
-use aws_credential_types::Credentials;
 use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
 use unified_model_proxy_v2::{
@@ -9,9 +7,9 @@ use unified_model_proxy_v2::{
     error::AppError,
     upstream::{
         bedrock::{
-            mantle_forward_headers, mantle_messages_url, normalize_mantle_model,
-            select_mantle_auth, should_retry_status, sign_mantle_headers_for_credentials,
-            MantleAuthSelection, MantleMessagesRequest, MANTLE_MESSAGES_PATH,
+            resolve_bedrock_runtime_model_id, runtime_forward_headers, runtime_invoke_url,
+            runtime_invoke_with_response_stream_url, select_bedrock_runtime_auth,
+            should_retry_status, BedrockRuntimeAuthSelection,
         },
         google::{
             build_google_generate_content_request_with_base_url,
@@ -38,118 +36,63 @@ fn state_with_google_key(key: Option<&str>) -> AppState {
 }
 
 #[test]
-fn bedrock_mantle_url_model_and_auth_helpers_are_fixtureable() {
+fn bedrock_runtime_url_model_and_auth_helpers_are_fixtureable() {
     assert_eq!(
-        mantle_messages_url("eu-west-1"),
-        "https://bedrock-mantle.eu-west-1.api.aws/anthropic/v1/messages"
-    );
-    assert_eq!(MANTLE_MESSAGES_PATH, "/anthropic/v1/messages");
-    assert_eq!(
-        normalize_mantle_model("anthropic/claude-haiku-4-5-20251001").unwrap(),
-        "anthropic.claude-haiku-4-5"
+        runtime_invoke_url("us-west-2", "global.anthropic.claude-sonnet-4-6"),
+        "https://bedrock-runtime.us-west-2.amazonaws.com/model/global.anthropic.claude-sonnet-4-6/invoke"
     );
     assert_eq!(
-        normalize_mantle_model("anthropic/claude-sonnet-4-6").unwrap(),
-        "us.anthropic.claude-sonnet-4-6"
+        runtime_invoke_with_response_stream_url("us-west-2", "global.anthropic.claude-sonnet-4-6"),
+        "https://bedrock-runtime.us-west-2.amazonaws.com/model/global.anthropic.claude-sonnet-4-6/invoke-with-response-stream"
     );
     assert_eq!(
-        normalize_mantle_model("claude-opus-4-6").unwrap(),
-        "us.anthropic.claude-opus-4-6-v1"
+        resolve_bedrock_runtime_model_id("anthropic/claude-haiku-4-5-20251001").unwrap(),
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    );
+    assert_eq!(
+        resolve_bedrock_runtime_model_id("anthropic/claude-sonnet-4-6").unwrap(),
+        "global.anthropic.claude-sonnet-4-6"
+    );
+    assert_eq!(
+        resolve_bedrock_runtime_model_id("claude-opus-4-6").unwrap(),
+        "global.anthropic.claude-opus-4-6-v1"
     );
 
-    let auth = select_mantle_auth(
+    let auth = select_bedrock_runtime_auth(
         BedrockAuth::Bearer {
             token: "test-token".into(),
             source: "bearer_file",
         },
-        "eu-west-1",
+        "us-west-2",
     );
     assert_eq!(
         auth,
-        MantleAuthSelection::Header {
-            name: "x-api-key",
+        BedrockRuntimeAuthSelection::Header {
+            name: "authorization",
             value: "test-token".into(),
             source: "bearer_file"
         }
     );
-
-    let auth = select_mantle_auth(
-        BedrockAuth::Profile {
-            name: "dev-profile".into(),
-        },
-        "eu-west-1",
-    );
-    assert_eq!(
-        auth,
-        MantleAuthSelection::Profile {
-            profile: "dev-profile".into(),
-            region: "eu-west-1".into(),
-            service: "bedrock-mantle"
-        }
-    );
-}
-
-#[test]
-fn bedrock_profile_auth_can_sign_mantle_request_with_sigv4_headers() {
-    let request = MantleMessagesRequest {
-        url: mantle_messages_url("eu-west-1"),
-        path: MANTLE_MESSAGES_PATH,
-        body: serde_json::json!({
-            "model": "anthropic.claude-haiku-4-5",
-            "messages": [{"role": "user", "content": "ping"}],
-            "max_tokens": 1
-        }),
-        auth: MantleAuthSelection::Profile {
-            profile: "dev-profile".into(),
-            region: "eu-west-1".into(),
-            service: "bedrock-mantle",
-        },
-        headers: mantle_forward_headers(&HeaderMap::new()),
-    };
-    let body = serde_json::to_vec(&request.body).unwrap();
-    let credentials = Credentials::new(
-        "AKIDEXAMPLE",
-        "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
-        Some("SESSION".to_string()),
-        None,
-        "test",
-    );
-
-    let headers = sign_mantle_headers_for_credentials(
-        &request,
-        &body,
-        &request.headers,
-        &credentials,
-        SystemTime::UNIX_EPOCH,
-        "eu-west-1",
-        "bedrock-mantle",
-    )
-    .unwrap();
-
-    assert!(headers["authorization"]
-        .to_str()
-        .unwrap()
-        .starts_with("AWS4-HMAC-SHA256"));
-    assert!(headers.contains_key("x-amz-date"));
-    assert_eq!(headers["x-amz-security-token"], "SESSION");
 }
 
 #[test]
 fn bedrock_forward_headers_default_anthropic_version_and_preserve_safe_headers() {
     let mut headers = axum::http::HeaderMap::new();
     headers.insert("accept", "text/event-stream".parse().unwrap());
-    headers.insert("anthropic-version", "2025-01-01".parse().unwrap());
-    headers.insert("authorization", "Bearer caller-secret".parse().unwrap());
+    headers.insert("x-amzn-bedrock-trace", "true".parse().unwrap());
 
-    let forwarded = mantle_forward_headers(&headers);
-
-    assert_eq!(forwarded["accept"], "text/event-stream");
-    assert_eq!(forwarded["anthropic-version"], "2025-01-01");
+    // Stream case:
+    let forwarded = runtime_forward_headers(&headers, true);
+    assert_eq!(forwarded["accept"], "application/vnd.amazon.eventstream");
+    assert_eq!(forwarded["x-amzn-bedrock-accept"], "application/json");
+    assert_eq!(forwarded["x-amzn-bedrock-trace"], "true");
     assert!(forwarded.get("authorization").is_none());
 
-    let defaults = mantle_forward_headers(&axum::http::HeaderMap::new());
-    assert_eq!(defaults["content-type"], "application/json");
-    assert_eq!(defaults["anthropic-version"], "2023-06-01");
+    // Non-stream case:
+    let forwarded_non_stream = runtime_forward_headers(&headers, false);
+    assert_eq!(forwarded_non_stream["accept"], "application/json");
+    assert_eq!(forwarded_non_stream["x-amzn-bedrock-trace"], "true");
+    assert!(forwarded_non_stream.get("x-amzn-bedrock-accept").is_none());
 }
 
 #[test]

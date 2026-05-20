@@ -242,7 +242,7 @@ async fn codex_refresh_writes_codex_auth_and_diagnostic_mirror() {
 }
 
 #[test]
-fn bedrock_resolves_env_then_auth_home_bearer_then_profile_and_fails_closed() {
+fn bedrock_resolves_env_then_auth_home_bearer_and_fails_closed() {
     let _guard = ENV_LOCK.lock().unwrap();
     let codex_home = tempdir().unwrap();
     let auth_home = tempdir().unwrap();
@@ -274,7 +274,7 @@ fn bedrock_resolves_env_then_auth_home_bearer_then_profile_and_fails_closed() {
                         let state = AppState::from_env();
                         assert!(matches!(
                             resolve_bedrock_auth(&state).unwrap_err(),
-                            AppError::MissingCredential("Bedrock bearer/profile")
+                            AppError::MissingCredential("Bedrock bearer")
                         ));
 
                         fs::write(
@@ -309,12 +309,10 @@ fn bedrock_resolves_env_then_auth_home_bearer_then_profile_and_fails_closed() {
                             r#"{"bedrock":{"profile":"dev-profile"}}"#,
                         )
                         .unwrap();
-                        assert_eq!(
-                            resolve_bedrock_auth(&state).unwrap(),
-                            BedrockAuth::Profile {
-                                name: "dev-profile".to_string()
-                            }
-                        );
+                        assert!(matches!(
+                            resolve_bedrock_auth(&state).unwrap_err(),
+                            AppError::MissingCredential("Bedrock bearer")
+                        ));
                     });
                 },
             )

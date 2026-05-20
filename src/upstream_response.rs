@@ -17,6 +17,7 @@ const PRESERVED_HEADERS: &[&str] = &[
     "request-id",
     "anthropic-request-id",
     "openai-request-id",
+    "x-amzn-requestid",
 ];
 
 const HOP_BY_HOP_HEADERS: &[&str] = &[

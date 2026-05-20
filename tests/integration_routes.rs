@@ -1196,7 +1196,7 @@ fn integration_routes_anthropic_messages_path_reaches_bedrock_credential_gate() 
     assert!(body["error"]["message"]
         .as_str()
         .unwrap()
-        .contains("Bedrock bearer/profile"));
+        .contains("Bedrock bearer"));
 }
 
 #[test]
