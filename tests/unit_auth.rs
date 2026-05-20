@@ -41,10 +41,9 @@ fn codex_parses_ump_shape_with_account_id_from_id_token() {
 }
 
 #[test]
-fn codex_parses_opencode_shape_and_prefers_explicit_account_id() {
+fn codex_parses_shorthand_shape_and_prefers_explicit_account_id() {
     let auth = parse_codex_auth(
         &serde_json::json!({
-            "type": "opencode",
             "access": "access_open",
             "refresh": "refresh_open",
             "id": id_token_with_account("acct_from_token"),

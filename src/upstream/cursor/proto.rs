@@ -888,7 +888,7 @@ pub fn encode_request_context_result(
         encode_message_field(
             request_context::MCP_INSTRUCTIONS,
             &concat_bytes(&[
-                encode_string_field(mcp_instructions::SERVER_NAME, "opencode"),
+                encode_string_field(mcp_instructions::SERVER_NAME, "ump"),
                 encode_string_field(
                     mcp_instructions::INSTRUCTIONS,
                     "Use the MCP tools listed in this request context. For codebase index searches, call cursor_codebase_search when it is listed; do not substitute grep, read, or shell for index-search requests.",
@@ -922,7 +922,7 @@ fn encode_mcp_tool_definitions(tools: &[crate::cursor_agent::CursorTool]) -> Vec
                     tool.description.as_deref().unwrap_or(""),
                 ),
                 encode_message_field(mcp_tool_definition::INPUT_SCHEMA, &schema),
-                encode_string_field(mcp_tool_definition::PROVIDER_IDENTIFIER, "opencode"),
+                encode_string_field(mcp_tool_definition::PROVIDER_IDENTIFIER, "ump"),
                 encode_string_field(mcp_tool_definition::TOOL_NAME, &tool.name),
             ])
         })

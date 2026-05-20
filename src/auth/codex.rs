@@ -51,12 +51,13 @@ pub fn parse_codex_auth(raw: &str) -> AppResult<CodexAuth> {
     if let Some(tokens) = value.get("tokens") {
         return from_ump_tokens(tokens, value.get("account_id"));
     }
-    if value.get("type").and_then(|kind| kind.as_str()) == Some("opencode") {
-        let access_token = value
-            .get("access")
-            .and_then(|token| token.as_str())
-            .filter(|token| !token.trim().is_empty())
-            .ok_or(AppError::MissingCredential("codex access token"))?;
+
+    // Try shorthand keys (standard in some codex tool variants)
+    if let Some(access_token) = value
+        .get("access")
+        .and_then(|token| token.as_str())
+        .filter(|token| !token.trim().is_empty())
+    {
         let id_token = value
             .get("id")
             .or_else(|| value.get("id_token"))
@@ -79,6 +80,7 @@ pub fn parse_codex_auth(raw: &str) -> AppResult<CodexAuth> {
             account_id,
         });
     }
+
     from_ump_tokens(&value, value.get("account_id"))
 }
 
