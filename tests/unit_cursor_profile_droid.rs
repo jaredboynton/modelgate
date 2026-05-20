@@ -84,8 +84,9 @@ fn droid_grep_emits_grep() {
     assert_eq!(name, "Grep");
     assert_eq!(call_id, FIXTURE_EXEC_ID);
     assert_eq!(arguments["pattern"], "needle");
-    assert_eq!(arguments["glob"], "/repo/**/*");
+    assert_eq!(arguments["glob_pattern"], "/repo/**/*");
     assert!(arguments.get("path").is_none());
+    assert!(arguments.get("glob").is_none());
     assert!(arguments.get("output_mode").is_none());
 
     // 2. File path case
@@ -97,7 +98,7 @@ fn droid_grep_emits_grep() {
     .concat();
     let exec_file = build_exec(ExecKind::Grep, args_file);
     let (_, arguments_file, _) = unwrap_emit(droid::render(&exec_file));
-    assert_eq!(arguments_file["glob"], "src/lib.rs");
+    assert_eq!(arguments_file["glob_pattern"], "src/lib.rs");
 
     // 3. Empty path case
     let args_empty = [
@@ -108,7 +109,26 @@ fn droid_grep_emits_grep() {
     .concat();
     let exec_empty = build_exec(ExecKind::Grep, args_empty);
     let (_, arguments_empty, _) = unwrap_emit(droid::render(&exec_empty));
-    assert!(arguments_empty.get("glob").is_none());
+    assert!(arguments_empty.get("glob_pattern").is_none());
+}
+
+#[test]
+fn droid_empty_pattern_grep_emits_glob() {
+    let args = [
+        encode_string_field(1, ""),
+        encode_string_field(2, "/repo"),
+        encode_string_field(3, "files_with_matches"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Grep, args);
+    let (name, arguments, call_id) = unwrap_emit(droid::render(&exec));
+
+    assert_eq!(name, "Glob");
+    assert_eq!(call_id, FIXTURE_EXEC_ID);
+    assert_eq!(arguments["patterns"], "**/*");
+    assert_eq!(arguments["folder"], "/repo");
+    assert!(arguments.get("glob").is_none());
+    assert!(arguments.get("pattern").is_none());
 }
 
 #[test]

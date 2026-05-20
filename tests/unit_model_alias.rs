@@ -24,27 +24,33 @@ fn maps_known_aliases() {
 
     let alias = resolve_model("anthropic/claude-haiku-4-5-20251001").unwrap();
     assert_eq!(alias.provider, Provider::Bedrock);
-    assert_eq!(alias.upstream_model, "anthropic.claude-haiku-4-5");
+    assert_eq!(
+        alias.upstream_model,
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    );
 
     let alias = resolve_model("claude-haiku-4-5-20251001").unwrap();
     assert_eq!(alias.provider, Provider::Bedrock);
-    assert_eq!(alias.upstream_model, "anthropic.claude-haiku-4-5");
+    assert_eq!(
+        alias.upstream_model,
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    );
 
     let alias = resolve_model("claude-sonnet-4-6").unwrap();
     assert_eq!(alias.provider, Provider::Bedrock);
-    assert_eq!(alias.upstream_model, "us.anthropic.claude-sonnet-4-6");
+    assert_eq!(alias.upstream_model, "global.anthropic.claude-sonnet-4-6");
 
     let alias = resolve_model("claude-sonnet-4-6-max").unwrap();
     assert_eq!(alias.provider, Provider::Bedrock);
-    assert_eq!(alias.upstream_model, "us.anthropic.claude-sonnet-4-6");
+    assert_eq!(alias.upstream_model, "global.anthropic.claude-sonnet-4-6");
 
     let alias = resolve_model("claude-opus-4-6").unwrap();
     assert_eq!(alias.provider, Provider::Bedrock);
-    assert_eq!(alias.upstream_model, "us.anthropic.claude-opus-4-6-v1");
+    assert_eq!(alias.upstream_model, "global.anthropic.claude-opus-4-6-v1");
 
     let alias = resolve_model("claude-opus-4-7").unwrap();
     assert_eq!(alias.provider, Provider::Bedrock);
-    assert_eq!(alias.upstream_model, "anthropic.claude-opus-4-7");
+    assert_eq!(alias.upstream_model, "global.anthropic.claude-opus-4-7");
 
     let alias = resolve_model("gemini-3.1-flash-lite").unwrap();
     assert_eq!(alias.provider, Provider::Google);
@@ -206,7 +212,8 @@ fn every_claude_alias_routes_to_bedrock() {
             assert_eq!(alias.provider, Provider::Bedrock, "{}", model.id);
             assert!(
                 alias.upstream_model.starts_with("anthropic.claude-")
-                    || alias.upstream_model.starts_with("us.anthropic.claude-"),
+                    || alias.upstream_model.starts_with("us.anthropic.claude-")
+                    || alias.upstream_model.starts_with("global.anthropic.claude-"),
                 "{} -> {}",
                 model.id,
                 alias.upstream_model

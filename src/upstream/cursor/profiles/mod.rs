@@ -44,6 +44,6 @@ pub fn render_tool_call(profile: ClientProfile, exec: &ExecRequest) -> RenderedT
         ClientProfile::ClaudeCode => claude_code::render(exec),
         ClientProfile::Droid => droid::render(exec),
         ClientProfile::GenericAnthropic => generic_anthropic::render(exec),
-        ClientProfile::GenericOpenAi => generic_openai::render(exec),
+        ClientProfile::GenericOpenAi | ClientProfile::Devin => generic_openai::render(exec),
     }
 }

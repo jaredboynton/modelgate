@@ -110,11 +110,16 @@ const CODEX_NATIVE_TOOLS: &[&str] = &[
     "view_image",
 ];
 
+const DEVIN_NATIVE_TOOLS: &[&str] = &[
+    "read", "edit", "delete", "move", "search", "execute", "think", "fetch",
+];
+
 pub fn is_client_native_tool(profile: ClientProfile, name: &str) -> bool {
     match profile {
         ClientProfile::Droid => DROID_NATIVE_TOOLS.contains(&name),
         ClientProfile::ClaudeCode => CLAUDE_NATIVE_TOOLS.contains(&name),
         ClientProfile::CodexCli => CODEX_NATIVE_TOOLS.contains(&name),
+        ClientProfile::Devin => DEVIN_NATIVE_TOOLS.contains(&name),
         ClientProfile::GenericAnthropic | ClientProfile::GenericOpenAi => false,
     }
 }
@@ -151,7 +156,7 @@ pub fn profile_mcp_tool_name(profile: ClientProfile, server: &str, raw_tool_name
 
     match profile {
         ClientProfile::Droid => format!("{server}___{raw_tool_name}"),
-        ClientProfile::CodexCli | ClientProfile::ClaudeCode => {
+        ClientProfile::CodexCli | ClientProfile::ClaudeCode | ClientProfile::Devin => {
             format!("mcp__{server}__{raw_tool_name}")
         }
         ClientProfile::GenericAnthropic | ClientProfile::GenericOpenAi => raw_tool_name.to_string(),

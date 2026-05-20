@@ -7,7 +7,7 @@ use super::proto_helpers::read_string_field;
 use super::{refuse_code, RenderedToolCall};
 use crate::upstream::cursor::client_profile::ClientProfile;
 use crate::upstream::cursor::proto::{decode_exec_public_tool_call, ExecKind, ExecRequest};
-use serde_json::json;
+use serde_json::{json, Map, Value};
 
 pub fn render(exec: &ExecRequest) -> RenderedToolCall {
     if matches!(exec.kind, ExecKind::Mcp) {
@@ -105,14 +105,40 @@ fn path_to_glob(path: &str) -> String {
     }
 }
 
+fn glob_arguments_from_path(path: &str) -> Map<String, Value> {
+    let mut arguments = Map::new();
+    let path = path.trim();
+    if path.is_empty() {
+        arguments.insert("patterns".into(), json!("**/*"));
+        return arguments;
+    }
+    let has_wildcard = path.contains('*') || path.contains('?') || path.contains('[');
+    let last_segment = path.split('/').next_back().unwrap_or(path);
+    let is_file = last_segment.contains('.') && !last_segment.starts_with('.');
+    if has_wildcard || is_file {
+        arguments.insert("patterns".into(), json!(path));
+    } else {
+        arguments.insert("patterns".into(), json!("**/*"));
+        arguments.insert("folder".into(), json!(path.trim_end_matches('/')));
+    }
+    arguments
+}
+
 fn emit_grep(exec: &ExecRequest) -> RenderedToolCall {
     let pattern = read_string_field(&exec.args, 1).unwrap_or_default();
     let path = read_string_field(&exec.args, 2).unwrap_or_default();
+    if pattern.is_empty() {
+        return RenderedToolCall::Emit {
+            tool_name: "Glob".into(),
+            arguments: Value::Object(glob_arguments_from_path(&path)),
+            tool_call_id: exec.exec_id.clone(),
+        };
+    }
     let mut arguments = serde_json::Map::new();
     arguments.insert("pattern".into(), json!(pattern));
     let glob = path_to_glob(&path);
     if !glob.is_empty() {
-        arguments.insert("glob".into(), json!(glob));
+        arguments.insert("glob_pattern".into(), json!(glob));
     }
     RenderedToolCall::Emit {
         tool_name: "Grep".into(),
