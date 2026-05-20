@@ -187,9 +187,9 @@ fn render_mcp(exec: &ExecRequest) -> RenderedToolCall {
 
 fn emit_opencode_read(tool_call_id: String, arguments: serde_json::Value) -> RenderedToolCall {
     let mut out = arguments.as_object().cloned().unwrap_or_default();
-    if !out.contains_key("file_path") {
-        if let Some(path) = out.remove("path") {
-            out.insert("file_path".into(), path);
+    if !out.contains_key("path") {
+        if let Some(file_path) = out.remove("file_path") {
+            out.insert("path".into(), file_path);
         }
     }
     RenderedToolCall::Emit {

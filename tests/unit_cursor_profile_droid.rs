@@ -342,3 +342,27 @@ fn droid_other_field_refuses_with_unsupported_and_field_number() {
         "reason should preserve the unknown field number, got {reason}",
     );
 }
+
+#[test]
+fn droid_opencode_read_normalizes_file_path_to_path() {
+    let argument_entry = [
+        encode_string_field(1, "file_path"),
+        encode_message_field(2, br#""/tmp/test_file.txt""#),
+    ]
+    .concat();
+    let args = [
+        encode_message_field(2, &argument_entry),
+        encode_string_field(3, "opencode-read-id"),
+        encode_string_field(4, "opencode"),
+        encode_string_field(5, "Read"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (name, arguments, call_id) = unwrap_emit(droid::render(&exec));
+
+    assert_eq!(name, "Read");
+    assert_eq!(call_id, "opencode-read-id");
+    assert_eq!(arguments["path"], "/tmp/test_file.txt");
+    assert!(arguments.get("file_path").is_none());
+}

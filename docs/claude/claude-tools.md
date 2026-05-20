@@ -13,15 +13,12 @@ Claude Code utilizes a set of built-in tools for filesystem and shell interactio
 ### Read
 - **Description**: Reads a file from the filesystem.
 - **Parameters**:
-  - `path`: Absolute file path.
+  - `file_path`: Absolute file path.
   - `offset`: (optional) Byte offset to start reading.
   - `limit`: (optional) Maximum bytes to read.
 
 ### Edit
-- **Description**: Modifies a file. Typically uses a semantic diff or "search and replace" block.
-- **Parameters**:
-  - `path`: Absolute file path.
-  - `edits`: Structured list of edits (old/new pairs).
+- **Description**: Modifies a file. Typically uses a semantic diff or "search and replace" block. (Cursor `Write` / `Edit` requests are currently refused by the adapter).
 
 ### Glob
 - **Description**: Finds files matching a glob pattern.
@@ -29,14 +26,15 @@ Claude Code utilizes a set of built-in tools for filesystem and shell interactio
   - `pattern`: The glob pattern to search for.
 
 ### Grep
-- **Description**: Searches for text within files using a query.
+- **Description**: Searches for text within files using a pattern.
 - **Parameters**:
-  - `query`: The search string or regex.
+  - `pattern`: The search string or regex.
+  - `path`: (optional) Subdirectory/file path to limit search scope.
+  - `output_mode`: (optional) Match output formatting.
 
 ### LS
-- **Description**: Lists files in a directory.
-- **Parameters**:
-  - `path`: Directory path.
+- **Description**: Lists files in a directory. Note: In `claude_code.rs` this maps directly to `Bash` executing `ls {path}`.
+
 
 ---
 
