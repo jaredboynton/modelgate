@@ -236,6 +236,128 @@ fn claude_mcp_namespaces_with_double_underscore() {
 }
 
 #[test]
+fn claude_opencode_native_bash_refuses_as_mcp_leak() {
+    let args = [
+        encode_string_field(3, "opencode-bash-id"),
+        encode_string_field(4, "opencode"),
+        encode_string_field(5, "Bash"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (exec_id, reason, code) = unwrap_refuse(profiles::claude_code::render(&exec));
+
+    assert_eq!(exec_id, "exec-fixture-id");
+    assert_eq!(code, refuse_code::NATIVE_TOOL_LEAKED_AS_MCP);
+    assert!(reason.contains("Bash"));
+}
+
+#[test]
+fn claude_empty_server_native_bash_refuses_as_mcp_leak() {
+    let args = [
+        encode_string_field(3, "empty-server-bash-id"),
+        encode_string_field(5, "Bash"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (exec_id, reason, code) = unwrap_refuse(profiles::claude_code::render(&exec));
+
+    assert_eq!(exec_id, "exec-fixture-id");
+    assert_eq!(code, refuse_code::NATIVE_TOOL_LEAKED_AS_MCP);
+    assert!(reason.contains("Bash"));
+}
+
+#[test]
+fn claude_opencode_namespaced_external_tool_passes_through_without_double_namespace() {
+    let argument_entry = [
+        encode_string_field(1, "query"),
+        encode_message_field(2, br#""hello""#),
+    ]
+    .concat();
+    let args = [
+        encode_message_field(2, &argument_entry),
+        encode_string_field(3, "opencode-github-id"),
+        encode_string_field(4, "opencode"),
+        encode_string_field(5, "mcp__github__list_prs"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (name, call_id, arguments) = unwrap_emit(profiles::claude_code::render(&exec));
+
+    assert_eq!(name, "mcp__github__list_prs");
+    assert_eq!(call_id, "opencode-github-id");
+    assert_eq!(arguments["query"], "hello");
+}
+
+#[test]
+fn claude_opencode_non_native_raw_tool_passes_through() {
+    let args = [
+        encode_string_field(3, "opencode-lookup-id"),
+        encode_string_field(4, "opencode"),
+        encode_string_field(5, "lookup"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (name, call_id, arguments) = unwrap_emit(profiles::claude_code::render(&exec));
+
+    assert_eq!(name, "lookup");
+    assert_eq!(call_id, "opencode-lookup-id");
+    assert!(arguments.is_object());
+}
+
+#[test]
+fn claude_empty_server_non_native_raw_tool_passes_through() {
+    let args = [
+        encode_string_field(3, "empty-server-lookup-id"),
+        encode_string_field(5, "lookup"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (name, call_id, arguments) = unwrap_emit(profiles::claude_code::render(&exec));
+
+    assert_eq!(name, "lookup");
+    assert_eq!(call_id, "empty-server-lookup-id");
+    assert!(arguments.is_object());
+}
+
+#[test]
+fn claude_third_party_read_collision_still_namespaces() {
+    let args = [
+        encode_string_field(3, "filesystem-read-id"),
+        encode_string_field(4, "filesystem"),
+        encode_string_field(5, "Read"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (name, call_id, _arguments) = unwrap_emit(profiles::claude_code::render(&exec));
+
+    assert_eq!(name, "mcp__filesystem__Read");
+    assert_eq!(call_id, "filesystem-read-id");
+}
+
+#[test]
+fn claude_cursor_codebase_search_mcp_refuses_internal_leak() {
+    let args = [
+        encode_string_field(3, "cursor-search-id"),
+        encode_string_field(4, "opencode"),
+        encode_string_field(5, "cursor_codebase_search"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (exec_id, reason, code) = unwrap_refuse(profiles::claude_code::render(&exec));
+
+    assert_eq!(exec_id, "exec-fixture-id");
+    assert_eq!(code, refuse_code::CLIENT_CAPABILITY_UNSUPPORTED);
+    assert!(reason.contains("cursor_codebase_search"));
+}
+
+#[test]
 fn claude_fetch_emits_webfetch_with_synth_default_prompt() {
     let args = encode_string_field(1, "https://example.com");
     let exec = build_exec(ExecKind::Fetch, args);

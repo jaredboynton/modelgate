@@ -60,7 +60,7 @@ async fn cursor_continuation_happy_path_reaches_cursor_auth_gate() {
     });
 
     let parsed = post_responses(app, body).await;
-    assert_eq!(parsed.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(parsed.0, StatusCode::UNAUTHORIZED, "{:#?}", parsed.1);
     assert_eq!(error_type(&parsed.1), "missing_credential");
 }
 
@@ -100,7 +100,7 @@ async fn cursor_droid_replayed_tool_result_without_previous_response_id_reaches_
     });
 
     let parsed = post_responses_with_user_agent(app, body, "factory-cli/0.129.0").await;
-    assert_eq!(parsed.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(parsed.0, StatusCode::UNAUTHORIZED, "{:#?}", parsed.1);
     assert_eq!(error_type(&parsed.1), "missing_credential");
 }
 
@@ -156,6 +156,140 @@ async fn cursor_droid_replayed_multiple_read_results_for_fast_alias_reaches_auth
                 "output": "file not found",
                 "error": "not_found"
             }
+        ],
+    });
+
+    let parsed = post_responses_with_user_agent(app, body, "factory-cli/0.129.0").await;
+    assert_eq!(parsed.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(error_type(&parsed.1), "missing_credential");
+}
+
+#[tokio::test]
+async fn cursor_droid_replayed_live_prefixed_read_result_reaches_auth_gate() {
+    let homes = common::TestHomes::new();
+    prime_cursor_continuation_with_pending_and_stable_fields(
+        &homes.state,
+        "resp_readme",
+        "conv_readme",
+        "composer-2.5",
+        CursorClientProfile::Droid,
+        json!({
+            "model": "composer-2.5-fast",
+            "instructions": "stable Droid instructions",
+        }),
+        vec![CursorToolCall {
+            id: "46d82b32-d981-4f82-bb91-523a18ebeab4".into(),
+            name: "Read".into(),
+            arguments: json!({ "file_path": "/private/tmp/ump-droid-live-capture/README.md" }),
+        }],
+    );
+    let app = build_router(homes.state.clone());
+    let body = json!({
+        "model": "composer-2.5-fast",
+        "store": false,
+        "stream": true,
+        "instructions": "stable Droid instructions",
+        "input": [
+            { "role": "user", "content": "Read README.md using tools" },
+            {
+                "type": "function_call",
+                "call_id": "call_46d82b32-d981-4f82-bb91-_0",
+                "name": "Read",
+                "arguments": "{\"file_path\":\"/private/tmp/ump-droid-live-capture/README.md\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_46d82b32-d981-4f82-bb91-_0",
+                "output": "alpha README\n"
+            }
+        ],
+    });
+
+    let parsed = post_responses_with_user_agent(app, body, "factory-cli/0.129.0").await;
+    assert_eq!(parsed.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(error_type(&parsed.1), "missing_credential");
+}
+
+#[tokio::test]
+async fn cursor_droid_replayed_sequential_read_round_uses_latest_tool_result() {
+    let homes = common::TestHomes::new();
+    prime_cursor_continuation_with_pending_and_stable_fields(
+        &homes.state,
+        "resp_second_read",
+        "conv_readme",
+        "composer-2.5",
+        CursorClientProfile::Droid,
+        json!({
+            "model": "composer-2.5-fast",
+            "instructions": "stable Droid instructions",
+        }),
+        vec![CursorToolCall {
+            id: "f68a98e7-14ad-4780-8259-7ebd63e60d06".into(),
+            name: "Read".into(),
+            arguments: json!({ "file_path": "/private/tmp/ump-droid-two-read-live/README.md" }),
+        }],
+    );
+    let app = build_router(homes.state.clone());
+    let body = json!({
+        "model": "composer-2.5-fast",
+        "store": false,
+        "stream": true,
+        "instructions": "stable Droid instructions",
+        "input": [
+            { "role": "user", "content": "Read README.md using tools" },
+            {
+                "type": "function_call",
+                "call_id": "call_9c43ea9c-bc9e-4c6a-9fae-_0",
+                "name": "Read",
+                "arguments": "{\"file_path\":\"/private/tmp/ump-droid-two-read-live/README.md\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_9c43ea9c-bc9e-4c6a-9fae-_0",
+                "output": "alpha README\n"
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_f68a98e7-14ad-4780-8259-_1",
+                "name": "Read",
+                "arguments": "{\"file_path\":\"/private/tmp/ump-droid-two-read-live/README.md\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_f68a98e7-14ad-4780-8259-_1",
+                "output": "alpha README\n"
+            }
+        ],
+    });
+
+    let parsed = post_responses_with_user_agent(app, body, "factory-cli/0.129.0").await;
+    assert_eq!(parsed.0, StatusCode::UNAUTHORIZED, "{:#?}", parsed.1);
+    assert_eq!(error_type(&parsed.1), "missing_credential");
+}
+
+#[tokio::test]
+async fn cursor_droid_historical_tool_result_before_new_user_message_is_not_continuation() {
+    let homes = common::TestHomes::new();
+    let app = build_router(homes.state.clone());
+    let body = json!({
+        "model": "composer-2.5-fast",
+        "store": false,
+        "stream": true,
+        "instructions": "stable Droid instructions",
+        "input": [
+            { "role": "user", "content": "Read README.md using tools" },
+            {
+                "type": "function_call",
+                "call_id": "call_46d82b32-d981-4f82-bb91-_0",
+                "name": "Read",
+                "arguments": "{\"file_path\":\"/private/tmp/ump-droid-live-capture/README.md\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_46d82b32-d981-4f82-bb91-_0",
+                "output": "alpha README\n"
+            },
+            { "role": "user", "content": "Reply exactly: followup-ok. Do not use tools." }
         ],
     });
 
@@ -305,6 +439,26 @@ fn prime_cursor_continuation_with_pending_for_request_model(
     pending_tool_calls: Vec<CursorToolCall>,
 ) {
     let stable = json!({ "model": requested_model });
+    prime_cursor_continuation_with_pending_and_stable_fields(
+        state,
+        response_id,
+        conversation_id,
+        upstream_model,
+        client_profile,
+        stable,
+        pending_tool_calls,
+    );
+}
+
+fn prime_cursor_continuation_with_pending_and_stable_fields(
+    state: &unified_model_proxy_v2::AppState,
+    response_id: &str,
+    conversation_id: &str,
+    upstream_model: &str,
+    client_profile: CursorClientProfile,
+    stable: Value,
+    pending_tool_calls: Vec<CursorToolCall>,
+) {
     let key = CursorContinuationKey {
         route: CursorRoute::Responses,
         provider: Provider::Cursor,

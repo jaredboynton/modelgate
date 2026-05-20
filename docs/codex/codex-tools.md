@@ -24,6 +24,14 @@ This document defines the tools used by the Codex agent, including built-in prim
   - `fork`: (bool) Fork the current thread history.
   - `model`: (optional) Model override.
 
+## UMP Cursor Profile Names
+
+The Cursor profile currently preserves existing compatibility output shapes where they differ from the local Codex catalog:
+
+- Native/compat names filtered from Cursor MCP ads include `shell`, `apply_patch`, `spawn_agent`, `get_goal`, `create_goal`, `update_goal`, `read_file`, `edit_file`, `ls`, `grep`, `glob`, `web_search`, `shell_command`, `exec_command`, `write_stdin`, `list_mcp_resources`, `read_mcp_resource`, `list_mcp_resource_templates`, `update_plan`, `send_input`, `resume_agent`, `wait_agent`, `close_agent`, and `view_image`.
+- External MCP names should be namespaced as `mcp__server__tool`.
+- `opencode` MCP calls with raw Codex-native names are refused as native-tool leaks; `opencode` calls with non-native names pass through unchanged.
+
 ---
 
 ## State & Goal Management

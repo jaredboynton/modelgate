@@ -4,6 +4,14 @@ This document lists the tools available to Factory Droid, including their parame
 
 ## Core Tools
 
+Current Droid native tool IDs observed locally include:
+
+- Read/explore: `Read`, `LS`, `Grep`, `Glob`
+- Edit: `Create`, `Edit`, `ApplyPatch`
+- Execute/agentic: `Execute`, `Task`, `Skill`, `ToolSearch`, `GenerateDroid`
+- Web: `WebSearch`, `FetchUrl`
+- Planning/session: `TodoWrite`, `DismissHandoffItems`, `EndFeatureRun`, `ExitSpecMode`, `ProposeMission`, `StartMissionRun`
+
 ### Edit (`edit-cli`)
 - **llmId**: `Edit`
 - **Description**: Edit the contents of a file by finding and replacing text. Requires the file to be read first.
@@ -28,11 +36,17 @@ This document lists the tools available to Factory Droid, including their parame
   - `timeout`: (optional) Timeout in seconds (default 90).
   - `fireAndForget`: (bool) Run in background.
 
+### LS (`list-directory`)
+- **llmId**: `LS`
+- **Description**: List directory contents.
+- **Parameters**:
+  - `path`: Directory path.
+
 ### Read (`read-cli`)
 - **llmId**: `Read`
 - **Description**: Read file contents. Supports text (truncated at 2400 lines), images (up to 5MB), and PDFs.
 - **Parameters**:
-  - `path`: Absolute path.
+  - `file_path`: Absolute path.
   - `offset`: (optional) Byte offset.
   - `limit`: (optional) Byte limit.
 
@@ -49,6 +63,10 @@ This document lists the tools available to Factory Droid, including their parame
 - **Description**: File path search using glob patterns.
 - **Parameters**:
   - `pattern`: Glob pattern (e.g. `**/*.ts`).
+
+### WebSearch / FetchUrl
+- **llmId**: `WebSearch`, `FetchUrl`
+- **Description**: Search the web or fetch URL content.
 
 ---
 
@@ -70,6 +88,13 @@ This document lists the tools available to Factory Droid, including their parame
 ---
 
 ## MCP Tools (Pre-installed)
+
+UMP treats Droid native tools and external MCP tools as separate namespaces:
+
+- Droid native names are filtered out of Cursor `mcp_tools` advertisements.
+- External MCP tools should stay namespaced as `server___tool`.
+- `opencode` MCP calls with raw Droid-native names such as `Read` or `TodoWrite` are refused as native-tool leaks.
+- `opencode` MCP calls with non-native names, including already-namespaced names such as `ref___ref_search_documentation`, pass through unchanged.
 
 ### Exa (Search)
 - `exa___web_search_exa`: Search the web.

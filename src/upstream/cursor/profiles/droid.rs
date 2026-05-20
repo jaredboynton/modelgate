@@ -2,8 +2,10 @@
 //!
 //! Maps Cursor exec requests to Factory Droid native tool calls.
 
+use super::native_tools;
 use super::proto_helpers::read_string_field;
 use super::{refuse_code, RenderedToolCall};
+use crate::upstream::cursor::client_profile::ClientProfile;
 use crate::upstream::cursor::proto::{decode_exec_public_tool_call, ExecKind, ExecRequest};
 use serde_json::json;
 
@@ -74,7 +76,7 @@ fn emit_read(exec: &ExecRequest) -> RenderedToolCall {
     let path = read_string_field(&exec.args, 1).unwrap_or_default();
     RenderedToolCall::Emit {
         tool_name: "Read".into(),
-        arguments: json!({ "path": path }),
+        arguments: json!({ "file_path": path }),
         tool_call_id: exec.exec_id.clone(),
     }
 }
@@ -110,7 +112,7 @@ fn emit_execute_shell(exec: &ExecRequest, background: bool) -> RenderedToolCall 
     let mut arguments = serde_json::Map::new();
     arguments.insert("command".into(), json!(command));
     if background {
-        arguments.insert("background".into(), json!(true));
+        arguments.insert("fireAndForget".into(), json!(true));
     }
     arguments.insert("riskLevel".into(), json!("medium"));
     arguments.insert(
@@ -167,56 +169,26 @@ fn emit_fetch(exec: &ExecRequest) -> RenderedToolCall {
 fn render_mcp(exec: &ExecRequest) -> RenderedToolCall {
     let (mcp_tool_name, tool_call_id, arguments) = decode_exec_public_tool_call(exec);
     let server = read_string_field(&exec.args, 4).unwrap_or_default();
-    if server == "opencode" && mcp_tool_name == "Read" {
-        return emit_opencode_read(tool_call_id, arguments);
+    if native_tools::is_cursor_codebase_search(&mcp_tool_name) {
+        return RenderedToolCall::Refuse {
+            exec_id: exec.exec_id.clone(),
+            reason: "cursor_codebase_search is proxy-internal and must be handled before Droid rendering"
+                .into(),
+            code: refuse_code::CLIENT_CAPABILITY_UNSUPPORTED,
+        };
     }
-    if server == "opencode" && mcp_tool_name == "TodoWrite" {
-        return emit_opencode_todo_write(tool_call_id, arguments);
+    if native_tools::is_synthetic_mcp_native_leak(ClientProfile::Droid, &server, &mcp_tool_name) {
+        return RenderedToolCall::Refuse {
+            exec_id: exec.exec_id.clone(),
+            reason: format!("Droid native tool {mcp_tool_name} was leaked as Cursor MCP"),
+            code: refuse_code::NATIVE_TOOL_LEAKED_AS_MCP,
+        };
     }
-    let namespaced = if server.is_empty() {
-        mcp_tool_name
-    } else {
-        format!("{server}___{mcp_tool_name}")
-    };
+    let namespaced =
+        native_tools::profile_mcp_tool_name(ClientProfile::Droid, &server, &mcp_tool_name);
     RenderedToolCall::Emit {
         tool_name: namespaced,
         arguments,
-        tool_call_id,
-    }
-}
-
-fn emit_opencode_read(tool_call_id: String, arguments: serde_json::Value) -> RenderedToolCall {
-    let mut out = arguments.as_object().cloned().unwrap_or_default();
-    if !out.contains_key("path") {
-        if let Some(file_path) = out.remove("file_path") {
-            out.insert("path".into(), file_path);
-        }
-    }
-    RenderedToolCall::Emit {
-        tool_name: "Read".into(),
-        arguments: serde_json::Value::Object(out),
-        tool_call_id,
-    }
-}
-
-fn emit_opencode_todo_write(
-    tool_call_id: String,
-    arguments: serde_json::Value,
-) -> RenderedToolCall {
-    let mut out = serde_json::Map::new();
-    if let Some(todos) = arguments.get("todos") {
-        let todos = todos
-            .as_str()
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| todos.to_string());
-        out.insert("todos".into(), json!(todos));
-    }
-    if let Some(merge) = arguments.get("merge") {
-        out.insert("merge".into(), merge.clone());
-    }
-    RenderedToolCall::Emit {
-        tool_name: "TodoWrite".into(),
-        arguments: serde_json::Value::Object(out),
         tool_call_id,
     }
 }

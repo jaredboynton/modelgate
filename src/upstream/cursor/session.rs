@@ -223,6 +223,23 @@ impl CursorSessionStore {
         state.stable_field_hash = stable_field_hash(key);
 
         let mut guard = self.write();
+        if !state.pending_tool_calls.is_empty() {
+            let stale_hashes: Vec<_> = guard
+                .map
+                .iter()
+                .filter_map(|(existing_hash, existing)| {
+                    if *existing_hash != hash && duplicate_active_continuation(existing, &state) {
+                        Some(*existing_hash)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            for stale_hash in stale_hashes {
+                guard.map.remove(&stale_hash);
+                guard.forget(&stale_hash);
+            }
+        }
         guard.map.insert(hash, state);
         guard.touch(&hash);
         while guard.map.len() > guard.max_active {
@@ -267,10 +284,9 @@ impl CursorSessionStore {
         if !entry_matches(entry, key, &expected_stable) {
             return None;
         }
-        let position = entry
-            .pending_tool_calls
-            .iter()
-            .position(|call| call.id == call_id)?;
+        let position = entry.pending_tool_calls.iter().position(|call| {
+            pending_tool_call_id_matches(entry.client_profile, &call.id, call_id)
+        })?;
         let call = entry.pending_tool_calls.remove(position);
         entry.last_access = Instant::now();
         guard.touch(&hash);
@@ -304,10 +320,9 @@ impl CursorSessionStore {
                     return None;
                 }
                 if !query.call_ids.iter().all(|call_id| {
-                    state
-                        .pending_tool_calls
-                        .iter()
-                        .any(|pending| pending.id == *call_id)
+                    state.pending_tool_calls.iter().any(|pending| {
+                        pending_tool_call_id_matches(query.client_profile, &pending.id, call_id)
+                    })
                 }) {
                     return None;
                 }
@@ -372,6 +387,53 @@ impl Default for CursorSessionStore {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn pending_tool_call_id_matches(
+    client_profile: CursorClientProfile,
+    pending_id: &str,
+    submitted_id: &str,
+) -> bool {
+    pending_id == submitted_id
+        || (client_profile == CursorClientProfile::Droid
+            && droid_replayed_call_id_matches(pending_id, submitted_id))
+}
+
+fn droid_replayed_call_id_matches(pending_id: &str, submitted_id: &str) -> bool {
+    let Some(inner) = submitted_id.strip_prefix("call_") else {
+        return false;
+    };
+    let Some((prefix, ordinal)) = inner.rsplit_once('_') else {
+        return false;
+    };
+    if ordinal.is_empty() || !ordinal.chars().all(|ch| ch.is_ascii_digit()) {
+        return false;
+    }
+    prefix.len() >= "00000000-0000-0000-0000-".len()
+        && prefix.ends_with('-')
+        && pending_id.starts_with(prefix)
+        && pending_id.len() > prefix.len()
+}
+
+fn duplicate_active_continuation(
+    existing: &ConversationState,
+    incoming: &ConversationState,
+) -> bool {
+    existing.route == incoming.route
+        && existing.provider == incoming.provider
+        && existing.upstream_model == incoming.upstream_model
+        && existing.target_format == incoming.target_format
+        && existing.client_profile == incoming.client_profile
+        && existing.stable_field_hash == incoming.stable_field_hash
+        && existing.conversation_id == incoming.conversation_id
+        && pending_tool_calls_match(&existing.pending_tool_calls, &incoming.pending_tool_calls)
+}
+
+fn pending_tool_calls_match(a: &[CursorToolCall], b: &[CursorToolCall]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(left, right)| {
+            left.id == right.id && left.name == right.name && left.arguments == right.arguments
+        })
 }
 
 fn entry_matches(
@@ -525,5 +587,221 @@ mod tests {
         });
 
         assert_eq!(lookup, PendingToolContinuationLookup::Found(key));
+    }
+
+    #[test]
+    fn pending_tool_continuation_lookup_accepts_droid_replayed_prefix_id() {
+        let store = CursorSessionStore::with_config(CursorSessionConfig {
+            max_active: 16,
+            ttl: std::time::Duration::from_secs(60),
+            cleanup_interval: std::time::Duration::from_secs(60),
+        });
+        let stable_request_fields = json!({ "model": "composer-2.5-fast" });
+        let key = CursorContinuationKey {
+            route: CursorRoute::Responses,
+            provider: Provider::Cursor,
+            upstream_model: "composer-2.5".into(),
+            target_format: TargetFormat::CursorAgent,
+            stable_request_fields: stable_request_fields.clone(),
+            response_id: "resp_readme".into(),
+            conversation_id: "conv_readme".into(),
+        };
+        store.store_continuation(
+            &key,
+            ConversationState {
+                checkpoint: None,
+                pending_tool_calls: vec![CursorToolCall {
+                    id: "46d82b32-d981-4f82-bb91-523a18ebeab4".into(),
+                    name: "Read".into(),
+                    arguments: json!({
+                        "file_path": "/private/tmp/ump-droid-live-capture/README.md"
+                    }),
+                }],
+                last_access: Instant::now(),
+                route: CursorRoute::Responses,
+                provider: Provider::Cursor,
+                upstream_model: "composer-2.5".into(),
+                target_format: TargetFormat::CursorAgent,
+                client_profile: CursorClientProfile::Droid,
+                stable_field_hash: [0; 32],
+                response_id: "resp_readme".into(),
+                conversation_id: "conv_readme".into(),
+                blob_store: HashMap::new(),
+            },
+        );
+
+        let lookup = store.find_pending_tool_continuation(PendingToolContinuationQuery {
+            route: CursorRoute::Responses,
+            provider: Provider::Cursor,
+            upstream_model: "composer-2.5",
+            target_format: TargetFormat::CursorAgent,
+            client_profile: CursorClientProfile::Droid,
+            stable_request_fields: &stable_request_fields,
+            call_ids: &["call_46d82b32-d981-4f82-bb91-_0".into()],
+        });
+
+        assert_eq!(lookup, PendingToolContinuationLookup::Found(key.clone()));
+        let consumed = store
+            .consume_pending_tool_call(&key, "call_46d82b32-d981-4f82-bb91-_0")
+            .expect("Droid replay alias consumes the original pending call");
+        assert_eq!(consumed.id, "46d82b32-d981-4f82-bb91-523a18ebeab4");
+    }
+
+    #[test]
+    fn pending_tool_continuation_lookup_accepts_droid_replayed_nonzero_index() {
+        let store = CursorSessionStore::with_config(CursorSessionConfig {
+            max_active: 16,
+            ttl: std::time::Duration::from_secs(60),
+            cleanup_interval: std::time::Duration::from_secs(60),
+        });
+        let stable_request_fields = json!({ "model": "composer-2.5-fast" });
+        let key = CursorContinuationKey {
+            route: CursorRoute::Responses,
+            provider: Provider::Cursor,
+            upstream_model: "composer-2.5".into(),
+            target_format: TargetFormat::CursorAgent,
+            stable_request_fields: stable_request_fields.clone(),
+            response_id: "resp_readme".into(),
+            conversation_id: "conv_readme".into(),
+        };
+        store.store_continuation(
+            &key,
+            ConversationState {
+                checkpoint: None,
+                pending_tool_calls: vec![CursorToolCall {
+                    id: "f68a98e7-14ad-4780-8259-7ebd63e60d06".into(),
+                    name: "Read".into(),
+                    arguments: json!({ "file_path": "README.md" }),
+                }],
+                last_access: Instant::now(),
+                route: CursorRoute::Responses,
+                provider: Provider::Cursor,
+                upstream_model: "composer-2.5".into(),
+                target_format: TargetFormat::CursorAgent,
+                client_profile: CursorClientProfile::Droid,
+                stable_field_hash: [0; 32],
+                response_id: "resp_readme".into(),
+                conversation_id: "conv_readme".into(),
+                blob_store: HashMap::new(),
+            },
+        );
+
+        let lookup = store.find_pending_tool_continuation(PendingToolContinuationQuery {
+            route: CursorRoute::Responses,
+            provider: Provider::Cursor,
+            upstream_model: "composer-2.5",
+            target_format: TargetFormat::CursorAgent,
+            client_profile: CursorClientProfile::Droid,
+            stable_request_fields: &stable_request_fields,
+            call_ids: &["call_f68a98e7-14ad-4780-8259-_1".into()],
+        });
+
+        assert_eq!(lookup, PendingToolContinuationLookup::Found(key));
+    }
+
+    #[test]
+    fn store_continuation_replaces_duplicate_active_tool_state_for_same_conversation() {
+        let store = CursorSessionStore::with_config(CursorSessionConfig {
+            max_active: 16,
+            ttl: std::time::Duration::from_secs(60),
+            cleanup_interval: std::time::Duration::from_secs(60),
+        });
+        let stable_request_fields = json!({ "model": "composer-2.5-fast" });
+        let old_key = CursorContinuationKey {
+            route: CursorRoute::Responses,
+            provider: Provider::Cursor,
+            upstream_model: "composer-2.5".into(),
+            target_format: TargetFormat::CursorAgent,
+            stable_request_fields: stable_request_fields.clone(),
+            response_id: "resp_old".into(),
+            conversation_id: "conv_readme".into(),
+        };
+        let new_key = CursorContinuationKey {
+            response_id: "resp_new".into(),
+            ..old_key.clone()
+        };
+        let state = ConversationState {
+            checkpoint: None,
+            pending_tool_calls: vec![CursorToolCall {
+                id: "f68a98e7-14ad-4780-8259-7ebd63e60d06".into(),
+                name: "Read".into(),
+                arguments: json!({ "file_path": "README.md" }),
+            }],
+            last_access: Instant::now(),
+            route: CursorRoute::Responses,
+            provider: Provider::Cursor,
+            upstream_model: "composer-2.5".into(),
+            target_format: TargetFormat::CursorAgent,
+            client_profile: CursorClientProfile::Droid,
+            stable_field_hash: [0; 32],
+            response_id: "resp_old".into(),
+            conversation_id: "conv_readme".into(),
+            blob_store: HashMap::new(),
+        };
+
+        store.store_continuation(&old_key, state.clone());
+        store.store_continuation(
+            &new_key,
+            ConversationState {
+                response_id: "resp_new".into(),
+                ..state
+            },
+        );
+
+        assert_eq!(store.len(), 1);
+        assert!(store.lookup_continuation(&old_key).is_none());
+        assert!(store.lookup_continuation(&new_key).is_some());
+    }
+
+    #[test]
+    fn pending_tool_continuation_lookup_keeps_generic_replay_ids_strict() {
+        let store = CursorSessionStore::with_config(CursorSessionConfig {
+            max_active: 16,
+            ttl: std::time::Duration::from_secs(60),
+            cleanup_interval: std::time::Duration::from_secs(60),
+        });
+        let stable_request_fields = json!({ "model": "composer-2.5-fast" });
+        let key = CursorContinuationKey {
+            route: CursorRoute::Responses,
+            provider: Provider::Cursor,
+            upstream_model: "composer-2.5".into(),
+            target_format: TargetFormat::CursorAgent,
+            stable_request_fields: stable_request_fields.clone(),
+            response_id: "resp_readme".into(),
+            conversation_id: "conv_readme".into(),
+        };
+        store.store_continuation(
+            &key,
+            ConversationState {
+                checkpoint: None,
+                pending_tool_calls: vec![CursorToolCall {
+                    id: "46d82b32-d981-4f82-bb91-523a18ebeab4".into(),
+                    name: "Read".into(),
+                    arguments: json!({ "file_path": "README.md" }),
+                }],
+                last_access: Instant::now(),
+                route: CursorRoute::Responses,
+                provider: Provider::Cursor,
+                upstream_model: "composer-2.5".into(),
+                target_format: TargetFormat::CursorAgent,
+                client_profile: CursorClientProfile::GenericOpenAi,
+                stable_field_hash: [0; 32],
+                response_id: "resp_readme".into(),
+                conversation_id: "conv_readme".into(),
+                blob_store: HashMap::new(),
+            },
+        );
+
+        let lookup = store.find_pending_tool_continuation(PendingToolContinuationQuery {
+            route: CursorRoute::Responses,
+            provider: Provider::Cursor,
+            upstream_model: "composer-2.5",
+            target_format: TargetFormat::CursorAgent,
+            client_profile: CursorClientProfile::GenericOpenAi,
+            stable_request_fields: &stable_request_fields,
+            call_ids: &["call_46d82b32-d981-4f82-bb91-_0".into()],
+        });
+
+        assert_eq!(lookup, PendingToolContinuationLookup::NotFound);
     }
 }

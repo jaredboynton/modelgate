@@ -320,6 +320,134 @@ fn codex_mcp_namespaces_with_double_underscore() {
 }
 
 #[test]
+fn codex_opencode_native_shell_refuses_as_mcp_leak() {
+    let args = [
+        encode_string_field(3, "opencode-shell-id"),
+        encode_string_field(4, "opencode"),
+        encode_string_field(5, "shell"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (exec_id, reason) = assert_refuse(
+        codex_cli::render(&exec),
+        refuse_code::NATIVE_TOOL_LEAKED_AS_MCP,
+    );
+
+    assert_eq!(exec_id, FIXTURE_EXEC_ID);
+    assert!(reason.contains("shell"));
+}
+
+#[test]
+fn codex_empty_server_native_shell_refuses_as_mcp_leak() {
+    let args = [
+        encode_string_field(3, "empty-server-shell-id"),
+        encode_string_field(5, "shell"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (exec_id, reason) = assert_refuse(
+        codex_cli::render(&exec),
+        refuse_code::NATIVE_TOOL_LEAKED_AS_MCP,
+    );
+
+    assert_eq!(exec_id, FIXTURE_EXEC_ID);
+    assert!(reason.contains("shell"));
+}
+
+#[test]
+fn codex_opencode_namespaced_external_tool_passes_through_without_double_namespace() {
+    let argument_entry = [
+        encode_string_field(1, "query"),
+        encode_message_field(2, br#""hello""#),
+    ]
+    .concat();
+    let args = [
+        encode_message_field(2, &argument_entry),
+        encode_string_field(3, "opencode-github-id"),
+        encode_string_field(4, "opencode"),
+        encode_string_field(5, "mcp__github__list_prs"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (name, arguments, call_id) = unwrap_emit(codex_cli::render(&exec));
+
+    assert_eq!(name, "mcp__github__list_prs");
+    assert_eq!(call_id, "opencode-github-id");
+    assert_eq!(arguments["query"], "hello");
+}
+
+#[test]
+fn codex_opencode_non_native_raw_tool_passes_through() {
+    let args = [
+        encode_string_field(3, "opencode-lookup-id"),
+        encode_string_field(4, "opencode"),
+        encode_string_field(5, "lookup"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (name, arguments, call_id) = unwrap_emit(codex_cli::render(&exec));
+
+    assert_eq!(name, "lookup");
+    assert_eq!(call_id, "opencode-lookup-id");
+    assert!(arguments.is_object());
+}
+
+#[test]
+fn codex_empty_server_non_native_raw_tool_passes_through() {
+    let args = [
+        encode_string_field(3, "empty-server-lookup-id"),
+        encode_string_field(5, "lookup"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (name, arguments, call_id) = unwrap_emit(codex_cli::render(&exec));
+
+    assert_eq!(name, "lookup");
+    assert_eq!(call_id, "empty-server-lookup-id");
+    assert!(arguments.is_object());
+}
+
+#[test]
+fn codex_third_party_shell_collision_still_namespaces() {
+    let args = [
+        encode_string_field(3, "github-shell-id"),
+        encode_string_field(4, "github"),
+        encode_string_field(5, "shell"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (name, _arguments, call_id) = unwrap_emit(codex_cli::render(&exec));
+
+    assert_eq!(name, "mcp__github__shell");
+    assert_eq!(call_id, "github-shell-id");
+}
+
+#[test]
+fn codex_cursor_codebase_search_mcp_refuses_internal_leak() {
+    let args = [
+        encode_string_field(3, "cursor-search-id"),
+        encode_string_field(4, "opencode"),
+        encode_string_field(5, "cursor_codebase_search"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (exec_id, reason) = assert_refuse(
+        codex_cli::render(&exec),
+        refuse_code::CLIENT_CAPABILITY_UNSUPPORTED,
+    );
+
+    assert_eq!(exec_id, FIXTURE_EXEC_ID);
+    assert!(reason.contains("cursor_codebase_search"));
+}
+
+#[test]
 fn codex_fetch_emits_shell_command_curl() {
     let args = encode_string_field(1, "https://example.com/page");
     let exec = build_exec(ExecKind::Fetch, args);

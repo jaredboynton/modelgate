@@ -611,8 +611,37 @@ fn collect_tool_results(input: Option<&Value>) -> AppResult<Vec<CursorToolResult
     let Some(Value::Array(items)) = input else {
         return Ok(Vec::new());
     };
+    let mut start = items
+        .iter()
+        .rposition(|item| {
+            let item_type = item
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("message");
+            !matches!(
+                item_type,
+                "function_call"
+                    | "custom_tool_call"
+                    | "function_call_output"
+                    | "custom_tool_call_output"
+                    | "reasoning"
+            )
+        })
+        .map_or(0, |idx| idx + 1);
+    let mut seen_output = false;
+    for (idx, item) in items.iter().enumerate().skip(start) {
+        let item_type = item.get("type").and_then(Value::as_str).unwrap_or("");
+        match item_type {
+            "function_call_output" | "custom_tool_call_output" => seen_output = true,
+            "function_call" | "custom_tool_call" if seen_output => {
+                start = idx;
+                seen_output = false;
+            }
+            _ => {}
+        }
+    }
     let mut results = Vec::new();
-    for item in items {
+    for item in &items[start..] {
         let object = item
             .as_object()
             .ok_or_else(|| AppError::BadRequest("input items must be objects".into()))?;

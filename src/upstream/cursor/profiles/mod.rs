@@ -10,6 +10,7 @@ pub mod codex_cli;
 pub mod droid;
 pub mod generic_anthropic;
 pub mod generic_openai;
+pub mod native_tools;
 mod proto_helpers;
 
 /// Per-profile rendering decision for one Cursor exec request.
@@ -33,6 +34,7 @@ pub mod refuse_code {
     pub const SHAPE_UNKNOWN_PENDING_LIVE_PHASE0: &str = "shape_unknown_pending_live_phase0";
     pub const MISSING_REQUIRED_FIELD: &str = "missing_required_field";
     pub const CLIENT_CAPABILITY_UNSUPPORTED: &str = "client_capability_unsupported";
+    pub const NATIVE_TOOL_LEAKED_AS_MCP: &str = "native_tool_leaked_as_mcp";
 }
 
 /// Dispatch a Cursor ExecRequest to the per-profile renderer.

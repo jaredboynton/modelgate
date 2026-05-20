@@ -31,6 +31,49 @@ fn read_exec() -> ExecRequest {
     }
 }
 
+fn opencode_native_read_exec() -> ExecRequest {
+    ExecRequest {
+        id: 3,
+        exec_id: "exec-opencode-read".to_string(),
+        kind: ExecKind::Mcp,
+        args: [
+            encode_string_field(3, "opencode-read-call"),
+            encode_string_field(4, "opencode"),
+            encode_string_field(5, "Read"),
+        ]
+        .concat(),
+    }
+}
+
+#[test]
+fn droid_read_uses_live_file_path_contract() {
+    let exec = read_exec();
+    let events = public_tool_events_for_exec(ClientProfile::Droid, &exec);
+    assert_eq!(events.len(), 3, "Droid read must emit Started/Delta/Done");
+
+    match &events[2] {
+        CursorAgentEvent::ToolCallDone { call_id, arguments } => {
+            assert_eq!(call_id, "exec-read");
+            assert_eq!(arguments["file_path"], "src/cursor_agent.rs");
+            assert!(
+                arguments.get("path").is_none(),
+                "live Droid Read rejects `path`; it requires `file_path`, got {arguments:?}",
+            );
+        }
+        other => panic!("expected ToolCallDone, got {other:?}"),
+    }
+
+    let pending = pending_tool_call_for_exec(ClientProfile::Droid, &exec)
+        .expect("Droid read must yield pending tool call");
+    assert_eq!(pending.id, "exec-read");
+    assert_eq!(pending.name, "Read");
+    assert_eq!(pending.arguments["file_path"], "src/cursor_agent.rs");
+    assert!(
+        pending.arguments.get("path").is_none(),
+        "pending call must match the public Droid tool args"
+    );
+}
+
 fn assert_single_provider_error(events: &[CursorAgentEvent], exec_id: &str) {
     assert_eq!(
         events.len(),
@@ -126,4 +169,27 @@ fn pending_tool_call_none_for_refusing_profiles() {
             "profile {profile:?} must refuse RecordScreen and yield no pending call"
         );
     }
+}
+
+#[test]
+fn refused_native_mcp_leak_emits_provider_error_without_pending_call() {
+    let exec = opencode_native_read_exec();
+    let events = public_tool_events_for_exec(ClientProfile::Droid, &exec);
+    assert_eq!(
+        events.len(),
+        1,
+        "native MCP leak refusal must collapse to one event, got {events:?}"
+    );
+    match &events[0] {
+        CursorAgentEvent::ProviderError {
+            code,
+            cursor_request_id,
+            ..
+        } => {
+            assert_eq!(code, "native_tool_leaked_as_mcp");
+            assert_eq!(cursor_request_id.as_deref(), Some("exec-opencode-read"));
+        }
+        other => panic!("expected ProviderError, got {other:?}"),
+    }
+    assert!(pending_tool_call_for_exec(ClientProfile::Droid, &exec).is_none());
 }

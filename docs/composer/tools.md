@@ -6,6 +6,15 @@ This document describes the native tools expected by Cursor Composer models (`co
 
 Tools in Cursor are defined in the `aiserver.v1` package. They are primarily transmitted via the `BuiltinToolCall` message.
 
+UMP currently talks to Cursor through the AgentService run path, where external tool advertisements are encoded as `mcp_tools`. Client-native harness tools must not be placed in that MCP lane. UMP filters native names per client profile and only advertises external/non-native tools plus the proxy-owned `cursor_codebase_search`.
+
+Current shipped profile renderers are intentionally narrower than this native
+Cursor table. Codex reads/lists/searches through `shell_command`, uses
+`exec_command` for shell-stream requests, and refuses Cursor `Write` until the
+proxy has enough edit context. Claude maps read to `Read` and foreground
+commands to `Bash`. Droid maps read to `Read` with `file_path`, shell to
+`Execute`, and background shell to `Execute` with `fireAndForget`.
+
 ### Service: `BackgroundComposerService`
 - **Method**: `StreamConversation`
 - **Request**: `GetComposerChatRequest`

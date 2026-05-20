@@ -4,6 +4,8 @@ Claude Code utilizes a set of built-in tools for filesystem and shell interactio
 
 ## Core Built-in Tools
 
+Current Claude Code native tool names include the core tools below plus agent/session tools such as `Agent`, `AskUserQuestion`, `TodoWrite`, `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate`, `TaskStop`, `Skill`, `ToolSearch`, `WaitForMcpServers`, `EnterPlanMode`, `ExitPlanMode`, `EnterWorktree`, `ExitWorktree`, `CronCreate`, `CronDelete`, `CronList`, `SendMessage`, `TeamCreate`, `TeamDelete`, `PushNotification`, `RemoteTrigger`, and `ShareOnboardingGuide`.
+
 ### Bash
 - **Description**: Executes a shell command in the local environment.
 - **Parameters**:
@@ -40,6 +42,13 @@ Claude Code utilizes a set of built-in tools for filesystem and shell interactio
 
 ## Plugin & MCP Tools
 Claude Code loads tools dynamically from plugins located in `~/.claude/plugins`.
+
+UMP treats Claude native tools and external MCP tools as separate namespaces:
+
+- Claude native names are filtered out of Cursor `mcp_tools` advertisements.
+- External MCP names should be namespaced as `mcp__server__tool`.
+- `opencode` MCP calls with raw Claude-native names such as `Read`, `Bash`, or `TodoWrite` are refused as native-tool leaks.
+- `opencode` MCP calls with non-native names, including already-namespaced `mcp__server__tool` names, pass through unchanged.
 
 ### Common Plugins
 - **LSP Plugins**: `typescript-lsp`, `rust-analyzer-lsp`, `swift-lsp` provide symbol navigation and type-checking.

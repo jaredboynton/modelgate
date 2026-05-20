@@ -31,7 +31,7 @@ use crate::{
     upstream::cursor::{
         client_profile::ClientProfile,
         connect::frame_connect_message,
-        profiles::{render_tool_call, RenderedToolCall},
+        profiles::{native_tools::tools_visible_to_cursor, render_tool_call, RenderedToolCall},
         proto::{
             decode_agent_server_message, decode_exec_public_tool_call, decode_get_blob_args,
             decode_set_blob_args, encode_agent_run_request, encode_get_blob_result,
@@ -94,6 +94,8 @@ pub async fn run(
         max_mode: false,
         parameters: &requested_parameters,
     };
+    let cursor_visible_tools =
+        tools_visible_to_cursor(request.client_profile.into(), &request.tools);
 
     let body = encode_agent_run_request(AgentRunRequestInput {
         model: &request.model,
@@ -104,7 +106,7 @@ pub async fn run(
         os_version: &os_version,
         workspace_path: &workspace_path,
         shell: &shell,
-        tools: &request.tools,
+        tools: &cursor_visible_tools,
     });
 
     let cursor_sessions = state.cursor_sessions.clone();
@@ -199,7 +201,7 @@ pub async fn run(
                     crate::upstream::cursor::proto::ExecKind::RequestContext => {
                         let response = encode_request_context_result(
                             exec,
-                            &request.tools,
+                            &cursor_visible_tools,
                             &os_version,
                             &workspace_path,
                             &shell,

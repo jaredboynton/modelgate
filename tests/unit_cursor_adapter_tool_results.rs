@@ -120,6 +120,70 @@ fn responses_adapter_accepts_replayed_tool_result_with_prior_function_call() {
 }
 
 #[test]
+fn responses_adapter_ignores_historical_tool_output_before_later_user_message() {
+    let body = json!({
+    "model": "composer-2-fast",
+    "store": false,
+    "input": [
+    { "role": "user", "content": "read README" },
+    {
+    "type": "function_call",
+    "call_id": "call_read",
+    "name": "Read",
+    "arguments": "{\"file_path\":\"README.md\"}"
+    },
+    {
+    "type": "function_call_output",
+    "call_id": "call_read",
+    "output": "README text"
+    },
+    { "role": "user", "content": "reply now" }
+    ]
+    });
+    let request = cursor_responses::build_request(&body).expect("historical result accepted");
+    assert!(
+        request.tool_results.is_empty(),
+        "historical tool outputs before a later user message are transcript context, not active tool results",
+    );
+}
+
+#[test]
+fn responses_adapter_uses_latest_tool_round_when_replay_has_multiple_rounds() {
+    let body = json!({
+    "model": "composer-2-fast",
+    "store": false,
+    "input": [
+    { "role": "user", "content": "read README" },
+    {
+    "type": "function_call",
+    "call_id": "call_first",
+    "name": "Read",
+    "arguments": "{\"file_path\":\"README.md\"}"
+    },
+    {
+    "type": "function_call_output",
+    "call_id": "call_first",
+    "output": "README text"
+    },
+    {
+    "type": "function_call",
+    "call_id": "call_second",
+    "name": "Read",
+    "arguments": "{\"file_path\":\"README.md\"}"
+    },
+    {
+    "type": "function_call_output",
+    "call_id": "call_second",
+    "output": "README text again"
+    }
+    ]
+    });
+    let request = cursor_responses::build_request(&body).expect("latest replay accepted");
+    assert_eq!(request.tool_results.len(), 1);
+    assert_eq!(request.tool_results[0].call_id, "call_second");
+}
+
+#[test]
 fn responses_adapter_rejects_replayed_tool_result_with_unmatched_call_id() {
     let body = json!({
     "model": "composer-2-fast",

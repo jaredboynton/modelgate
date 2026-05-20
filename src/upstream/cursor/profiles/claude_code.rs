@@ -2,8 +2,10 @@
 //!
 //! Maps Cursor exec requests to Claude Code native tool calls.
 
+use super::native_tools;
 use super::proto_helpers::read_string_field;
 use super::{refuse_code, RenderedToolCall};
+use crate::upstream::cursor::client_profile::ClientProfile;
 use crate::upstream::cursor::proto::{decode_exec_public_tool_call, ExecKind, ExecRequest};
 use serde_json::json;
 
@@ -154,11 +156,27 @@ fn emit_webfetch(exec: &ExecRequest) -> RenderedToolCall {
 fn render_mcp(exec: &ExecRequest) -> RenderedToolCall {
     let (mcp_tool_name, tool_call_id, arguments) = decode_exec_public_tool_call(exec);
     let server = read_string_field(&exec.args, 4).unwrap_or_default();
-    let namespaced = if server.is_empty() {
-        mcp_tool_name
-    } else {
-        format!("mcp__{server}__{mcp_tool_name}")
-    };
+    if native_tools::is_cursor_codebase_search(&mcp_tool_name) {
+        return RenderedToolCall::Refuse {
+            exec_id: exec.exec_id.clone(),
+            reason: "cursor_codebase_search is proxy-internal and must be handled before Claude rendering"
+                .into(),
+            code: refuse_code::CLIENT_CAPABILITY_UNSUPPORTED,
+        };
+    }
+    if native_tools::is_synthetic_mcp_native_leak(
+        ClientProfile::ClaudeCode,
+        &server,
+        &mcp_tool_name,
+    ) {
+        return RenderedToolCall::Refuse {
+            exec_id: exec.exec_id.clone(),
+            reason: format!("Claude native tool {mcp_tool_name} was leaked as Cursor MCP"),
+            code: refuse_code::NATIVE_TOOL_LEAKED_AS_MCP,
+        };
+    }
+    let namespaced =
+        native_tools::profile_mcp_tool_name(ClientProfile::ClaudeCode, &server, &mcp_tool_name);
     RenderedToolCall::Emit {
         tool_name: namespaced,
         arguments,

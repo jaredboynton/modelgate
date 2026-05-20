@@ -43,7 +43,7 @@ fn unwrap_emit(rendered: RenderedToolCall) -> (String, serde_json::Value, String
 }
 
 #[test]
-fn droid_read_emits_read_with_path() {
+fn droid_read_emits_read_with_file_path() {
     let args = encode_string_field(1, "/tmp/file.txt");
     let exec = build_exec(ExecKind::Read, args);
 
@@ -51,7 +51,11 @@ fn droid_read_emits_read_with_path() {
 
     assert_eq!(name, "Read");
     assert_eq!(call_id, FIXTURE_EXEC_ID);
-    assert_eq!(arguments["path"], "/tmp/file.txt");
+    assert_eq!(arguments["file_path"], "/tmp/file.txt");
+    assert!(
+        arguments.get("path").is_none(),
+        "Droid Read rejects `path`; it requires `file_path`, got {arguments:?}",
+    );
 }
 
 #[test]
@@ -130,7 +134,7 @@ fn droid_shell_stream_emits_execute_with_medium_risk() {
 }
 
 #[test]
-fn droid_background_shell_spawn_emits_execute_with_background_flag() {
+fn droid_background_shell_spawn_emits_execute_with_fire_and_forget_only() {
     let args = [
         encode_string_field(1, "long-running"),
         encode_string_field(2, "/tmp"),
@@ -143,7 +147,8 @@ fn droid_background_shell_spawn_emits_execute_with_background_flag() {
     assert_eq!(name, "Execute");
     assert_eq!(call_id, FIXTURE_EXEC_ID);
     assert_eq!(arguments["command"], "long-running");
-    assert_eq!(arguments["background"], true);
+    assert_eq!(arguments["fireAndForget"], true);
+    assert!(arguments.get("background").is_none());
     assert_eq!(arguments["riskLevel"], "medium");
     assert_eq!(arguments["riskLevelReason"], "automated proxy invocation");
 }
@@ -344,7 +349,7 @@ fn droid_other_field_refuses_with_unsupported_and_field_number() {
 }
 
 #[test]
-fn droid_opencode_read_normalizes_file_path_to_path() {
+fn droid_opencode_native_read_refuses_as_mcp_leak() {
     let argument_entry = [
         encode_string_field(1, "file_path"),
         encode_message_field(2, br#""/tmp/test_file.txt""#),
@@ -359,10 +364,116 @@ fn droid_opencode_read_normalizes_file_path_to_path() {
     .concat();
     let exec = build_exec(ExecKind::Mcp, args);
 
+    let (exec_id, reason) =
+        assert_refuse(droid::render(&exec), refuse_code::NATIVE_TOOL_LEAKED_AS_MCP);
+
+    assert_eq!(exec_id, FIXTURE_EXEC_ID);
+    assert!(reason.contains("Read"));
+}
+
+#[test]
+fn droid_empty_server_native_read_refuses_as_mcp_leak() {
+    let args = [
+        encode_string_field(3, "empty-server-read-id"),
+        encode_string_field(5, "Read"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (exec_id, reason) =
+        assert_refuse(droid::render(&exec), refuse_code::NATIVE_TOOL_LEAKED_AS_MCP);
+
+    assert_eq!(exec_id, FIXTURE_EXEC_ID);
+    assert!(reason.contains("Read"));
+}
+
+#[test]
+fn droid_opencode_namespaced_external_tool_passes_through_without_double_namespace() {
+    let argument_entry = [
+        encode_string_field(1, "query"),
+        encode_message_field(2, br#""tool docs""#),
+    ]
+    .concat();
+    let args = [
+        encode_message_field(2, &argument_entry),
+        encode_string_field(3, "opencode-ref-id"),
+        encode_string_field(4, "opencode"),
+        encode_string_field(5, "ref___ref_search_documentation"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
     let (name, arguments, call_id) = unwrap_emit(droid::render(&exec));
 
-    assert_eq!(name, "Read");
-    assert_eq!(call_id, "opencode-read-id");
-    assert_eq!(arguments["path"], "/tmp/test_file.txt");
-    assert!(arguments.get("file_path").is_none());
+    assert_eq!(name, "ref___ref_search_documentation");
+    assert_eq!(call_id, "opencode-ref-id");
+    assert_eq!(arguments["query"], "tool docs");
+}
+
+#[test]
+fn droid_opencode_non_native_raw_tool_passes_through() {
+    let args = [
+        encode_string_field(3, "opencode-lookup-id"),
+        encode_string_field(4, "opencode"),
+        encode_string_field(5, "lookup"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (name, arguments, call_id) = unwrap_emit(droid::render(&exec));
+
+    assert_eq!(name, "lookup");
+    assert_eq!(call_id, "opencode-lookup-id");
+    assert!(arguments.is_object());
+}
+
+#[test]
+fn droid_empty_server_non_native_raw_tool_passes_through() {
+    let args = [
+        encode_string_field(3, "empty-server-lookup-id"),
+        encode_string_field(5, "lookup"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (name, arguments, call_id) = unwrap_emit(droid::render(&exec));
+
+    assert_eq!(name, "lookup");
+    assert_eq!(call_id, "empty-server-lookup-id");
+    assert!(arguments.is_object());
+}
+
+#[test]
+fn droid_third_party_read_collision_still_namespaces() {
+    let args = [
+        encode_string_field(3, "filesystem-read-id"),
+        encode_string_field(4, "filesystem"),
+        encode_string_field(5, "Read"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (name, _arguments, call_id) = unwrap_emit(droid::render(&exec));
+
+    assert_eq!(name, "filesystem___Read");
+    assert_eq!(call_id, "filesystem-read-id");
+}
+
+#[test]
+fn droid_cursor_codebase_search_mcp_refuses_internal_leak() {
+    let args = [
+        encode_string_field(3, "cursor-search-id"),
+        encode_string_field(4, "opencode"),
+        encode_string_field(5, "cursor_codebase_search"),
+    ]
+    .concat();
+    let exec = build_exec(ExecKind::Mcp, args);
+
+    let (exec_id, reason) = assert_refuse(
+        droid::render(&exec),
+        refuse_code::CLIENT_CAPABILITY_UNSUPPORTED,
+    );
+
+    assert_eq!(exec_id, FIXTURE_EXEC_ID);
+    assert!(reason.contains("cursor_codebase_search"));
 }

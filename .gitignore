@@ -9,6 +9,9 @@
 
 # Local agent/runtime state
 /.omx/
+/.agents/
+/.antigravitycli/
+/ORIGINAL_REQUEST.md
 
 # Local live harness captures and raw transcripts
 /.live-harness/
