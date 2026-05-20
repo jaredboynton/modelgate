@@ -25,7 +25,7 @@ const GOOGLE_GENERATE_BASE_URL: &str = "https://generativelanguage.googleapis.co
 const WINDSURF_CLOUD_BASE_URL: &str = "https://server.codeium.com";
 const TEST_CODEX_RESPONSES_WSS_URL: &str = "ws://127.0.0.1:1/backend-api/codex/responses";
 const TEST_CODEX_RESPONSES_HTTP_URL: &str = "http://127.0.0.1:1/backend-api/codex/responses";
-const DEFAULT_BEDROCK_REGION: &str = "eu-west-1";
+const DEFAULT_BEDROCK_REGION: &str = "us-west-2";
 
 #[derive(Clone)]
 pub struct AppState {

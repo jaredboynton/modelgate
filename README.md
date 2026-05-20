@@ -35,7 +35,7 @@ secret or best-effort provider.
 
 | Provider | Models and surface | Auth and transport |
 |---|---|---|
-| Bedrock | Claude aliases such as `claude-sonnet-4-6`, `claude-opus-4-6`, `claude-opus-4-7`, and `claude-haiku-4-5` | Bedrock/Mantle auth from `~/.ump/auth.json` or `AWS_BEARER_TOKEN_BEDROCK`; region from `AWS_REGION`/`AWS_DEFAULT_REGION`; Anthropic Messages and Responses bridge |
+| Bedrock | Claude aliases such as `claude-sonnet-4-6`, `claude-opus-4-6`, `claude-opus-4-7`, and `claude-haiku-4-5` | Bedrock bearer auth from `~/.ump/auth.json` or `AWS_BEARER_TOKEN_BEDROCK`; region from `AWS_REGION`/`AWS_DEFAULT_REGION`; Anthropic Messages and Responses bridge |
 | Codex | GPT/Codex aliases such as `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.3-codex` | ChatGPT Codex OAuth from `~/.codex/auth.json`; Responses over HTTP or WSS |
 | Google | Gemini aliases such as `gemini-3.1-flash-lite`, `gemini-3.1-pro-preview`, and image-capable Gemini IDs | `gemini.api_key` in `~/.ump/auth.json` or `GOOGLE_API_KEY`; GenerateContent plus Responses bridge |
 | Cursor | `composer-1.5`, `composer-2`, `composer-2-fast`, plus live usable-model discovery when credentials work | Cursor AgentService over h2/Connect; auth from `CURSOR_ACCESS_TOKEN`, system secret store, or `<UMP_V2_AUTH_HOME>/.cursor/auth.json` |
@@ -219,7 +219,7 @@ Common environment variables:
 - `UMP_V2_CODEX_HANDSHAKES_PER_MIN`, default `55`
 - `UMP_V2_CODEX_CLIENT_VERSION`, default from `src/codex_catalog.rs`
 - `UMP_V2_CODEX_CATALOG_TTL_SECS`, default `600`
-- `AWS_REGION` / `AWS_DEFAULT_REGION`, default `eu-west-1` for Bedrock/Mantle
+- `AWS_REGION` / `AWS_DEFAULT_REGION`, default `us-west-2` for Bedrock Runtime
 - `UMP_V2_GOOGLE_GENERATE_BASE_URL`, default `https://generativelanguage.googleapis.com`
 - `UMP_V2_WINDSURF_CLOUD_BASE_URL`, default `https://server.codeium.com`
 - `UMP_V2_BEDROCK_DISCOVERY_TIMEOUT_MS`, default `5000`
@@ -241,8 +241,7 @@ Provider auth file shape under `~/.ump/auth.json`:
 ```json
 {
   "bedrock": {
-    "bearer": "ABSK...",
-    "profile": "optional-aws-profile"
+    "bearer": "ABSK..."
   },
   "gemini": {
     "api_key": "AIza..."
@@ -343,9 +342,14 @@ Primary checks:
 ```sh
 cargo fmt --check
 cargo check
-cargo test
-cargo clippy --all-targets --all-features -- -D warnings
+cargo nextest run                                               # primary
+cargo clippy --tests --no-deps --all-features -- -D warnings    # AFTER nextest, reuses rlibs
 ```
+
+Fast inner-loop wrapper that picks the right `RUSTC_WRAPPER` / `CARGO_INCREMENTAL`
+combination automatically: `scripts/dev-test.sh`. Plain `cargo test` is no longer
+routed through a shim; the `.cargo/config.toml` runner indirection was removed in
+May 2026.
 
 Harness cleanup/contract checks:
 
@@ -382,8 +386,8 @@ path. The agent runs at load, keeps itself alive, and binds
 
 To use a different Bedrock region under launchd, edit both region values in the
 copied plist, then reload and kickstart the agent. Keep credentials in
-`~/.ump/auth.json`, AWS profiles, or environment-injected secrets; do not put
-tokens in the plist.
+`~/.ump/auth.json` or environment-injected secrets; do not put tokens in the
+plist.
 
 Stop and unload:
 
