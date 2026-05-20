@@ -66,8 +66,8 @@ Route layer parse/validate request shape, enforce provider/model fit, call relev
 ## Testing and Quality
 
 - Run `cargo fmt --check` before finishing source changes
-- Run `cargo test` for route/auth/model/upstream/SSE behavior changes
-- Run `cargo clippy --all-targets --all-features -- -D warnings` for behavior/dependency/shared-module changes
+- Run `cargo nextest run` for route/auth/model/upstream/SSE behavior changes (not `cargo test`; see `scripts/dev-test.sh` for the fast inner-loop wrapper). Plain `cargo test` is no longer routed through a shim
+- Run nextest BEFORE clippy so the workspace `.rlib` is on disk; then `cargo clippy --tests --no-deps --all-features -- -D warnings` reuses the same fingerprint and stays at lint-only cost
 - Add/update tests near changed behavior in `tests/` or relevant module tests
 - Mock external provider w/ local tests or `wiremock`. No CI/unit tests on live creds
 
@@ -94,8 +94,8 @@ Route layer parse/validate request shape, enforce provider/model fit, call relev
 
 - Format: `cargo fmt --check`
 - Build/check: `cargo check`
-- Test: `cargo test`
-- Lint: `cargo clippy --all-targets --all-features -- -D warnings`
+- Test: `cargo nextest run` (fast inner loop: `scripts/dev-test.sh`)
+- Lint: `cargo clippy --tests --no-deps --all-features -- -D warnings` (run AFTER nextest to reuse the build)
 - Run locally: `cargo run`
 - Harness GC: `scripts/gc/run-all.sh`
 - Install hook: `git config core.hooksPath .githooks`

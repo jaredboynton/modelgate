@@ -13,7 +13,7 @@ Golden rule: tests are credential-free and must be safe on a developer machine, 
 ## Commands
 
 - Fast formatting gate: `cargo fmt --check`.
-- Standard local gate: `cargo check` then `cargo test`.
+- Standard local gate: `cargo check` then `cargo nextest run` (then `cargo clippy --tests --no-deps`).
 - Behavior/dependency/shared-module gate: `cargo clippy --all-targets --all-features -- -D warnings`.
 - Pre-remote gate: `scripts/gc/run-all.sh` once the harness scripts exist.
 

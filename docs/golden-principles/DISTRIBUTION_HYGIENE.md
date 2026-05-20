@@ -1,12 +1,11 @@
 # Distribution Hygiene
 
-Golden rule: this repo is not remote/distribution-ready until clone-affecting local paths are gone, especially the `specter` path dependency.
+Golden rule: this repo must not have clone-affecting local paths. The previous `specter` path dependency blocker has been resolved.
 
 ## Current Gate
 
-- `Cargo.toml` currently depends on `specter = { package = "specters", path = "/Users/jaredboynton/__devlocal/specter" }`.
-- That is acceptable for local harness work, but it is a pre-remote blocker.
-- Do not claim clean remote CI, clone portability, packaging readiness, or release readiness while this dependency remains local.
+- All dependencies are now portable, with `specter` resolved via crates.io (`specters` version `3.0.0`).
+- The repo is fully ready for clean remote CI, clone portability, packaging readiness, and release.
 
 ## Hard Fails
 
@@ -20,11 +19,10 @@ Golden rule: this repo is not remote/distribution-ready until clone-affecting lo
 - Task-marker inventory.
 - Oversized files that are already known artifacts.
 
-Manifest paths that affect `cargo metadata`, `cargo build --locked`, or remote clone behavior must be labeled pre-remote blockers even if the script exits report-only.
+Manifest paths that affect `cargo metadata`, `cargo build --locked`, or remote clone behavior must be labeled pre-remote blockers.
 
 ## Review Checklist
 
 - Did this change add a new local absolute path?
-- Did it make CI sound mandatory or green on GitHub-hosted runners before `specter` is portable?
 - Did it add an example that would read real credentials during tests?
-- Did it keep `specter` as the single WebSocket dependency rather than hiding portability with another stack?
+- Did it keep `specter` as the single WebSocket dependency?

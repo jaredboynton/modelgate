@@ -27,7 +27,7 @@ routes:
       - "tests/**"
     preferred_role: "test-engineer"
     validation:
-      - "cargo test architecture"
+      - "cargo nextest run -E 'test(architecture)'"
 
   gc_scripts:
     paths:

@@ -12,7 +12,7 @@ Golden rule: provider choice is explicit, catalog-driven, and never inferred fro
 
 ## Provider Rules
 
-- Bedrock routes Anthropic-shaped traffic through Mantle.
+- Bedrock routes Anthropic-shaped traffic through Bedrock Runtime.
 - Codex routes OpenAI Responses and Codex-backed OpenAI facade traffic through Codex/ChatGPT OAuth.
 - Google routes Gemini traffic through direct Google API-key auth and only uses documented fallback paths.
 - Public OpenAI API-key proxying is not a default provider boundary in this Rust proxy.

@@ -1,0 +1,50 @@
+# cargo-nextest profiles for unified-model-proxy-v2.
+#
+# No default filters: every profile sees the same test inventory so we never
+# accidentally hide tests behind a "fast" profile (see ralplan
+# .omx/plans/ralplan-rust-build-nextest-acceleration-20260520T084952Z.md,
+# acceptance criteria: "Default nextest inventory preserves non-live test
+# coverage").
+#
+# Live tests stay #[ignore] at the source level; nextest still lists them.
+
+[profile.default]
+# Used by `cargo nextest run` with no --profile. Optimized for terminal
+# attention: only show output on failure, but always print the final summary.
+failure-output    = "immediate-final"
+success-output    = "never"
+status-level      = "fail"
+final-status-level = "slow"
+retries           = 0
+fail-fast         = false
+# Tune thread counts to physical cores on M-series; nextest defaults to
+# logical cores which over-subscribes with hyperthreading-aware tokio.
+test-threads     = "num-cpus"
+slow-timeout     = { period = "30s", terminate-after = 4 }
+
+[profile.local]
+# Inner-loop alias of `default` for clarity in scripts/dev-test.sh callers.
+inherits         = "default"
+status-level     = "fail"
+
+[profile.full]
+# Used before commit / before opening a PR. Surfaces slow tests aggressively.
+inherits             = "default"
+status-level         = "pass"
+final-status-level   = "slow"
+slow-timeout         = { period = "60s", terminate-after = 6 }
+
+[profile.ci]
+# Used in .github/workflows/ci.yml. JUnit output for surface integration with
+# GitHub Actions, full visibility on retries and slow tests.
+inherits             = "default"
+fail-fast            = false
+retries              = 1
+status-level         = "all"
+final-status-level   = "slow"
+failure-output       = "immediate-final"
+success-output       = "final"
+slow-timeout         = { period = "90s", terminate-after = 4 }
+
+[profile.ci.junit]
+path = "junit.xml"

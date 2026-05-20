@@ -16,19 +16,24 @@ For Rust source changes:
 
 ```sh
 cargo fmt --check
-cargo check
-cargo test
-cargo clippy --all-targets --all-features -- -D warnings
+cargo nextest run                                                 # primary; reuses rlibs for clippy
+cargo clippy --tests --no-deps --all-features -- -D warnings      # run AFTER nextest
 ```
 
-For targeted behavior changes, run the closest test first, then the wider gates.
-Examples:
+`cargo test` no longer routes through the retired `scripts/test-runner.sh`
+shim, and the `[target.'cfg(all())'].runner` line in `.cargo/config.toml`
+has been removed. Invoke `cargo nextest run` (or
+`scripts/dev-test.sh`) directly. Plain `cargo test` will silently revert
+to libtest harness output without nextest's parallel scheduler.
 
-- route/model behavior: `cargo test integration_routes unit_model_alias`
-- auth behavior: `cargo test unit_auth`
-- upstream behavior: `cargo test unit_upstreams integration_codex_transport integration_google_transport integration_bedrock_transport`
-- SSE behavior: `cargo test unit_sse integration_responses_sse`
-- WebSocket behavior: `cargo test integration_websocket_facade integration_websocket_passthrough`
+For targeted behavior changes, run the closest test first, then the wider gates.
+Nextest filter expressions are more precise than positional name matches:
+
+- route/model behavior: `cargo nextest run -E 'test(integration_routes) + test(unit_model_alias)'`
+- auth behavior: `cargo nextest run -E 'test(unit_auth)'`
+- upstream behavior: `cargo nextest run -E 'test(unit_upstreams) + test(integration_codex_transport) + test(integration_google_transport) + test(integration_bedrock_transport)'`
+- SSE behavior: `cargo nextest run -E 'test(unit_sse) + test(integration_responses_sse)'`
+- WebSocket behavior: `cargo nextest run -E 'test(integration_websocket_facade) + test(integration_websocket_passthrough)'`
 
 ## Provider-aware compaction safety rail
 
