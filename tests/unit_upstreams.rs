@@ -33,15 +33,15 @@ fn state_with_google_key(key: Option<&str>) -> AppState {
         auth_home.path().to_path_buf(),
     );
     state.google_api_key = key.map(Arc::<str>::from);
-    state.bedrock_region = Arc::<str>::from("us-west-2");
+    state.bedrock_region = Arc::<str>::from("eu-west-1");
     state
 }
 
 #[test]
 fn bedrock_mantle_url_model_and_auth_helpers_are_fixtureable() {
     assert_eq!(
-        mantle_messages_url("us-east-1"),
-        "https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages"
+        mantle_messages_url("eu-west-1"),
+        "https://bedrock-mantle.eu-west-1.api.aws/anthropic/v1/messages"
     );
     assert_eq!(MANTLE_MESSAGES_PATH, "/anthropic/v1/messages");
     assert_eq!(
@@ -62,7 +62,7 @@ fn bedrock_mantle_url_model_and_auth_helpers_are_fixtureable() {
             token: "test-token".into(),
             source: "bearer_file",
         },
-        "us-east-1",
+        "eu-west-1",
     );
     assert_eq!(
         auth,
@@ -77,13 +77,13 @@ fn bedrock_mantle_url_model_and_auth_helpers_are_fixtureable() {
         BedrockAuth::Profile {
             name: "dev-profile".into(),
         },
-        "us-east-1",
+        "eu-west-1",
     );
     assert_eq!(
         auth,
         MantleAuthSelection::Profile {
             profile: "dev-profile".into(),
-            region: "us-east-1".into(),
+            region: "eu-west-1".into(),
             service: "bedrock-mantle"
         }
     );
@@ -92,7 +92,7 @@ fn bedrock_mantle_url_model_and_auth_helpers_are_fixtureable() {
 #[test]
 fn bedrock_profile_auth_can_sign_mantle_request_with_sigv4_headers() {
     let request = MantleMessagesRequest {
-        url: mantle_messages_url("us-east-1"),
+        url: mantle_messages_url("eu-west-1"),
         path: MANTLE_MESSAGES_PATH,
         body: serde_json::json!({
             "model": "anthropic.claude-haiku-4-5",
@@ -101,7 +101,7 @@ fn bedrock_profile_auth_can_sign_mantle_request_with_sigv4_headers() {
         }),
         auth: MantleAuthSelection::Profile {
             profile: "dev-profile".into(),
-            region: "us-east-1".into(),
+            region: "eu-west-1".into(),
             service: "bedrock-mantle",
         },
         headers: mantle_forward_headers(&HeaderMap::new()),
@@ -121,7 +121,7 @@ fn bedrock_profile_auth_can_sign_mantle_request_with_sigv4_headers() {
         &request.headers,
         &credentials,
         SystemTime::UNIX_EPOCH,
-        "us-east-1",
+        "eu-west-1",
         "bedrock-mantle",
     )
     .unwrap();

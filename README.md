@@ -219,7 +219,7 @@ Common environment variables:
 - `UMP_V2_CODEX_HANDSHAKES_PER_MIN`, default `55`
 - `UMP_V2_CODEX_CLIENT_VERSION`, default from `src/codex_catalog.rs`
 - `UMP_V2_CODEX_CATALOG_TTL_SECS`, default `600`
-- `AWS_REGION` / `AWS_DEFAULT_REGION`, default `us-west-2` for Bedrock/Mantle
+- `AWS_REGION` / `AWS_DEFAULT_REGION`, default `eu-west-1` for Bedrock/Mantle
 - `UMP_V2_GOOGLE_GENERATE_BASE_URL`, default `https://generativelanguage.googleapis.com`
 - `UMP_V2_WINDSURF_CLOUD_BASE_URL`, default `https://server.codeium.com`
 - `UMP_V2_BEDROCK_DISCOVERY_TIMEOUT_MS`, default `5000`
@@ -367,7 +367,7 @@ as authoritative.
 
 The development plist is `launchd/dev.unified-model-proxy-v2.plist`. It points at
 the release binary in this checkout and sets non-secret Bedrock region defaults:
-`AWS_REGION=us-west-2` and `AWS_DEFAULT_REGION=us-west-2`. Build first:
+`AWS_REGION=eu-west-1` and `AWS_DEFAULT_REGION=eu-west-1`. Build first:
 
 ```sh
 cargo build --release
