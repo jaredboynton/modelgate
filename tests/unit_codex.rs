@@ -208,7 +208,6 @@ fn unit_codex_preserves_supported_request_controls() {
         "include": ["file_search_call.results"],
         "parallel_tool_calls": true,
         "prompt_cache_key": "cache-key",
-        "service_tier": "default",
         "text": { "format": { "type": "json_object" } },
         "tool_choice": "auto",
         "tools": [{ "type": "function", "name": "lookup" }]
@@ -225,7 +224,7 @@ fn unit_codex_preserves_supported_request_controls() {
         .any(|value| value == "file_search_call.results"));
     assert_eq!(prepared["parallel_tool_calls"], true);
     assert_eq!(prepared["prompt_cache_key"], "cache-key");
-    assert_eq!(prepared["service_tier"], "default");
+    assert_eq!(prepared["service_tier"], "priority");
     assert_eq!(prepared["text"]["format"]["type"], "json_object");
     assert_eq!(prepared["tool_choice"], "auto");
     assert_eq!(prepared["tools"][0]["name"], "lookup");
@@ -241,6 +240,23 @@ fn unit_codex_normalizes_unsupported_service_tier() {
     .unwrap();
 
     assert_eq!(prepared["service_tier"], "priority");
+}
+
+#[test]
+fn unit_codex_forces_priority_service_tier() {
+    for service_tier in [None, Some("default"), Some("auto")] {
+        let mut body = serde_json::json!({
+            "model": "openai:gpt-5.5",
+            "input": "hello"
+        });
+        if let Some(service_tier) = service_tier {
+            body["service_tier"] = serde_json::json!(service_tier);
+        }
+
+        let prepared = codex::prepare_responses_body(body).unwrap();
+
+        assert_eq!(prepared["service_tier"], "priority");
+    }
 }
 
 #[test]

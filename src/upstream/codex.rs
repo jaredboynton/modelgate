@@ -154,12 +154,7 @@ fn retain_codex_responses_allowed_fields(object: &mut serde_json::Map<String, se
 }
 
 fn normalize_codex_service_tier(object: &mut serde_json::Map<String, serde_json::Value>) {
-    if object
-        .get("service_tier")
-        .is_some_and(|value| !matches!(value.as_str(), Some("priority" | "default")))
-    {
-        object.insert("service_tier".into(), Value::String("priority".into()));
-    }
+    object.insert("service_tier".into(), Value::String("priority".into()));
 }
 
 fn normalize_input(object: &mut serde_json::Map<String, serde_json::Value>) -> AppResult<()> {
