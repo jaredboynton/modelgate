@@ -90,15 +90,29 @@ fn emit_ls(exec: &ExecRequest) -> RenderedToolCall {
     }
 }
 
+fn path_to_glob(path: &str) -> String {
+    if path.is_empty() {
+        return String::new();
+    }
+    let has_wildcard = path.contains('*') || path.contains('?');
+    let last_segment = path.split('/').next_back().unwrap_or(path);
+    let is_file = last_segment.contains('.') && !last_segment.starts_with('.');
+    if has_wildcard || is_file {
+        path.to_string()
+    } else {
+        let trimmed = path.trim_end_matches('/');
+        format!("{trimmed}/**/*")
+    }
+}
+
 fn emit_grep(exec: &ExecRequest) -> RenderedToolCall {
     let pattern = read_string_field(&exec.args, 1).unwrap_or_default();
     let path = read_string_field(&exec.args, 2).unwrap_or_default();
-    let output_mode = read_string_field(&exec.args, 3).unwrap_or_default();
     let mut arguments = serde_json::Map::new();
     arguments.insert("pattern".into(), json!(pattern));
-    arguments.insert("path".into(), json!(path));
-    if !output_mode.is_empty() {
-        arguments.insert("output_mode".into(), json!(output_mode));
+    let glob = path_to_glob(&path);
+    if !glob.is_empty() {
+        arguments.insert("glob".into(), json!(glob));
     }
     RenderedToolCall::Emit {
         tool_name: "Grep".into(),
