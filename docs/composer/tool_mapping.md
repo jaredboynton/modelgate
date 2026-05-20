@@ -20,22 +20,22 @@ message BuiltinToolCall {
 
 ## Mapping Table
 
-| Capability | Cursor (Native) | Codex | Claude | Droid |
+| **Capability** | Cursor (Native Proto) | Codex | Claude | Droid |
 | :--- | :--- | :--- | :--- | :--- |
-| **Edit File** | `EditFile` | `edit_file` / `apply_patch` | `Edit` | `Edit` / `MultiEdit` |
-| **Read File** | `ReadFile` | `read_file` | `Read` | `Read` |
-| **List Dir** | `ListDir` | `ls` | `LS` | `LS` |
-| **Search Content** | `Grep` | `grep` | `Grep` | `Grep` |
+| **Edit File** | `EDIT` | `edit_file` (Primary) / `apply_patch` | `Edit` | `MultiEdit` (Morph) / `Edit` |
+| **Read File** | `READ_CHUNK` | `read_file` | `Read` | `Read` |
+| **List Dir** | `LIST_DIR` | `ls` | `LS` | `LS` |
+| **Search Content** | `GREP` | `grep` | `Grep` | `Grep` |
 | **Search Paths** | (Implicit) | `glob` | `Glob` | `Glob` |
-| **Semantic Search** | `semantic_search` | `omx_code_intel` | `mcp__claude-context` | `morph-mcp_codebase_search` |
-| **Run Command** | `RunTerminalCommand` | `shell` (set `tty: true`) | `Bash` | `Execute` |
-| **Terminal Stdin** | `WriteStdin` | `write_stdin` | (Manual Stdin) | (Manual Stdin) |
-| **Stop Command** | `TerminateTerminal` | `kill` (shell) | `kill` (shell) | `kill` (shell) |
-| **Spawn Subagent** | `BackgroundComposer` | `spawn_agent` | `Task` | `Task` |
-| **Web Search** | `WebSearch` | `web_search` (needs `--search`) | `exa___web_search` | `exa___web_search` |
-| **Get Structure** | `get_project_structure`| `ls` (recursive) | `LS` | `LS` / `morph-mcp_codebase_search` |
-| **Undo Change** | `Undo` | `shell` (`git checkout`) | `Bash` (`git checkout`) | `Execute` (`git checkout`) |
-| **Read w/ Linter** | `ReadWithLinter` | `omx_code_intel` MCP | LSP Plugins | (Manual Grep/Linter) |
+| **Semantic Search** | `SEMANTIC_SEARCH` | `omx_code_intel` | `mcp__claude-context` | `morph-mcp_codebase_search` |
+| **Run Command** | `RUN_TERMINAL_COMMANDS` | `shell` (set `tty: true`) | `Bash` | `Execute` |
+| **Terminal Stdin** | `WRITE_STDIN` | `write_stdin` | (Manual Stdin) | (Manual Stdin) |
+| **Stop Command** | `TERMINATE_TERMINAL` | `kill` (shell) | `kill` (shell) | `kill` (shell) |
+| **Spawn Subagent** | `BACKGROUND_COMPOSER` | `spawn_agent` | `Task` | `Task` |
+| **Web Search** | `WEB_SEARCH` | `web_search` (needs `--search`) | `exa___web_search` | `exa___web_search` |
+| **Get Structure** | `GET_PROJECT_STRUCTURE`| `ls` (recursive) | `LS` | `LS` / `morph-mcp_codebase_search` |
+| **Undo Change** | `UNDO` | `shell` (`git checkout`) | `Bash` (`git checkout`) | `Execute` (`git checkout`) |
+| **Read w/ Linter** | `READ_WITH_LINTER` | `omx_code_intel` MCP | LSP Plugins | (Manual Grep/Linter) |
 
 ## Detailed Mapping & Hardening Notes
 
@@ -46,9 +46,10 @@ message BuiltinToolCall {
 - **Droid**: Ensure the Cursor `explanation` is mapped to Droid's `justification` parameter, ensuring it meets the minimum character length requirements.
 
 ### 2. Execution Environment & Interaction
-- **PTY/TTY Support**: `RunTerminalCommand` should map to `shell` in Codex with `tty: true` to support interactive CLI tools.
+- **PTY/TTY Support**: `RUN_TERMINAL_COMMANDS` should map to `shell` in Codex with `tty: true` to ensure parity with Cursor's terminal expectations (e.g., color output, interactive prompts).
+- **Command Chaining**: Since `RUN_TERMINAL_COMMANDS` accepts a list of commands, the adapter should join them with `&&` or execute them sequentially.
 - **Interactivity Gap**: Claude and Droid are primarily request-response. Interactive installers (e.g., `npm init`) may hang. Hardening: Use non-interactive flags (e.g., `-y`, `--yes`) where possible.
-- **Undo Strategy**: Since harnesses lack a native `Undo` tool, map `aiserver.v1.Undo` to shell-level Git operations: `git checkout -- <file>` or `git stash pop`.
+- **Undo Strategy**: Since harnesses lack a native `Undo` tool, map `UNDO` to shell-level Git operations: `git checkout -- <file>` or `git stash pop`.
 
 ### 3. Context & Intelligence
 - **Linter Parity**: `ReadWithLinter` should be supplemented by enabling LSP plugins (Claude) or the `omx_code_intel` MCP (Codex) to ensure the agent doesn't lose visibility into diagnostics.
