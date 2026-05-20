@@ -266,6 +266,12 @@ impl ResponseContext {
         }
     }
 
+    pub fn replace_tool_arguments(&mut self, call_id: &str, arguments: impl Into<String>) {
+        if let Some(state) = self.tool_calls.get_mut(call_id) {
+            state.arguments_buffer = arguments.into();
+        }
+    }
+
     pub fn close_tool_call(&mut self, call_id: &str) -> Option<ToolCallSnapshot> {
         let state = self.tool_calls.remove(call_id)?;
         let final_arguments = state.arguments_buffer.clone();
@@ -480,5 +486,6 @@ pub fn message_role_str(message: &CursorMessage) -> &'static str {
         CursorMessage::Developer { .. } => "developer",
         CursorMessage::User { .. } => "user",
         CursorMessage::Assistant { .. } => "assistant",
+        CursorMessage::Tool { .. } => "tool",
     }
 }

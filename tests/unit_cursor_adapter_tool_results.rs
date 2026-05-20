@@ -1,6 +1,8 @@
 use serde_json::json;
 use unified_model_proxy_v2::adapter::{cursor_chat, cursor_messages, cursor_responses};
-use unified_model_proxy_v2::cursor_agent::CursorMessage;
+use unified_model_proxy_v2::cursor_agent::{
+    CursorAgentEvent, CursorFinishReason, CursorMessage, CursorToolKind,
+};
 
 #[test]
 fn responses_adapter_extracts_function_call_output_into_tool_results() {
@@ -181,6 +183,54 @@ fn responses_adapter_uses_latest_tool_round_when_replay_has_multiple_rounds() {
     let request = cursor_responses::build_request(&body).expect("latest replay accepted");
     assert_eq!(request.tool_results.len(), 1);
     assert_eq!(request.tool_results[0].call_id, "call_second");
+    let transcript_results: Vec<_> = request
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            CursorMessage::Tool { result } => Some(result.call_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        transcript_results,
+        vec!["call_first", "call_second"],
+        "all tool outputs stay in transcript context even though only the latest result is active",
+    );
+}
+
+#[test]
+fn responses_collect_non_stream_keeps_final_tool_arguments_in_completed_output() {
+    let response = cursor_responses::collect_non_stream(vec![
+        CursorAgentEvent::ToolCallStarted {
+            call_id: "call_grep".into(),
+            name: "Grep".into(),
+            kind: CursorToolKind::Function,
+            argument_index: 0,
+        },
+        CursorAgentEvent::ToolCallDone {
+            call_id: "call_grep".into(),
+            arguments: json!({
+                "pattern": "DROID_GREP_OK_20260520_FIXED",
+                "glob_pattern": "**/*"
+            }),
+        },
+        CursorAgentEvent::Done {
+            finish_reason: CursorFinishReason::ToolCalls,
+            response_id: "resp_grep".into(),
+            conversation_id: "conv_grep".into(),
+        },
+    ])
+    .expect("non-stream response collected");
+
+    let item = &response["output"][0];
+    assert_eq!(item["type"], "function_call");
+    assert_eq!(item["status"], "completed");
+    assert_eq!(item["call_id"], "call_grep");
+    assert_eq!(item["name"], "Grep");
+    assert_eq!(
+        item["arguments"], r#"{"glob_pattern":"**/*","pattern":"DROID_GREP_OK_20260520_FIXED"}"#,
+        "completed response output must keep the canonical final arguments from ToolCallDone",
+    );
 }
 
 #[test]

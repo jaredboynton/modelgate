@@ -55,14 +55,17 @@ Current Droid native tool IDs observed locally include:
 - **Description**: High-performance content search using ripgrep.
 - **Parameters**:
   - `pattern`: Regex pattern.
-  - `glob`: (optional) File glob pattern.
+  - `path`: (optional) Absolute file or directory to search in.
+  - `glob_pattern`: (optional) File glob pattern.
   - `case_insensitive`: (bool).
 
 ### Glob (`glob-search-cli`)
 - **llmId**: `Glob`
 - **Description**: File path search using glob patterns.
 - **Parameters**:
-  - `pattern`: Glob pattern (e.g. `**/*.ts`).
+  - `patterns`: Glob pattern string or array of glob patterns (e.g. `**/*.ts`).
+  - `excludePatterns`: (optional) Glob pattern string or array to exclude.
+  - `folder`: (optional) Absolute directory to search in.
 
 ### WebSearch / FetchUrl
 - **llmId**: `WebSearch`, `FetchUrl`

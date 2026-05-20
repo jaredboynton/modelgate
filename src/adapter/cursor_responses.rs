@@ -550,7 +550,9 @@ fn parse_input(
                         );
                     }
                     "function_call_output" | "custom_tool_call_output" => {
-                        // tool result items are collected separately.
+                        messages.push(CursorMessage::Tool {
+                            result: tool_result_from_object(object)?,
+                        });
                     }
                     "reasoning" => {
                         // Prior reasoning items are discarded; Cursor regenerates them.
@@ -649,45 +651,49 @@ fn collect_tool_results(input: Option<&Value>) -> AppResult<Vec<CursorToolResult
         if item_type != "function_call_output" && item_type != "custom_tool_call_output" {
             continue;
         }
-        let call_id = required_string(object, "call_id")
-            .or_else(|_| required_string(object, "id"))?
-            .to_string();
-        let output = match object.get("output") {
-            Some(Value::String(text)) => Value::String(text.clone()),
-            Some(Value::Array(blocks)) => {
-                let mut texts = Vec::new();
-                for block in blocks {
-                    let block_type = block.get("type").and_then(Value::as_str).unwrap_or("");
-                    match block_type {
-                        "output_text" | "input_text" | "text" => {
-                            if let Some(text) = block.get("text").and_then(Value::as_str) {
-                                texts.push(text.to_string());
-                            }
-                        }
-                        other => {
-                            return Err(AppError::BadRequest(format!(
-                                "tool output block {other} is not supported"
-                            )))
-                        }
-                    }
-                }
-                Value::String(texts.join(""))
-            }
-            Some(_) => {
-                return Err(AppError::BadRequest(
-                    "tool output supports text content only".into(),
-                ))
-            }
-            None => Value::String(String::new()),
-        };
-        let error = extract_tool_result_error(object, &output);
-        results.push(CursorToolResult {
-            call_id,
-            output,
-            error,
-        });
+        results.push(tool_result_from_object(object)?);
     }
     Ok(results)
+}
+
+fn tool_result_from_object(object: &Map<String, Value>) -> AppResult<CursorToolResult> {
+    let call_id = required_string(object, "call_id")
+        .or_else(|_| required_string(object, "id"))?
+        .to_string();
+    let output = match object.get("output") {
+        Some(Value::String(text)) => Value::String(text.clone()),
+        Some(Value::Array(blocks)) => {
+            let mut texts = Vec::new();
+            for block in blocks {
+                let block_type = block.get("type").and_then(Value::as_str).unwrap_or("");
+                match block_type {
+                    "output_text" | "input_text" | "text" => {
+                        if let Some(text) = block.get("text").and_then(Value::as_str) {
+                            texts.push(text.to_string());
+                        }
+                    }
+                    other => {
+                        return Err(AppError::BadRequest(format!(
+                            "tool output block {other} is not supported"
+                        )))
+                    }
+                }
+            }
+            Value::String(texts.join(""))
+        }
+        Some(_) => {
+            return Err(AppError::BadRequest(
+                "tool output supports text content only".into(),
+            ))
+        }
+        None => Value::String(String::new()),
+    };
+    let error = extract_tool_result_error(object, &output);
+    Ok(CursorToolResult {
+        call_id,
+        output,
+        error,
+    })
 }
 
 fn tool_results_match_replayed_tool_calls(
@@ -1123,7 +1129,7 @@ fn emit_tool_call_done(
         }
         // Replace any prior fragment buffer with the canonical final string
         // so the closed item carries a self-sufficient body.
-        ctx.append_tool_arguments(call_id, "");
+        ctx.replace_tool_arguments(call_id, final_arguments.clone());
     }
 
     let snapshot = ctx.close_tool_call(call_id);

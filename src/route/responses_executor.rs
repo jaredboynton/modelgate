@@ -135,7 +135,9 @@ pub async fn execute_responses_request(
         DispatchAction::CursorAgent => {
             execute_cursor_responses(state, &headers, &plan, value).await
         }
-        DispatchAction::WindsurfChat => execute_windsurf_responses(state, &plan, value).await,
+        DispatchAction::WindsurfChat => {
+            execute_windsurf_responses(state, &headers, &plan, value).await
+        }
     }
 }
 
@@ -268,6 +270,7 @@ async fn execute_cursor_responses(
 
 async fn execute_windsurf_responses(
     state: &AppState,
+    headers: &HeaderMap,
     plan: &crate::route::dispatch::DispatchPlan,
     value: Value,
 ) -> AppResult<UpstreamResponse> {
@@ -288,10 +291,29 @@ async fn execute_windsurf_responses(
         adapter_prior.as_ref(),
     )?;
 
+    let detection = crate::upstream::cursor::client_profile::detect_client_profile(headers);
+    let profile = detection.profile;
+    let windsurf_profile = match profile {
+        crate::upstream::cursor::client_profile::ClientProfile::CodexCli => {
+            crate::adapter::windsurf_chat::WindsurfClientProfile::CodexCli
+        }
+        crate::upstream::cursor::client_profile::ClientProfile::ClaudeCode => {
+            crate::adapter::windsurf_chat::WindsurfClientProfile::ClaudeCode
+        }
+        crate::upstream::cursor::client_profile::ClientProfile::Droid => {
+            crate::adapter::windsurf_chat::WindsurfClientProfile::Droid
+        }
+        crate::upstream::cursor::client_profile::ClientProfile::Devin => {
+            crate::adapter::windsurf_chat::WindsurfClientProfile::Devin
+        }
+        _ => crate::adapter::windsurf_chat::WindsurfClientProfile::Other,
+    };
+
     if crate::adapter::windsurf_chat::has_tool_context(&chat_request) {
         let planning = crate::adapter::windsurf_chat::tool_planning_request(
             &chat_request,
             &plan.target.upstream_model,
+            windsurf_profile,
         )?;
         let content =
             upstream::windsurf::collect_chat_text(state, &planning, &plan.target.upstream_model)
@@ -305,7 +327,13 @@ async fn execute_windsurf_responses(
                     content,
                 )
             }
-            crate::adapter::windsurf_chat::ToolPlan::ToolCalls(calls) => {
+            crate::adapter::windsurf_chat::ToolPlan::ToolCalls(mut calls) => {
+                for call in &mut calls {
+                    crate::adapter::windsurf_chat::map_windsurf_tool_call_to_client(
+                        call,
+                        windsurf_profile,
+                    );
+                }
                 crate::adapter::windsurf_responses::response_from_tool_calls(
                     &plan.requested_model,
                     &calls,

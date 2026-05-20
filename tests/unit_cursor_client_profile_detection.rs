@@ -631,3 +631,43 @@ fn detect_invalid_env_override_falls_through_safely() {
     assert!(matches!(detection.profile, ClientProfile::GenericOpenAi));
     assert!(matches!(detection.signal, ProfileSignal::None));
 }
+
+#[test]
+fn parse_profile_token_devin_lower() {
+    assert!(matches!(
+        parse_profile_token("devin"),
+        Some(ClientProfile::Devin)
+    ));
+}
+
+#[test]
+fn parse_profile_token_devin_cli() {
+    assert!(matches!(
+        parse_profile_token("devin-cli"),
+        Some(ClientProfile::Devin)
+    ));
+}
+
+#[test]
+fn detect_devin_cli_user_agent_resolves_devin() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let _trust = EnvGuard::unset(ENV_TRUST_HEADERS);
+    let _override = EnvGuard::unset(ENV_OVERRIDE);
+
+    let headers = headers_with(&[(USER_AGENT.as_str(), "devin-cli/1.0.0")]);
+    let detection = detect_client_profile(&headers);
+    assert!(matches!(detection.profile, ClientProfile::Devin));
+    assert!(matches!(detection.signal, ProfileSignal::UaDevin));
+}
+
+#[test]
+fn detect_chisel_agent_user_agent_resolves_devin() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let _trust = EnvGuard::unset(ENV_TRUST_HEADERS);
+    let _override = EnvGuard::unset(ENV_OVERRIDE);
+
+    let headers = headers_with(&[(USER_AGENT.as_str(), "chisel-agent/2.1")]);
+    let detection = detect_client_profile(&headers);
+    assert!(matches!(detection.profile, ClientProfile::Devin));
+    assert!(matches!(detection.signal, ProfileSignal::UaDevin));
+}

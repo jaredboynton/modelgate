@@ -74,6 +74,7 @@ pub enum CursorClientProfile {
     ClaudeCode,
     Droid,
     GenericAnthropic,
+    Devin,
     #[default]
     GenericOpenAi,
 }
@@ -95,6 +96,9 @@ pub enum CursorMessage {
         blocks: Vec<CursorContentBlock>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tool_calls: Vec<CursorToolCall>,
+    },
+    Tool {
+        result: CursorToolResult,
     },
 }
 

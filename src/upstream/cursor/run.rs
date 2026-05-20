@@ -14,10 +14,11 @@
 //! Returns an `impl Stream<Item = CursorAgentEvent>`. Callers (the public
 //! adapters) translate these neutral events into route-specific SSE.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bytes::Bytes;
 use futures::{stream, Stream};
+use serde_json::{Map, Value};
 use tokio::sync::mpsc;
 use tracing::debug;
 use uuid::Uuid;
@@ -25,8 +26,8 @@ use uuid::Uuid;
 use crate::{
     auth::cursor::resolve_cursor_credentials,
     cursor_agent::{
-        CursorAgentEvent, CursorAgentRequest, CursorContentBlock, CursorFinishReason,
-        CursorMessage, CursorToolKind,
+        CursorAgentEvent, CursorAgentRequest, CursorClientProfile, CursorContentBlock,
+        CursorFinishReason, CursorMessage, CursorToolCall, CursorToolKind, CursorToolResult,
     },
     upstream::cursor::{
         client_profile::ClientProfile,
@@ -565,6 +566,7 @@ fn receiver_into_stream<T: Send + 'static>(
 /// here.
 fn build_proto_messages(request: &CursorAgentRequest) -> Vec<Message> {
     let mut out = Vec::new();
+    let mut rendered_tool_result_ids = HashSet::new();
     if let Some(system) = request.system_instructions.as_deref() {
         if !system.is_empty() {
             out.push(Message {
@@ -598,11 +600,13 @@ fn build_proto_messages(request: &CursorAgentRequest) -> Vec<Message> {
             CursorMessage::Assistant { blocks, tool_calls } => {
                 let mut text = flatten_blocks(blocks);
                 for call in tool_calls {
+                    let (tool_name, arguments) =
+                        canonical_replay_tool_call(request.client_profile, call);
                     append_line(
                         &mut text,
                         &format!(
                             "Tool call {} named {} with arguments {}",
-                            call.id, call.name, call.arguments
+                            call.id, tool_name, arguments
                         ),
                     );
                 }
@@ -611,22 +615,413 @@ fn build_proto_messages(request: &CursorAgentRequest) -> Vec<Message> {
                     text,
                 });
             }
+            CursorMessage::Tool { result } => {
+                rendered_tool_result_ids.insert(result.call_id.clone());
+                out.push(Message {
+                    role: "tool".to_string(),
+                    text: render_tool_result_text(result),
+                });
+            }
         }
     }
     for result in &request.tool_results {
-        let rendered = match &result.error {
-            Some(error) => format!(
-                "Tool result for {} failed: {error}. Output: {}",
-                result.call_id, result.output
-            ),
-            None => format!("Tool result for {}: {}", result.call_id, result.output),
-        };
+        if rendered_tool_result_ids.contains(&result.call_id) {
+            continue;
+        }
         out.push(Message {
             role: "tool".to_string(),
-            text: rendered,
+            text: render_tool_result_text(result),
         });
     }
     out
+}
+
+fn canonical_replay_tool_call(
+    client_profile: CursorClientProfile,
+    call: &CursorToolCall,
+) -> (String, Value) {
+    match client_profile {
+        CursorClientProfile::Droid => canonical_droid_replay_tool_call(call),
+        CursorClientProfile::ClaudeCode => canonical_claude_replay_tool_call(call),
+        CursorClientProfile::CodexCli => canonical_codex_replay_tool_call(call),
+        CursorClientProfile::Devin => canonical_devin_replay_tool_call(call),
+        _ => (call.name.clone(), call.arguments.clone()),
+    }
+}
+
+fn canonical_devin_replay_tool_call(call: &CursorToolCall) -> (String, Value) {
+    let Some(arguments) = call.arguments.as_object() else {
+        return (call.name.clone(), call.arguments.clone());
+    };
+
+    match call.name.as_str() {
+        "Read" => {
+            let mut native = Map::new();
+            if let Some(file_path) = arguments.get("file_path") {
+                native.insert("path".to_string(), file_path.clone());
+            }
+            ("read".to_string(), Value::Object(native))
+        }
+        "LS" => {
+            let mut native = Map::new();
+            if let Some(directory_path) = arguments.get("directory_path") {
+                native.insert("path".to_string(), directory_path.clone());
+            }
+            ("ls".to_string(), Value::Object(native))
+        }
+        "Grep" => {
+            let mut native = Map::new();
+            if let Some(glob_pattern) = arguments.get("glob_pattern") {
+                native.insert("path".to_string(), glob_pattern.clone());
+            }
+            if let Some(pattern) = arguments.get("pattern") {
+                native.insert("pattern".to_string(), pattern.clone());
+            }
+            ("grep".to_string(), Value::Object(native))
+        }
+        "Execute" => {
+            let mut native = Map::new();
+            if let Some(command) = arguments.get("command") {
+                native.insert("command".to_string(), command.clone());
+            }
+            if let Some(cwd) = arguments.get("cwd") {
+                native.insert("working_directory".to_string(), cwd.clone());
+            }
+            ("execute".to_string(), Value::Object(native))
+        }
+        "FetchUrl" => {
+            let mut native = Map::new();
+            if let Some(url) = arguments.get("url") {
+                native.insert("url".to_string(), url.clone());
+            }
+            ("fetch".to_string(), Value::Object(native))
+        }
+        "Edit" => {
+            let mut native = Map::new();
+            if let Some(file_path) = arguments.get("file_path") {
+                native.insert("path".to_string(), file_path.clone());
+            }
+            if let Some(patch) = arguments.get("patch") {
+                native.insert("patch".to_string(), patch.clone());
+            }
+            ("edit".to_string(), Value::Object(native))
+        }
+        _ => (call.name.clone(), call.arguments.clone()),
+    }
+}
+
+fn canonical_claude_replay_tool_call(call: &CursorToolCall) -> (String, Value) {
+    let Some(arguments) = call.arguments.as_object() else {
+        return (call.name.clone(), call.arguments.clone());
+    };
+
+    match call.name.as_str() {
+        "Read" => {
+            let mut native = Map::new();
+            if let Some(file_path) = arguments.get("file_path") {
+                native.insert("path".to_string(), file_path.clone());
+            }
+            ("read".to_string(), Value::Object(native))
+        }
+        "Bash" => {
+            let Some(command) = arguments.get("command").and_then(Value::as_str) else {
+                return (call.name.clone(), call.arguments.clone());
+            };
+            let mut native = Map::new();
+            if command.starts_with("ls ") {
+                let path = command.strip_prefix("ls ").unwrap_or(command);
+                native.insert("path".to_string(), serde_json::json!(path));
+                ("ls".to_string(), Value::Object(native))
+            } else {
+                native.insert("command".to_string(), serde_json::json!(command));
+                if arguments.get("run_in_background") == Some(&Value::Bool(true)) {
+                    ("background_shell_spawn".to_string(), Value::Object(native))
+                } else {
+                    ("shell".to_string(), Value::Object(native))
+                }
+            }
+        }
+        "Grep" => {
+            let mut native = Map::new();
+            if let Some(pattern) = arguments.get("pattern") {
+                native.insert("pattern".to_string(), pattern.clone());
+            }
+            if let Some(path) = arguments.get("path") {
+                native.insert("path".to_string(), path.clone());
+            }
+            if let Some(mode) = arguments.get("output_mode") {
+                native.insert("output_mode".to_string(), mode.clone());
+            }
+            ("grep".to_string(), Value::Object(native))
+        }
+        "WebFetch" => {
+            let mut native = Map::new();
+            if let Some(url) = arguments.get("url") {
+                native.insert("url".to_string(), url.clone());
+            }
+            ("fetch".to_string(), Value::Object(native))
+        }
+        "ListMcpResourcesTool" => {
+            let mut native = Map::new();
+            if let Some(server) = arguments.get("server") {
+                native.insert("server".to_string(), server.clone());
+            }
+            ("list_mcp_resources".to_string(), Value::Object(native))
+        }
+        "ReadMcpResourceTool" => {
+            let mut native = Map::new();
+            if let Some(server) = arguments.get("server") {
+                native.insert("server".to_string(), server.clone());
+            }
+            if let Some(uri) = arguments.get("uri") {
+                native.insert("uri".to_string(), uri.clone());
+            }
+            ("read_mcp_resource".to_string(), Value::Object(native))
+        }
+        _ => (call.name.clone(), call.arguments.clone()),
+    }
+}
+
+fn canonical_codex_replay_tool_call(call: &CursorToolCall) -> (String, Value) {
+    let Some(arguments) = call.arguments.as_object() else {
+        return (call.name.clone(), call.arguments.clone());
+    };
+
+    match call.name.as_str() {
+        "shell_command" => {
+            let Some(cmd_array) = arguments.get("cmd").and_then(Value::as_array) else {
+                return (call.name.clone(), call.arguments.clone());
+            };
+            if cmd_array.is_empty() {
+                return (call.name.clone(), call.arguments.clone());
+            }
+            let first_arg = cmd_array[0].as_str().unwrap_or("");
+            match first_arg {
+                "cat" => {
+                    let path = cmd_array.get(1).and_then(Value::as_str).unwrap_or("");
+                    let mut native = Map::new();
+                    native.insert("path".to_string(), serde_json::json!(path));
+                    ("read".to_string(), Value::Object(native))
+                }
+                "ls" => {
+                    let path = cmd_array.get(1).and_then(Value::as_str).unwrap_or("");
+                    let mut native = Map::new();
+                    native.insert("path".to_string(), serde_json::json!(path));
+                    ("ls".to_string(), Value::Object(native))
+                }
+                "grep" => {
+                    let pattern = cmd_array.get(2).and_then(Value::as_str).unwrap_or("");
+                    let path = cmd_array.get(3).and_then(Value::as_str).unwrap_or("");
+                    let mut native = Map::new();
+                    native.insert("pattern".to_string(), serde_json::json!(pattern));
+                    native.insert("path".to_string(), serde_json::json!(path));
+                    native.insert("output_mode".to_string(), serde_json::json!("content"));
+                    ("grep".to_string(), Value::Object(native))
+                }
+                "curl" => {
+                    let url = cmd_array.get(1).and_then(Value::as_str).unwrap_or("");
+                    let mut native = Map::new();
+                    native.insert("url".to_string(), serde_json::json!(url));
+                    ("fetch".to_string(), Value::Object(native))
+                }
+                "bash" => {
+                    let command = cmd_array.get(2).and_then(Value::as_str).unwrap_or("");
+                    let mut native = Map::new();
+                    native.insert("command".to_string(), serde_json::json!(command));
+                    if let Some(workdir) = arguments.get("workdir") {
+                        native.insert("working_directory".to_string(), workdir.clone());
+                    }
+                    ("shell".to_string(), Value::Object(native))
+                }
+                _ => {
+                    let cmd_str = cmd_array
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let mut native = Map::new();
+                    native.insert("command".to_string(), serde_json::json!(cmd_str));
+                    if let Some(workdir) = arguments.get("workdir") {
+                        native.insert("working_directory".to_string(), workdir.clone());
+                    }
+                    ("shell".to_string(), Value::Object(native))
+                }
+            }
+        }
+        "exec_command" => {
+            let Some(cmd_array) = arguments.get("cmd").and_then(Value::as_array) else {
+                return (call.name.clone(), call.arguments.clone());
+            };
+            let mut native = Map::new();
+            if cmd_array.len() >= 3
+                && cmd_array[0].as_str() == Some("bash")
+                && cmd_array[1].as_str() == Some("-c")
+            {
+                let command = cmd_array[2].as_str().unwrap_or("");
+                native.insert("command".to_string(), serde_json::json!(command));
+            } else {
+                let cmd_str = cmd_array
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                native.insert("command".to_string(), serde_json::json!(cmd_str));
+            }
+            if let Some(workdir) = arguments.get("workdir") {
+                native.insert("working_directory".to_string(), workdir.clone());
+            }
+            ("shell_stream".to_string(), Value::Object(native))
+        }
+        "apply_patch" => {
+            let Some(patch) = arguments.get("patch").and_then(Value::as_str) else {
+                return (call.name.clone(), call.arguments.clone());
+            };
+            if patch.contains("*** Delete File:") {
+                let path = patch
+                    .lines()
+                    .find(|line| line.starts_with("*** Delete File:"))
+                    .and_then(|line| line.strip_prefix("*** Delete File:"))
+                    .map(str::trim)
+                    .unwrap_or("");
+                let mut native = Map::new();
+                native.insert("path".to_string(), serde_json::json!(path));
+                ("delete".to_string(), Value::Object(native))
+            } else {
+                (call.name.clone(), call.arguments.clone())
+            }
+        }
+        "write_stdin" => {
+            let mut native = Map::new();
+            if let Some(shell_id) = arguments.get("shell_id") {
+                native.insert("shell_id".to_string(), shell_id.clone());
+            }
+            if let Some(input) = arguments.get("input") {
+                native.insert("input".to_string(), input.clone());
+            }
+            ("write_shell_stdin".to_string(), Value::Object(native))
+        }
+        "read_mcp_resource" => {
+            let mut native = Map::new();
+            if let Some(server) = arguments.get("server") {
+                native.insert("server".to_string(), server.clone());
+            }
+            if let Some(uri) = arguments.get("uri") {
+                native.insert("uri".to_string(), uri.clone());
+            }
+            ("read_mcp_resource".to_string(), Value::Object(native))
+        }
+        "list_mcp_resources" => ("list_mcp_resources".to_string(), serde_json::json!({})),
+        _ => (call.name.clone(), call.arguments.clone()),
+    }
+}
+
+fn canonical_droid_replay_tool_call(call: &CursorToolCall) -> (String, Value) {
+    let Some(arguments) = call.arguments.as_object() else {
+        return (call.name.clone(), call.arguments.clone());
+    };
+
+    match call.name.as_str() {
+        "Grep" => {
+            let mut native = Map::new();
+            if let Some(pattern) = arguments.get("pattern") {
+                native.insert("pattern".to_string(), pattern.clone());
+            }
+            native.insert(
+                "path".to_string(),
+                Value::String(
+                    arguments
+                        .get("glob")
+                        .and_then(Value::as_str)
+                        .map(droid_glob_to_cursor_path)
+                        .unwrap_or_default(),
+                ),
+            );
+            native.insert(
+                "output_mode".to_string(),
+                arguments
+                    .get("output_mode")
+                    .cloned()
+                    .or_else(|| arguments.get("outputMode").cloned())
+                    .unwrap_or_else(|| Value::String("content".to_string())),
+            );
+            ("grep".to_string(), Value::Object(native))
+        }
+        "Read" => {
+            let mut native = Map::new();
+            if let Some(path) = arguments.get("file_path").or_else(|| arguments.get("path")) {
+                native.insert("path".to_string(), path.clone());
+            }
+            ("read".to_string(), Value::Object(native))
+        }
+        "Glob" => {
+            let mut native = Map::new();
+            native.insert("pattern".to_string(), Value::String(String::new()));
+            native.insert(
+                "path".to_string(),
+                Value::String(droid_glob_arguments_to_cursor_path(arguments)),
+            );
+            native.insert(
+                "output_mode".to_string(),
+                Value::String("files_with_matches".to_string()),
+            );
+            ("grep".to_string(), Value::Object(native))
+        }
+        _ => (call.name.clone(), call.arguments.clone()),
+    }
+}
+
+fn droid_glob_arguments_to_cursor_path(arguments: &Map<String, Value>) -> String {
+    let pattern = arguments
+        .get("patterns")
+        .or_else(|| arguments.get("pattern"))
+        .and_then(first_string_value);
+    let folder = arguments
+        .get("folder")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|folder| !folder.is_empty());
+
+    match (folder, pattern) {
+        (Some(folder), Some(pattern)) if pattern != "**/*" => {
+            if pattern.starts_with('/') {
+                droid_glob_to_cursor_path(pattern)
+            } else {
+                droid_glob_to_cursor_path(&format!(
+                    "{}/{}",
+                    folder.trim_end_matches('/'),
+                    pattern.trim_start_matches('/')
+                ))
+            }
+        }
+        (Some(folder), _) => folder.trim_end_matches('/').to_string(),
+        (None, Some(pattern)) => droid_glob_to_cursor_path(pattern),
+        (None, None) => String::new(),
+    }
+}
+
+fn first_string_value(value: &Value) -> Option<&str> {
+    value.as_str().or_else(|| {
+        value
+            .as_array()
+            .and_then(|items| items.iter().find_map(Value::as_str))
+    })
+}
+
+fn droid_glob_to_cursor_path(glob: &str) -> String {
+    if glob == "**/*" {
+        return String::new();
+    }
+    glob.strip_suffix("/**/*").unwrap_or(glob).to_string()
+}
+
+fn render_tool_result_text(result: &CursorToolResult) -> String {
+    match &result.error {
+        Some(error) => format!(
+            "Tool result for {} failed: {error}. Output: {}",
+            result.call_id, result.output
+        ),
+        None => format!("Tool result for {}: {}", result.call_id, result.output),
+    }
 }
 
 fn append_line(target: &mut String, line: &str) {
@@ -657,8 +1052,8 @@ mod tests {
 
     use super::{build_proto_messages, public_tool_events_for_exec};
     use crate::cursor_agent::{
-        CursorAgentEvent, CursorAgentRequest, CursorContentBlock, CursorMessage, CursorToolCall,
-        CursorToolResult, CursorWorkspaceContext,
+        CursorAgentEvent, CursorAgentRequest, CursorClientProfile, CursorContentBlock,
+        CursorMessage, CursorToolCall, CursorToolResult, CursorWorkspaceContext,
     };
     use crate::upstream::cursor::client_profile::ClientProfile;
     use crate::upstream::cursor::proto::{
@@ -706,6 +1101,143 @@ mod tests {
         assert_eq!(messages[1].role, "tool");
         assert!(messages[1].text.contains("Tool result for call-grep"));
         assert!(messages[1].text.contains("src/cursor_agent.rs"));
+    }
+
+    #[test]
+    fn build_proto_messages_preserves_historical_tool_results_without_duplication() {
+        let latest_result = CursorToolResult {
+            call_id: "call-read".to_string(),
+            output: serde_json::json!("file text"),
+            error: None,
+        };
+        let request = CursorAgentRequest {
+            model: "composer-2.5-fast".to_string(),
+            upstream_model: "composer-2.5".to_string(),
+            system_instructions: None,
+            developer_instructions: None,
+            messages: vec![
+                CursorMessage::User {
+                    blocks: vec![CursorContentBlock::Text("Use Grep then Read.".to_string())],
+                },
+                CursorMessage::Assistant {
+                    blocks: Vec::new(),
+                    tool_calls: vec![CursorToolCall {
+                        id: "call-grep".to_string(),
+                        name: "Grep".to_string(),
+                        arguments: serde_json::json!({
+                            "pattern": "DROID_GREP_OK",
+                            "glob": "/tmp/**/*"
+                        }),
+                    }],
+                },
+                CursorMessage::Tool {
+                    result: CursorToolResult {
+                        call_id: "call-grep".to_string(),
+                        output: serde_json::json!("./docs/droid-tool-proof.md"),
+                        error: None,
+                    },
+                },
+                CursorMessage::Assistant {
+                    blocks: Vec::new(),
+                    tool_calls: vec![CursorToolCall {
+                        id: "call-read".to_string(),
+                        name: "Read".to_string(),
+                        arguments: serde_json::json!({
+                            "file_path": "/tmp/docs/droid-tool-proof.md"
+                        }),
+                    }],
+                },
+                CursorMessage::Tool {
+                    result: latest_result.clone(),
+                },
+            ],
+            tools: Vec::new(),
+            tool_results: vec![latest_result],
+            continuation_key: None,
+            workspace: None,
+            stream: false,
+            request_id: Uuid::nil(),
+            client_profile: Default::default(),
+        };
+
+        let messages = build_proto_messages(&request);
+
+        assert_eq!(messages.len(), 5);
+        assert_eq!(messages[2].role, "tool");
+        assert!(messages[2].text.contains("call-grep"));
+        assert!(messages[2].text.contains("./docs/droid-tool-proof.md"));
+        assert_eq!(messages[4].role, "tool");
+        assert!(messages[4].text.contains("call-read"));
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| message.text.contains("Tool result for call-read"))
+                .count(),
+            1,
+            "latest active tool result must not be duplicated when it is already in transcript history",
+        );
+    }
+
+    #[test]
+    fn build_proto_messages_canonicalizes_droid_grep_and_read_replay_for_cursor() {
+        let request = CursorAgentRequest {
+            model: "composer-2.5-fast".to_string(),
+            upstream_model: "composer-2.5".to_string(),
+            system_instructions: None,
+            developer_instructions: None,
+            messages: vec![CursorMessage::Assistant {
+                blocks: Vec::new(),
+                tool_calls: vec![
+                    CursorToolCall {
+                        id: "call-grep".to_string(),
+                        name: "Grep".to_string(),
+                        arguments: serde_json::json!({
+                            "pattern": "DROID_GREP_OK",
+                            "glob": "/tmp/workspace/**/*"
+                        }),
+                    },
+                    CursorToolCall {
+                        id: "call-read".to_string(),
+                        name: "Read".to_string(),
+                        arguments: serde_json::json!({
+                            "file_path": "/tmp/workspace/docs/wiki.md"
+                        }),
+                    },
+                    CursorToolCall {
+                        id: "call-glob".to_string(),
+                        name: "Glob".to_string(),
+                        arguments: serde_json::json!({
+                            "patterns": "**/*",
+                            "folder": "/tmp/workspace"
+                        }),
+                    },
+                ],
+            }],
+            tools: Vec::new(),
+            tool_results: Vec::new(),
+            continuation_key: None,
+            workspace: None,
+            stream: false,
+            request_id: Uuid::nil(),
+            client_profile: CursorClientProfile::Droid,
+        };
+
+        let messages = build_proto_messages(&request);
+        let text = &messages[0].text;
+
+        assert!(text.contains("Tool call call-grep named grep"));
+        assert!(text.contains(r#""path":"/tmp/workspace""#));
+        assert!(text.contains(r#""output_mode":"content""#));
+        assert!(!text.contains("named Grep"));
+        assert!(!text.contains(r#""glob""#));
+        assert!(text.contains("Tool call call-read named read"));
+        assert!(text.contains(r#""path":"/tmp/workspace/docs/wiki.md""#));
+        assert!(!text.contains("file_path"));
+        assert!(text.contains("Tool call call-glob named grep"));
+        assert!(text.contains(r#""path":"/tmp/workspace""#));
+        assert!(text.contains(r#""pattern":"""#));
+        assert!(text.contains(r#""output_mode":"files_with_matches""#));
+        assert!(!text.contains("named Glob"));
     }
 
     #[test]
@@ -841,5 +1373,228 @@ mod tests {
             String::from_utf8_lossy(&mcp_result).contains("CursorAgentRequest"),
             "encoded MCP result includes indexed hit body"
         );
+    }
+
+    #[test]
+    fn build_proto_messages_canonicalizes_claude_replay_for_cursor() {
+        let request = CursorAgentRequest {
+            model: "composer-2-fast".to_string(),
+            upstream_model: "composer-2-fast".to_string(),
+            system_instructions: None,
+            developer_instructions: None,
+            messages: vec![CursorMessage::Assistant {
+                blocks: Vec::new(),
+                tool_calls: vec![
+                    CursorToolCall {
+                        id: "call-read".to_string(),
+                        name: "Read".to_string(),
+                        arguments: serde_json::json!({
+                            "file_path": "/tmp/workspace/docs/wiki.md"
+                        }),
+                    },
+                    CursorToolCall {
+                        id: "call-ls".to_string(),
+                        name: "Bash".to_string(),
+                        arguments: serde_json::json!({
+                            "command": "ls /tmp/workspace"
+                        }),
+                    },
+                    CursorToolCall {
+                        id: "call-grep".to_string(),
+                        name: "Grep".to_string(),
+                        arguments: serde_json::json!({
+                            "pattern": "CursorAgentRequest",
+                            "path": "src",
+                            "output_mode": "content"
+                        }),
+                    },
+                    CursorToolCall {
+                        id: "call-fetch".to_string(),
+                        name: "WebFetch".to_string(),
+                        arguments: serde_json::json!({
+                            "url": "https://example.com"
+                        }),
+                    },
+                    CursorToolCall {
+                        id: "call-execute".to_string(),
+                        name: "Bash".to_string(),
+                        arguments: serde_json::json!({
+                            "command": "pwd",
+                            "run_in_background": false
+                        }),
+                    },
+                    CursorToolCall {
+                        id: "call-bg-execute".to_string(),
+                        name: "Bash".to_string(),
+                        arguments: serde_json::json!({
+                            "command": "long-running &",
+                            "run_in_background": true
+                        }),
+                    },
+                ],
+            }],
+            tools: Vec::new(),
+            tool_results: Vec::new(),
+            continuation_key: None,
+            workspace: None,
+            stream: false,
+            request_id: Uuid::nil(),
+            client_profile: CursorClientProfile::ClaudeCode,
+        };
+
+        let messages = build_proto_messages(&request);
+        let text = &messages[0].text;
+
+        assert!(text.contains("Tool call call-read named read"));
+        assert!(text.contains(r#""path":"/tmp/workspace/docs/wiki.md""#));
+        assert!(text.contains("Tool call call-ls named ls"));
+        assert!(text.contains(r#""path":"/tmp/workspace""#));
+        assert!(text.contains("Tool call call-grep named grep"));
+        assert!(text.contains(r#""pattern":"CursorAgentRequest""#));
+        assert!(text.contains(r#""path":"src""#));
+        assert!(text.contains("Tool call call-fetch named fetch"));
+        assert!(text.contains(r#""url":"https://example.com""#));
+        assert!(text.contains("Tool call call-execute named shell"));
+        assert!(text.contains(r#""command":"pwd""#));
+        assert!(text.contains("Tool call call-bg-execute named background_shell_spawn"));
+        assert!(text.contains(r#""command":"long-running &""#));
+    }
+
+    #[test]
+    fn build_proto_messages_canonicalizes_codex_replay_for_cursor() {
+        let request = CursorAgentRequest {
+            model: "composer-2-fast".to_string(),
+            upstream_model: "composer-2-fast".to_string(),
+            system_instructions: None,
+            developer_instructions: None,
+            messages: vec![CursorMessage::Assistant {
+                blocks: Vec::new(),
+                tool_calls: vec![
+                    CursorToolCall {
+                        id: "call-read".to_string(),
+                        name: "shell_command".to_string(),
+                        arguments: serde_json::json!({
+                            "cmd": ["cat", "/tmp/workspace/docs/wiki.md"]
+                        }),
+                    },
+                    CursorToolCall {
+                        id: "call-ls".to_string(),
+                        name: "shell_command".to_string(),
+                        arguments: serde_json::json!({
+                            "cmd": ["ls", "/tmp/workspace"]
+                        }),
+                    },
+                    CursorToolCall {
+                        id: "call-grep".to_string(),
+                        name: "shell_command".to_string(),
+                        arguments: serde_json::json!({
+                            "cmd": ["grep", "-rn", "CursorAgentRequest", "src"]
+                        }),
+                    },
+                    CursorToolCall {
+                        id: "call-fetch".to_string(),
+                        name: "shell_command".to_string(),
+                        arguments: serde_json::json!({
+                            "cmd": ["curl", "https://example.com"]
+                        }),
+                    },
+                    CursorToolCall {
+                        id: "call-execute".to_string(),
+                        name: "shell_command".to_string(),
+                        arguments: serde_json::json!({
+                            "cmd": ["bash", "-c", "pwd"],
+                            "workdir": "/tmp/workspace"
+                        }),
+                    },
+                    CursorToolCall {
+                        id: "call-exec-cmd".to_string(),
+                        name: "exec_command".to_string(),
+                        arguments: serde_json::json!({
+                            "cmd": ["bash", "-c", "tail -f log"],
+                            "workdir": "/var/log"
+                        }),
+                    },
+                    CursorToolCall {
+                        id: "call-delete".to_string(),
+                        name: "apply_patch".to_string(),
+                        arguments: serde_json::json!({
+                            "patch": "*** Begin Patch\n*** Delete File: /tmp/file.txt\n*** End Patch\n"
+                        }),
+                    },
+                ],
+            }],
+            tools: Vec::new(),
+            tool_results: Vec::new(),
+            continuation_key: None,
+            workspace: None,
+            stream: false,
+            request_id: Uuid::nil(),
+            client_profile: CursorClientProfile::CodexCli,
+        };
+
+        let messages = build_proto_messages(&request);
+        let text = &messages[0].text;
+
+        assert!(text.contains("Tool call call-read named read"));
+        assert!(text.contains(r#""path":"/tmp/workspace/docs/wiki.md""#));
+        assert!(text.contains("Tool call call-ls named ls"));
+        assert!(text.contains(r#""path":"/tmp/workspace""#));
+        assert!(text.contains("Tool call call-grep named grep"));
+        assert!(text.contains(r#""pattern":"CursorAgentRequest""#));
+        assert!(text.contains(r#""path":"src""#));
+        assert!(text.contains("Tool call call-fetch named fetch"));
+        assert!(text.contains(r#""url":"https://example.com""#));
+        assert!(text.contains("Tool call call-execute named shell"));
+        assert!(text.contains(r#""command":"pwd""#));
+        assert!(text.contains(r#""working_directory":"/tmp/workspace""#));
+        assert!(text.contains("Tool call call-exec-cmd named shell_stream"));
+        assert!(text.contains(r#""command":"tail -f log""#));
+        assert!(text.contains(r#""working_directory":"/var/log""#));
+        assert!(text.contains("Tool call call-delete named delete"));
+        assert!(text.contains(r#""path":"/tmp/file.txt""#));
+    }
+
+    #[test]
+    fn build_proto_messages_canonicalizes_devin_replay_for_cursor() {
+        let request = CursorAgentRequest {
+            model: "composer-2-fast".to_string(),
+            upstream_model: "composer-2-fast".to_string(),
+            system_instructions: None,
+            developer_instructions: None,
+            messages: vec![CursorMessage::Assistant {
+                blocks: Vec::new(),
+                tool_calls: vec![
+                    CursorToolCall {
+                        id: "call-read".to_string(),
+                        name: "Read".to_string(),
+                        arguments: serde_json::json!({
+                            "file_path": "/tmp/workspace/docs/wiki.md"
+                        }),
+                    },
+                    CursorToolCall {
+                        id: "call-ls".to_string(),
+                        name: "LS".to_string(),
+                        arguments: serde_json::json!({
+                            "directory_path": "/tmp/workspace"
+                        }),
+                    },
+                ],
+            }],
+            tools: Vec::new(),
+            tool_results: Vec::new(),
+            continuation_key: None,
+            workspace: None,
+            stream: false,
+            request_id: Uuid::nil(),
+            client_profile: CursorClientProfile::Devin,
+        };
+
+        let messages = build_proto_messages(&request);
+        let text = &messages[0].text;
+
+        assert!(text.contains("Tool call call-read named read"));
+        assert!(text.contains(r#""path":"/tmp/workspace/docs/wiki.md""#));
+        assert!(text.contains("Tool call call-ls named ls"));
+        assert!(text.contains(r#""path":"/tmp/workspace""#));
     }
 }

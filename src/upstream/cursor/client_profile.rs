@@ -13,6 +13,7 @@ pub enum ClientProfile {
     Droid,
     GenericAnthropic,
     GenericOpenAi,
+    Devin,
 }
 
 impl From<ClientProfile> for crate::cursor_agent::CursorClientProfile {
@@ -23,6 +24,7 @@ impl From<ClientProfile> for crate::cursor_agent::CursorClientProfile {
             ClientProfile::Droid => Self::Droid,
             ClientProfile::GenericAnthropic => Self::GenericAnthropic,
             ClientProfile::GenericOpenAi => Self::GenericOpenAi,
+            ClientProfile::Devin => Self::Devin,
         }
     }
 }
@@ -35,6 +37,7 @@ impl From<crate::cursor_agent::CursorClientProfile> for ClientProfile {
             crate::cursor_agent::CursorClientProfile::Droid => Self::Droid,
             crate::cursor_agent::CursorClientProfile::GenericAnthropic => Self::GenericAnthropic,
             crate::cursor_agent::CursorClientProfile::GenericOpenAi => Self::GenericOpenAi,
+            crate::cursor_agent::CursorClientProfile::Devin => Self::Devin,
         }
     }
 }
@@ -47,6 +50,7 @@ impl ClientProfile {
             ClientProfile::Droid => "droid",
             ClientProfile::GenericAnthropic => "generic_anthropic",
             ClientProfile::GenericOpenAi => "generic_openai",
+            ClientProfile::Devin => "devin",
         }
     }
 }
@@ -64,6 +68,7 @@ pub enum ProfileSignal {
     UaFactory,
     UaAnthropicSdk,
     UaOpenAiSdk,
+    UaDevin,
     None,
 }
 
@@ -80,6 +85,7 @@ impl ProfileSignal {
             ProfileSignal::UaFactory => "ua_factory",
             ProfileSignal::UaAnthropicSdk => "ua_anthropic_sdk",
             ProfileSignal::UaOpenAiSdk => "ua_openai_sdk",
+            ProfileSignal::UaDevin => "ua_devin",
             ProfileSignal::None => "none",
         }
     }
@@ -140,6 +146,7 @@ pub fn parse_profile_token(raw: &str) -> Option<ClientProfile> {
         "droid" => Some(ClientProfile::Droid),
         "generic_openai" | "generic-openai" => Some(ClientProfile::GenericOpenAi),
         "generic_anthropic" | "generic-anthropic" => Some(ClientProfile::GenericAnthropic),
+        "devin" | "devin_cli" | "devin-cli" => Some(ClientProfile::Devin),
         _ => None,
     }
 }
@@ -217,6 +224,16 @@ pub fn detect_client_profile(headers: &HeaderMap) -> ProfileDetection {
     }
 
     let ua = header_value(headers, USER_AGENT.as_str()).unwrap_or("");
+    if ua.starts_with("devin-cli/")
+        || ua.starts_with("chisel-agent/")
+        || ua.starts_with("chisel-cli/")
+        || ua.starts_with("chisel/")
+    {
+        return ProfileDetection {
+            profile: ClientProfile::Devin,
+            signal: ProfileSignal::UaDevin,
+        };
+    }
     if ua.starts_with("factory-cli/") {
         return ProfileDetection {
             profile: ClientProfile::Droid,
