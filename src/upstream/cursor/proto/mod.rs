@@ -1,248 +1,11 @@
 //! Manual protobuf wire layer for the Cursor AgentService narrow path.
-//!
-//! Ported from the canonical Rust adapter at
-//! `/Users/jaredboynton/__devlocal/unified-model-proxy-rs/crates/ump-adapters/ump-adapter-cursor-bidisse/src/lib.rs`.
-//! Field numbers come from the Buf-generated TypeScript schema at
-//! `/Users/jaredboynton/__devlocal/unified-model-proxy/src/lib/cursor/proto/agent_pb.ts`.
-//!
-//! `prost`/`prost-build` is intentionally NOT used here. The narrow surface
-//! we exchange with Cursor today fits in a few hand-written helpers and
-//! keeps the build dependency-free.
-//!
-//! Proto3 default semantics: `encode_string_field` and `encode_int32_field`
-//! short-circuit when the value is empty / zero (proto3 default). That keeps
-//! Run frames byte-stable against the v1 golden fixtures. `encode_int64_field`
-//! deliberately does NOT short-circuit because kv/exec response builders
-//! always carry a correlation id that the server expects on the wire even
-//! when it equals zero.
+//! Plus complete generated structures from agent_pb.ts.
 
-// ---------------------------------------------------------------------------
-// Wire-format primitives (varint + tag helpers)
-// ---------------------------------------------------------------------------
+pub mod mod_impl;
+pub mod services;
+pub mod types;
 
-/// Encode a 64-bit unsigned varint per the protobuf wire format.
-pub fn encode_varint(mut value: u64) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    while value > 127 {
-        bytes.push(((value & 0x7f) as u8) | 0x80);
-        value >>= 7;
-    }
-    bytes.push(value as u8);
-    bytes
-}
-
-/// Decode a varint at `offset`, returning `(value, bytes_consumed)`.
-///
-/// Returns `None` on truncated or oversized input. The 10-byte cap matches
-/// the upper bound for a 64-bit varint and prevents the parser from running
-/// off the end of an attacker-supplied chunk.
-pub fn decode_varint(data: &[u8], offset: usize) -> Option<(u64, usize)> {
-    let mut value = 0u64;
-    let mut shift = 0u32;
-    for (index, byte) in data.get(offset..)?.iter().enumerate() {
-        value |= u64::from(byte & 0x7f) << shift;
-        if byte & 0x80 == 0 {
-            return Some((value, index + 1));
-        }
-        shift += 7;
-        if shift >= 64 {
-            return None;
-        }
-    }
-    None
-}
-
-/// Encode a length-delimited string field (wire type 2).
-///
-/// Short-circuits on empty input per proto3 default semantics.
-pub fn encode_string_field(field_number: u32, value: &str) -> Vec<u8> {
-    if value.is_empty() {
-        return Vec::new();
-    }
-    encode_string_field_always(field_number, value)
-}
-
-fn encode_string_field_always(field_number: u32, value: &str) -> Vec<u8> {
-    let mut out = encode_varint(((field_number << 3) | 2) as u64);
-    out.extend(encode_varint(value.len() as u64));
-    out.extend_from_slice(value.as_bytes());
-    out
-}
-
-/// Encode a length-delimited message/bytes field (wire type 2).
-///
-/// Always written, even when the body is empty: callers explicitly use this
-/// to send a present-but-empty sub-message (e.g. empty `ConversationStateStructure`).
-pub fn encode_message_field(field_number: u32, data: &[u8]) -> Vec<u8> {
-    let mut out = encode_varint(((field_number << 3) | 2) as u64);
-    out.extend(encode_varint(data.len() as u64));
-    out.extend_from_slice(data);
-    out
-}
-
-/// Encode an int32 / uint32 / bool field (wire type 0).
-///
-/// Short-circuits on zero per proto3 default semantics.
-pub fn encode_int32_field(field_number: u32, value: u32) -> Vec<u8> {
-    if value == 0 {
-        return Vec::new();
-    }
-    let mut out = encode_varint((field_number << 3) as u64);
-    out.extend(encode_varint(value as u64));
-    out
-}
-
-/// Encode an int64 / uint64 field (wire type 0).
-///
-/// Does NOT short-circuit on zero. kv/exec response builders need field 1
-/// to be present even when id == 0.
-pub fn encode_int64_field(field_number: u32, value: u64) -> Vec<u8> {
-    let mut out = encode_varint((field_number << 3) as u64);
-    out.extend(encode_varint(value));
-    out
-}
-
-/// Encode a bool field (wire type 0). Mirrors proto3 default semantics —
-/// `false` short-circuits to an empty byte slice.
-pub fn encode_bool_field(field_number: u32, value: bool) -> Vec<u8> {
-    if !value {
-        return Vec::new();
-    }
-    let mut out = encode_varint((field_number << 3) as u64);
-    out.push(1);
-    out
-}
-
-fn encode_varint_field_always(field_number: u32, value: u64) -> Vec<u8> {
-    let mut out = encode_varint((field_number << 3) as u64);
-    out.extend(encode_varint(value));
-    out
-}
-
-fn encode_double_field_always(field_number: u32, value: f64) -> Vec<u8> {
-    let mut out = encode_varint(((field_number << 3) | 1) as u64);
-    out.extend_from_slice(&value.to_le_bytes());
-    out
-}
-
-fn encode_bool_field_always(field_number: u32, value: bool) -> Vec<u8> {
-    encode_varint_field_always(field_number, u64::from(value))
-}
-
-/// Encode a `repeated string` proto3 field as unpacked length-delimited
-/// entries (one tag/length pair per element).
-pub fn encode_repeated_string_field(field_number: u32, values: &[String]) -> Vec<u8> {
-    let mut out = Vec::new();
-    for v in values {
-        if v.is_empty() {
-            // proto3 default; emit nothing rather than a zero-length string.
-            continue;
-        }
-        out.extend_from_slice(&encode_string_field(field_number, v));
-    }
-    out
-}
-
-/// Encode a `repeated message` field as unpacked length-delimited entries.
-pub fn encode_repeated_message_field(field_number: u32, items: &[Vec<u8>]) -> Vec<u8> {
-    let mut out = Vec::new();
-    for item in items {
-        out.extend_from_slice(&encode_message_field(field_number, item));
-    }
-    out
-}
-
-/// Concatenate a list of byte chunks into a single buffer. Sum-allocate so we
-/// never pay for incremental Vec growth.
-pub fn concat_bytes(chunks: &[Vec<u8>]) -> Vec<u8> {
-    let total: usize = chunks.iter().map(Vec::len).sum();
-    let mut out = Vec::with_capacity(total);
-    for chunk in chunks {
-        out.extend_from_slice(chunk);
-    }
-    out
-}
-
-/// Decoded protobuf field. Wire-type 0 values are re-encoded as varint bytes
-/// inside `value` so consumers stay uniform; call `decode_varint` again to
-/// recover the integer.
-#[derive(Debug, Clone)]
-pub struct ProtoField {
-    pub number: u32,
-    pub wire_type: u8,
-    pub value: Vec<u8>,
-}
-
-/// Walk a length-delimited body and return all decoded fields. Truncated or
-/// malformed tails stop parsing early instead of panicking; partial frames
-/// are filtered upstream by the Connect framing layer.
-pub fn parse_proto_fields(data: &[u8]) -> Vec<ProtoField> {
-    let mut fields = Vec::new();
-    let mut offset = 0usize;
-    while offset < data.len() {
-        let Some((tag, tag_len)) = decode_varint(data, offset) else {
-            break;
-        };
-        offset += tag_len;
-        let number = (tag >> 3) as u32;
-        let wire_type = (tag & 7) as u8;
-        match wire_type {
-            0 => {
-                let Some((value, len)) = decode_varint(data, offset) else {
-                    break;
-                };
-                offset += len;
-                fields.push(ProtoField {
-                    number,
-                    wire_type,
-                    value: encode_varint(value),
-                });
-            }
-            2 => {
-                let Some((len, len_len)) = decode_varint(data, offset) else {
-                    break;
-                };
-                offset += len_len;
-                let end = offset.saturating_add(len as usize);
-                if end > data.len() {
-                    break;
-                }
-                fields.push(ProtoField {
-                    number,
-                    wire_type,
-                    value: data[offset..end].to_vec(),
-                });
-                offset = end;
-            }
-            1 => {
-                let end = offset.saturating_add(8);
-                if end > data.len() {
-                    break;
-                }
-                fields.push(ProtoField {
-                    number,
-                    wire_type,
-                    value: data[offset..end].to_vec(),
-                });
-                offset = end;
-            }
-            5 => {
-                let end = offset.saturating_add(4);
-                if end > data.len() {
-                    break;
-                }
-                fields.push(ProtoField {
-                    number,
-                    wire_type,
-                    value: data[offset..end].to_vec(),
-                });
-                offset = end;
-            }
-            _ => break,
-        }
-    }
-    fields
-}
+pub use mod_impl::*;
 
 // ---------------------------------------------------------------------------
 // AgentClientMessage / AgentRunRequest tags
@@ -441,11 +204,7 @@ pub mod get_usable_models_response {
 // High-level encoders / decoders
 // ---------------------------------------------------------------------------
 
-/// Neutral message structure consumed by the run-request encoder. Lane F
-/// will likely replace this with a richer DTO from `cursor_agent.rs`; until
-/// then we accept a flat role+text shape because that is all the narrow
-/// first-delivery path actually puts on the wire.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Message {
     pub role: String,
     pub text: String,
@@ -479,17 +238,10 @@ pub struct RequestedModelInput<'a> {
 /// Heartbeat encoder. Returns the framed `AgentClientMessage` body bytes
 /// (no Connect envelope).
 pub fn encode_client_heartbeat() -> Vec<u8> {
-    // ClientHeartbeat is an empty message; the wrapper field is 7 wire-type 2
-    // with length 0, producing the exact two bytes [0x3a, 0x00].
     encode_message_field(agent_client_message::CLIENT_HEARTBEAT, &[])
 }
 
 /// Encode the minimal `AgentRunRequest` for first delivery.
-///
-/// Mirrors the byte-for-byte behavior of the canonical Rust adapter at
-/// `lib.rs:616-649` of `ump-adapter-cursor-bidisse`. Conversation state is
-/// emitted as an empty sub-message; richer state shapes are a Phase 1+
-/// follow-up.
 pub fn encode_agent_run_request(input: AgentRunRequestInput<'_>) -> Vec<u8> {
     let prompt = messages_to_prompt(input.messages);
     let user_message_bytes = concat_bytes(&[
@@ -498,7 +250,6 @@ pub fn encode_agent_run_request(input: AgentRunRequestInput<'_>) -> Vec<u8> {
         encode_int32_field(user_message::MODE, 1),
     ]);
 
-    // RequestContextEnv is wrapped under `RequestContext.env` (field 4).
     let env_body = concat_bytes(&[
         encode_string_field(request_context_env::OS_VERSION, input.os_version),
         encode_string_field(request_context_env::WORKSPACE_PATHS, input.workspace_path),
@@ -564,10 +315,6 @@ fn encode_requested_model(input: RequestedModelInput<'_>) -> Vec<u8> {
     concat_bytes(&parts)
 }
 
-/// Render the message log as a single user-prompt string. Mirrors the
-/// reference adapter's `messages_to_prompt`. Lane F may replace this once
-/// the neutral DTO lands; until then it preserves byte parity with the
-/// existing Rust adapter.
 fn messages_to_prompt(messages: &[Message]) -> String {
     let mut out = String::new();
     for message in messages {
@@ -587,9 +334,6 @@ fn capitalize(input: &str) -> String {
     }
 }
 
-/// Decoded interaction event surfaced to higher layers. Mirrors the variants
-/// the canonical adapter emits today plus `TokenDelta` (per the Phase 0
-/// gap list).
 #[derive(Debug, Clone, PartialEq)]
 pub enum InteractionEvent {
     Text(String),
@@ -599,9 +343,6 @@ pub enum InteractionEvent {
     TurnEnded,
 }
 
-/// Decoded server-side exec request. The body payload bytes are returned
-/// verbatim so higher-level lanes can decide how to satisfy the call (or
-/// reject it).
 #[derive(Debug, Clone)]
 pub struct ExecRequest {
     pub id: u64,
@@ -610,8 +351,6 @@ pub struct ExecRequest {
     pub args: Vec<u8>,
 }
 
-/// Variant of an exec request, keyed by the field number on
-/// `ExecServerMessage.message`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExecKind {
     Shell,
@@ -659,7 +398,6 @@ impl ExecKind {
     }
 }
 
-/// Decoded server-side kv request.
 #[derive(Debug, Clone)]
 pub struct KvRequest {
     pub id: u64,
@@ -667,8 +405,6 @@ pub struct KvRequest {
     pub args: Vec<u8>,
 }
 
-/// Variant of a kv request, keyed by the field number on
-/// `KvServerMessage.message`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KvKind {
     GetBlob,
@@ -686,9 +422,6 @@ impl KvKind {
     }
 }
 
-/// Decoded shape returned by `decode_agent_server_message`. Higher-level
-/// lanes own the policy of which exec/kv requests to satisfy or reject;
-/// this layer just surfaces them.
 #[derive(Debug, Default, Clone)]
 pub struct AgentServerMessage {
     pub events: Vec<InteractionEvent>,
@@ -698,8 +431,6 @@ pub struct AgentServerMessage {
     pub checkpoint_update: Option<Vec<u8>>,
 }
 
-/// Parse a single decoded `AgentServerMessage` body (already stripped of
-/// the Connect frame envelope).
 pub fn decode_agent_server_message(bytes: &[u8]) -> AgentServerMessage {
     let mut out = AgentServerMessage::default();
     for field in parse_proto_fields(bytes) {
@@ -772,16 +503,8 @@ fn parse_exec_server_message(data: &[u8]) -> Option<ExecRequest> {
             v if v == exec_message::EXEC_ID => {
                 exec_id = String::from_utf8_lossy(&field.value).into_owned();
             }
-            v if v == exec_message::SPAN_CONTEXT => {
-                // Metadata only; not part of the oneof request payload.
-            }
+            v if v == exec_message::SPAN_CONTEXT => {}
             other if field.wire_type == 2 => {
-                // The exec payload is a oneof and Cursor can add new
-                // length-delimited exec request variants before this proxy
-                // knows their tag numbers. Preserve unknown variants as
-                // `ExecKind::Other` so the run loop can still surface them as
-                // public `cursor_exec` tool calls instead of silently dropping
-                // the provider request.
                 kind = Some((other, field.value));
             }
             _ => {}
@@ -811,9 +534,7 @@ fn parse_kv_server_message(data: &[u8]) -> Option<KvRequest> {
             {
                 kind = Some((v, field.value));
             }
-            v if v == kv_message::SPAN_CONTEXT => {
-                // Metadata only; not part of the oneof request payload.
-            }
+            v if v == kv_message::SPAN_CONTEXT => {}
             _ => {}
         }
     }
@@ -825,7 +546,6 @@ fn parse_kv_server_message(data: &[u8]) -> Option<KvRequest> {
     })
 }
 
-/// Decode `GetBlobArgs.blob_id`.
 pub fn decode_get_blob_args(data: &[u8]) -> Option<Vec<u8>> {
     parse_proto_fields(data)
         .into_iter()
@@ -833,7 +553,6 @@ pub fn decode_get_blob_args(data: &[u8]) -> Option<Vec<u8>> {
         .map(|field| field.value)
 }
 
-/// Decode `SetBlobArgs.{blob_id, blob_data}`.
 pub fn decode_set_blob_args(data: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
     let mut blob_id = None;
     let mut blob_data = None;
@@ -847,7 +566,6 @@ pub fn decode_set_blob_args(data: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
     Some((blob_id?, blob_data.unwrap_or_default()))
 }
 
-/// Encode `AgentClientMessage { kv_client_message: { id, get_blob_result } }`.
 pub fn encode_get_blob_result(id: u64, blob_data: Option<&[u8]>) -> Vec<u8> {
     let result = blob_data
         .map(|data| encode_message_field(1, data))
@@ -855,7 +573,6 @@ pub fn encode_get_blob_result(id: u64, blob_data: Option<&[u8]>) -> Vec<u8> {
     encode_kv_client_message(id, kv_message::GET_BLOB, &result)
 }
 
-/// Encode `AgentClientMessage { kv_client_message: { id, set_blob_result } }`.
 pub fn encode_set_blob_result(id: u64) -> Vec<u8> {
     encode_kv_client_message(id, kv_message::SET_BLOB, &[])
 }
@@ -888,7 +605,7 @@ pub fn encode_request_context_result(
         encode_message_field(
             request_context::MCP_INSTRUCTIONS,
             &concat_bytes(&[
-                encode_string_field(mcp_instructions::SERVER_NAME, "ump"),
+                encode_string_field(mcp_instructions::SERVER_NAME, "opencode"),
                 encode_string_field(
                     mcp_instructions::INSTRUCTIONS,
                     "Use the MCP tools listed in this request context. For codebase index searches, call cursor_codebase_search when it is listed; do not substitute grep, read, or shell for index-search requests.",
@@ -922,7 +639,7 @@ fn encode_mcp_tool_definitions(tools: &[crate::cursor_agent::CursorTool]) -> Vec
                     tool.description.as_deref().unwrap_or(""),
                 ),
                 encode_message_field(mcp_tool_definition::INPUT_SCHEMA, &schema),
-                encode_string_field(mcp_tool_definition::PROVIDER_IDENTIFIER, "ump"),
+                encode_string_field(mcp_tool_definition::PROVIDER_IDENTIFIER, "opencode"),
                 encode_string_field(mcp_tool_definition::TOOL_NAME, &tool.name),
             ])
         })
@@ -1132,15 +849,10 @@ fn take_int_subfield(data: &[u8], number: u32) -> Option<i32> {
 // GetUsableModels encode / decode
 // ---------------------------------------------------------------------------
 
-/// Encode an empty `GetUsableModelsRequest`. The schema only carries an
-/// optional `custom_model_ids` repeated string which we never populate.
 pub fn encode_get_usable_models_request() -> Vec<u8> {
     Vec::new()
 }
 
-/// Plain-data descriptor returned by `decode_get_usable_models_response`.
-/// Higher-level normalization (dedupe, sort, fallback merge) lives in
-/// `models.rs`.
 #[derive(Debug, Clone)]
 pub struct ModelDescriptorRaw {
     pub model_id: String,
@@ -1151,9 +863,6 @@ pub struct ModelDescriptorRaw {
     pub supports_reasoning: bool,
 }
 
-/// Decode a `GetUsableModelsResponse` body into raw descriptors. Accepts
-/// either a Connect-framed payload or a raw protobuf body — callers strip
-/// any envelope before invoking.
 pub fn decode_get_usable_models_response(bytes: &[u8]) -> Vec<ModelDescriptorRaw> {
     let mut out = Vec::new();
     for field in parse_proto_fields(bytes) {
@@ -1178,7 +887,6 @@ fn decode_model_details(bytes: &[u8]) -> ModelDescriptorRaw {
                 model_id = String::from_utf8_lossy(&field.value).into_owned();
             }
             v if v == model_details::THINKING_DETAILS => {
-                // Presence-only signal; matches v1 behavior.
                 supports_reasoning = true;
             }
             v if v == model_details::DISPLAY_MODEL_ID && field.wire_type == 2 => {

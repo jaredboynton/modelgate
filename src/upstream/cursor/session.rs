@@ -452,3 +452,78 @@ fn canonicalize_stable_fields(value: &serde_json::Value) -> serde_json::Value {
         other => other.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, time::Instant};
+
+    use serde_json::json;
+
+    use super::{
+        ConversationState, CursorSessionConfig, CursorSessionStore, PendingToolContinuationLookup,
+        PendingToolContinuationQuery,
+    };
+    use crate::{
+        cursor_agent::{CursorClientProfile, CursorContinuationKey, CursorRoute, CursorToolCall},
+        model_alias::{Provider, TargetFormat},
+    };
+
+    #[test]
+    fn pending_tool_continuation_lookup_finds_unique_droid_match() {
+        let store = CursorSessionStore::with_config(CursorSessionConfig {
+            max_active: 16,
+            ttl: std::time::Duration::from_secs(60),
+            cleanup_interval: std::time::Duration::from_secs(60),
+        });
+        let stable_request_fields = json!({ "model": "composer-2.5-fast" });
+        let key = CursorContinuationKey {
+            route: CursorRoute::Responses,
+            provider: Provider::Cursor,
+            upstream_model: "composer-2.5".into(),
+            target_format: TargetFormat::CursorAgent,
+            stable_request_fields: stable_request_fields.clone(),
+            response_id: "resp_readme".into(),
+            conversation_id: "conv_readme".into(),
+        };
+        store.store_continuation(
+            &key,
+            ConversationState {
+                checkpoint: None,
+                pending_tool_calls: vec![
+                    CursorToolCall {
+                        id: "call_readme".into(),
+                        name: "Read".into(),
+                        arguments: json!({ "path": "README.md" }),
+                    },
+                    CursorToolCall {
+                        id: "call_notes".into(),
+                        name: "Read".into(),
+                        arguments: json!({ "path": "NOTES.md" }),
+                    },
+                ],
+                last_access: Instant::now(),
+                route: CursorRoute::Responses,
+                provider: Provider::Cursor,
+                upstream_model: "composer-2.5".into(),
+                target_format: TargetFormat::CursorAgent,
+                client_profile: CursorClientProfile::Droid,
+                stable_field_hash: [0; 32],
+                response_id: "resp_readme".into(),
+                conversation_id: "conv_readme".into(),
+                blob_store: HashMap::new(),
+            },
+        );
+
+        let lookup = store.find_pending_tool_continuation(PendingToolContinuationQuery {
+            route: CursorRoute::Responses,
+            provider: Provider::Cursor,
+            upstream_model: "composer-2.5",
+            target_format: TargetFormat::CursorAgent,
+            client_profile: CursorClientProfile::Droid,
+            stable_request_fields: &stable_request_fields,
+            call_ids: &["call_readme".into(), "call_notes".into()],
+        });
+
+        assert_eq!(lookup, PendingToolContinuationLookup::Found(key));
+    }
+}

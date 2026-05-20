@@ -12,9 +12,8 @@
 //! finishReason detection, v1 Codex-style allowlist) are deliberately not
 //! replicated here.
 
-use std::collections::HashSet;
-
 use serde_json::{json, Map, Value};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::adapter::cursor_events::{ResponseContext, ResponsesSseEvent, ToolCallSnapshot};

@@ -44,7 +44,7 @@ pub const DEFAULT_CONTEXT_WINDOW: u32 = 200_000;
 /// Default per-model max output tokens.
 pub const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 64_000;
 
-/// Pinned fallback rows. Mirrors the v1 fallback set; row order
+/// Pinned fallback rows. Mirrors the v1/opencode fallback set; row order
 /// matters so it stays alphabetical by `id`.
 pub static FALLBACK_MODELS: &[FallbackModel] = &[
     FallbackModel {

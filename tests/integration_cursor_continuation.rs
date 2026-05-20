@@ -105,6 +105,66 @@ async fn cursor_droid_replayed_tool_result_without_previous_response_id_reaches_
 }
 
 #[tokio::test]
+async fn cursor_droid_replayed_multiple_read_results_for_fast_alias_reaches_auth_gate() {
+    let homes = common::TestHomes::new();
+    prime_cursor_continuation_with_pending_for_request_model(
+        &homes.state,
+        "resp_readme",
+        "conv_readme",
+        "composer-2.5-fast",
+        "composer-2.5",
+        CursorClientProfile::Droid,
+        vec![
+            CursorToolCall {
+                id: "call_readme".into(),
+                name: "Read".into(),
+                arguments: json!({ "path": "README.md" }),
+            },
+            CursorToolCall {
+                id: "call_missing".into(),
+                name: "Read".into(),
+                arguments: json!({ "path": "DOES_NOT_EXIST.md" }),
+            },
+        ],
+    );
+    let app = build_router(homes.state.clone());
+    let body = json!({
+        "model": "composer-2.5-fast",
+        "store": false,
+        "input": [
+            { "type": "message", "role": "user", "content": "raed the readme" },
+            {
+                "type": "function_call",
+                "call_id": "call_readme",
+                "name": "Read",
+                "arguments": "{\"path\":\"README.md\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_readme",
+                "output": "Unified Model Proxy v2"
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_missing",
+                "name": "Read",
+                "arguments": "{\"path\":\"DOES_NOT_EXIST.md\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_missing",
+                "output": "file not found",
+                "error": "not_found"
+            }
+        ],
+    });
+
+    let parsed = post_responses_with_user_agent(app, body, "factory-cli/0.129.0").await;
+    assert_eq!(parsed.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(error_type(&parsed.1), "missing_credential");
+}
+
+#[tokio::test]
 async fn cursor_generic_replayed_tool_result_without_previous_response_id_stays_strict() {
     let homes = common::TestHomes::new();
     prime_cursor_continuation_with_pending(
@@ -224,7 +284,27 @@ fn prime_cursor_continuation_with_pending(
     client_profile: CursorClientProfile,
     pending_tool_calls: Vec<CursorToolCall>,
 ) {
-    let stable = json!({ "model": upstream_model });
+    prime_cursor_continuation_with_pending_for_request_model(
+        state,
+        response_id,
+        conversation_id,
+        upstream_model,
+        upstream_model,
+        client_profile,
+        pending_tool_calls,
+    );
+}
+
+fn prime_cursor_continuation_with_pending_for_request_model(
+    state: &unified_model_proxy_v2::AppState,
+    response_id: &str,
+    conversation_id: &str,
+    requested_model: &str,
+    upstream_model: &str,
+    client_profile: CursorClientProfile,
+    pending_tool_calls: Vec<CursorToolCall>,
+) {
+    let stable = json!({ "model": requested_model });
     let key = CursorContinuationKey {
         route: CursorRoute::Responses,
         provider: Provider::Cursor,

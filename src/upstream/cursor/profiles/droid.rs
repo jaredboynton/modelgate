@@ -167,6 +167,12 @@ fn emit_fetch(exec: &ExecRequest) -> RenderedToolCall {
 fn render_mcp(exec: &ExecRequest) -> RenderedToolCall {
     let (mcp_tool_name, tool_call_id, arguments) = decode_exec_public_tool_call(exec);
     let server = read_string_field(&exec.args, 4).unwrap_or_default();
+    if server == "opencode" && mcp_tool_name == "Read" {
+        return emit_opencode_read(tool_call_id, arguments);
+    }
+    if server == "opencode" && mcp_tool_name == "TodoWrite" {
+        return emit_opencode_todo_write(tool_call_id, arguments);
+    }
     let namespaced = if server.is_empty() {
         mcp_tool_name
     } else {
@@ -175,6 +181,42 @@ fn render_mcp(exec: &ExecRequest) -> RenderedToolCall {
     RenderedToolCall::Emit {
         tool_name: namespaced,
         arguments,
+        tool_call_id,
+    }
+}
+
+fn emit_opencode_read(tool_call_id: String, arguments: serde_json::Value) -> RenderedToolCall {
+    let mut out = arguments.as_object().cloned().unwrap_or_default();
+    if !out.contains_key("file_path") {
+        if let Some(path) = out.remove("path") {
+            out.insert("file_path".into(), path);
+        }
+    }
+    RenderedToolCall::Emit {
+        tool_name: "Read".into(),
+        arguments: serde_json::Value::Object(out),
+        tool_call_id,
+    }
+}
+
+fn emit_opencode_todo_write(
+    tool_call_id: String,
+    arguments: serde_json::Value,
+) -> RenderedToolCall {
+    let mut out = serde_json::Map::new();
+    if let Some(todos) = arguments.get("todos") {
+        let todos = todos
+            .as_str()
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| todos.to_string());
+        out.insert("todos".into(), json!(todos));
+    }
+    if let Some(merge) = arguments.get("merge") {
+        out.insert("merge".into(), merge.clone());
+    }
+    RenderedToolCall::Emit {
+        tool_name: "TodoWrite".into(),
+        arguments: serde_json::Value::Object(out),
         tool_call_id,
     }
 }
