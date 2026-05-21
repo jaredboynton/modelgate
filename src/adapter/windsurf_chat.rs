@@ -108,6 +108,13 @@ pub fn parse_tool_plan(output: &str) -> Option<ToolPlan> {
         }
     }
 
+    if output.trim_start().starts_with("ASSISTANT TOOL_CALLS:") {
+        return parse_assistant_tool_calls_block(output);
+    }
+    if output.contains("ASSISTANT TOOL_CALLS:") {
+        return None;
+    }
+
     if let (Some(start), Some(end)) = (output.find('{'), output.rfind('}')) {
         if end > start {
             if let Ok(parsed) = serde_json::from_str::<Value>(&output[start..=end]) {
@@ -141,6 +148,22 @@ pub fn parse_tool_plan(output: &str) -> Option<ToolPlan> {
     }
 
     parse_droid_style_tool_call_tags(output)
+}
+
+fn parse_assistant_tool_calls_block(output: &str) -> Option<ToolPlan> {
+    let trimmed = output.trim();
+    let calls_json = trimmed.strip_prefix("ASSISTANT TOOL_CALLS:")?.trim();
+    let calls = serde_json::from_str::<Value>(calls_json)
+        .ok()?
+        .as_array()?
+        .iter()
+        .filter_map(tool_call_from_value)
+        .collect::<Vec<_>>();
+    if calls.is_empty() {
+        None
+    } else {
+        Some(ToolPlan::ToolCalls(calls))
+    }
 }
 
 fn parse_droid_style_tool_call_tags(output: &str) -> Option<ToolPlan> {
@@ -740,7 +763,15 @@ pub fn map_client_tools_to_windsurf(tools: &mut [Value], profile: WindsurfClient
 }
 
 pub fn map_windsurf_tool_call_to_client(call: &mut ToolCallPlan, profile: WindsurfClientProfile) {
-    if profile == WindsurfClientProfile::Devin {
+    if profile == WindsurfClientProfile::Droid {
+        if call.name == "Execute" {
+            if let Some(obj) = call.arguments.as_object_mut() {
+                obj.entry("riskLevel").or_insert_with(|| json!("medium"));
+                obj.entry("riskLevelReason")
+                    .or_insert_with(|| json!("automated proxy invocation"));
+            }
+        }
+    } else if profile == WindsurfClientProfile::Devin {
         match call.name.as_str() {
             "Read" => {
                 call.name = "read".to_string();
@@ -1010,10 +1041,18 @@ fn map_client_tool_call_to_windsurf(func_val: &mut Value, profile: WindsurfClien
 
 fn tool_call_from_value(value: &Value) -> Option<ToolCallPlan> {
     let object = value.as_object()?;
-    let name = object.get("name").and_then(Value::as_str)?;
+    if let Some(name) = object.get("name").and_then(Value::as_str) {
+        return Some(ToolCallPlan {
+            name: name.to_string(),
+            arguments: parse_tool_arguments(object.get("arguments").cloned().unwrap_or(json!({}))),
+        });
+    }
+
+    let function = object.get("function")?.as_object()?;
+    let name = function.get("name").and_then(Value::as_str)?;
     Some(ToolCallPlan {
         name: name.to_string(),
-        arguments: parse_tool_arguments(object.get("arguments").cloned().unwrap_or(json!({}))),
+        arguments: parse_tool_arguments(function.get("arguments").cloned().unwrap_or(json!({}))),
     })
 }
 
@@ -1152,6 +1191,38 @@ mod tests {
         assert_eq!(parse_tool_plan(r#"<tool_call>Read"/tmp/README.md""#), None);
         assert_eq!(
             parse_tool_plan(r#"<tool_call>Read["/tmp/README.md"]"#),
+            None
+        );
+    }
+
+    #[test]
+    fn tool_plan_parser_accepts_exact_assistant_tool_calls_block() {
+        assert_eq!(
+            parse_tool_plan(
+                r#"ASSISTANT TOOL_CALLS: [{"id":"call_1","type":"function","function":{"name":"Execute","arguments":"{\"command\":\"git status --short\"}"}}]"#
+            ),
+            Some(ToolPlan::ToolCalls(vec![ToolCallPlan {
+                name: "Execute".into(),
+                arguments: json!({ "command": "git status --short" })
+            }]))
+        );
+    }
+
+    #[test]
+    fn tool_plan_parser_rejects_mixed_assistant_tool_call_transcripts() {
+        assert_eq!(
+            parse_tool_plan(
+                r#"ASSISTANT TOOL_CALLS: [{"id":"call_1","type":"function","function":{"name":"Execute","arguments":"{\"command\":\"git status\"}"}}]
+
+TOOL RESULT call_1: ok"#
+            ),
+            None
+        );
+        assert_eq!(
+            parse_tool_plan(
+                r#"I will run it.
+ASSISTANT TOOL_CALLS: [{"id":"call_1","type":"function","function":{"name":"Execute","arguments":"{\"command\":\"git status\"}"}}]"#
+            ),
             None
         );
     }
@@ -1320,5 +1391,23 @@ mod tests {
         map_windsurf_tool_call_to_client(&mut codex_call, WindsurfClientProfile::CodexCli);
         assert_eq!(codex_call.name, "read_file");
         assert_eq!(codex_call.arguments["path"], "/tmp/README.md");
+    }
+
+    #[test]
+    fn test_map_windsurf_tool_call_to_client_droid_execute_adds_risk_defaults() {
+        let mut call = ToolCallPlan {
+            name: "Execute".to_string(),
+            arguments: json!({ "command": "git status --short" }),
+        };
+
+        map_windsurf_tool_call_to_client(&mut call, WindsurfClientProfile::Droid);
+
+        assert_eq!(call.name, "Execute");
+        assert_eq!(call.arguments["command"], "git status --short");
+        assert_eq!(call.arguments["riskLevel"], "medium");
+        assert_eq!(
+            call.arguments["riskLevelReason"],
+            "automated proxy invocation"
+        );
     }
 }

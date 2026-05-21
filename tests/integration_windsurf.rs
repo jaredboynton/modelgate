@@ -1,6 +1,6 @@
 use axum::{
     body::{to_bytes, Bytes},
-    http::{HeaderMap, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -194,6 +194,115 @@ async fn windsurf_chat_stream_converts_droid_style_tool_tags_to_tool_calls() {
     assert!(body.contains(r#""name":"Read""#));
     assert!(body.contains(r#""finish_reason":"tool_calls""#));
     assert!(body.contains("data: [DONE]"));
+}
+
+#[tokio::test]
+async fn windsurf_chat_droid_profile_converts_assistant_tool_calls_block_to_tool_calls() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/exa.api_server_pb.ApiServerService/GetChatMessage"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(windsurf_text_frame(
+            r#"ASSISTANT TOOL_CALLS: [{"id":"call_1","type":"function","function":{"name":"Execute","arguments":"{\"command\":\"git status --short\"}"}}]"#,
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let (_temp, state) = windsurf_state(&server);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::USER_AGENT,
+        HeaderValue::from_static("factory-cli/0.130.0"),
+    );
+
+    let response = chat_completions(
+        axum::extract::State(state),
+        headers,
+        Bytes::from(
+            json!({
+                "model": "swe-1.6",
+                "messages": [{ "role": "user", "content": "check status" }],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "Execute",
+                        "parameters": {
+                            "type": "object",
+                            "properties": { "command": { "type": "string" } },
+                            "required": ["command"]
+                        }
+                    }
+                }],
+                "stream": false
+            })
+            .to_string(),
+        ),
+    )
+    .await
+    .unwrap();
+
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.body, usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(body["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(body["choices"][0]["message"]["content"], "");
+    let call = &body["choices"][0]["message"]["tool_calls"][0];
+    assert_eq!(call["function"]["name"], "Execute");
+    let arguments: Value = serde_json::from_str(call["function"]["arguments"].as_str().unwrap())
+        .expect("tool arguments must be JSON");
+    assert_eq!(arguments["command"], "git status --short");
+    assert_eq!(arguments["riskLevel"], "medium");
+    assert_eq!(arguments["riskLevelReason"], "automated proxy invocation");
+    assert!(!body.to_string().contains("ASSISTANT TOOL_CALLS"));
+}
+
+#[tokio::test]
+async fn windsurf_responses_droid_profile_converts_assistant_tool_calls_block_to_function_call() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/exa.api_server_pb.ApiServerService/GetChatMessage"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(windsurf_text_frame(
+            r#"ASSISTANT TOOL_CALLS: [{"id":"call_1","type":"function","function":{"name":"Execute","arguments":"{\"command\":\"git status --short\"}"}}]"#,
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let (_temp, state) = windsurf_state(&server);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::USER_AGENT,
+        HeaderValue::from_static("factory-cli/0.130.0"),
+    );
+
+    let response = execute_responses_request(
+        &state,
+        headers,
+        json!({
+            "model": "swe-1.6",
+            "input": "check status",
+            "tools": [{
+                "type": "function",
+                "name": "Execute",
+                "parameters": {
+                    "type": "object",
+                    "properties": { "command": { "type": "string" } },
+                    "required": ["command"]
+                }
+            }]
+        }),
+        ExecuteResponsesOptions::default(),
+    )
+    .await
+    .unwrap();
+
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.body, usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(body["output"][0]["type"], "function_call");
+    assert_eq!(body["output"][0]["name"], "Execute");
+    let arguments: Value = serde_json::from_str(body["output"][0]["arguments"].as_str().unwrap())
+        .expect("function call arguments must be JSON");
+    assert_eq!(arguments["command"], "git status --short");
+    assert_eq!(arguments["riskLevel"], "medium");
+    assert_eq!(arguments["riskLevelReason"], "automated proxy invocation");
+    assert!(!body.to_string().contains("ASSISTANT TOOL_CALLS"));
 }
 
 #[tokio::test]
