@@ -1,3 +1,5 @@
+mod build_info;
+
 pub mod adapter;
 pub mod amp_compat;
 pub mod auth;

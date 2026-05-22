@@ -62,7 +62,7 @@ impl ResponsesSseParser {
         let event = std::str::from_utf8(event)
             .map_err(|error| AppError::Upstream(format!("invalid Responses SSE UTF-8: {error}")))?;
         let mut event_name = None;
-        let mut data_lines = Vec::new();
+        let mut data = String::new();
 
         for raw_line in event.lines() {
             let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
@@ -75,16 +75,20 @@ impl ResponsesSseParser {
             let value = raw_value.strip_prefix(' ').unwrap_or(raw_value);
             match field {
                 "event" => event_name = Some(value.to_string()),
-                "data" => data_lines.push(value.to_string()),
+                "data" => {
+                    if !data.is_empty() {
+                        data.push('\n');
+                    }
+                    data.push_str(value);
+                }
                 _ => {}
             }
         }
 
-        if data_lines.is_empty() {
+        if data.is_empty() {
             return Ok(None);
         }
 
-        let data = data_lines.join("\n");
         if data == "[DONE]" {
             if self.saw_completed {
                 return Ok(None);

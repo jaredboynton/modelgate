@@ -24,4 +24,16 @@ if [ "${FULL_PRECOMMIT:-0}" = "1" ]; then
   scripts/gc/run-all.sh
 fi
 
+runtime_staged_changes=$(
+  git diff --cached --name-only --diff-filter=ACMR |
+    grep -E '^(src/|Cargo\.toml$|Cargo\.lock$|build\.rs$|launchd/)' || true
+)
+
+if [ -n "$runtime_staged_changes" ]; then
+  echo "pre-commit: runtime-affecting staged changes detected; rebuilding and reloading launchd"
+  scripts/install-launchd-release.sh
+else
+  echo "pre-commit: no runtime-affecting staged changes; skipping release build/install/reload"
+fi
+
 echo "pre-commit: ok"

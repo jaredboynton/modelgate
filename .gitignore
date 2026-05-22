@@ -1,5 +1,6 @@
 # Rust build output
 /target/
+/bin/
 **/*.rs.bk
 
 # Local environment and credentials

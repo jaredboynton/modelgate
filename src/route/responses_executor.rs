@@ -174,8 +174,10 @@ async fn execute_cursor_responses(
             &request.tool_results,
         )?;
     }
-    // Check credentials first (fast path on cache hit, fails closed before expensive workspace work).
-    crate::upstream::cursor::ensure_credentials(state).await?;
+    // Check credentials once (fast path on cache hit, fails closed before workspace work)
+    // and pass the result into the run engine so the stream hot path does not
+    // re-enter the credential cache.
+    let credentials = crate::upstream::cursor::cursor_credentials(state).await?;
     crate::upstream::cursor::workspace::attach_to_request(&mut request, headers).await;
     validate_cursor_tool_results(
         state,
@@ -185,7 +187,7 @@ async fn execute_cursor_responses(
     let client_profile = request.client_profile;
 
     if stream {
-        let events = upstream::cursor::run::run(state, request).await;
+        let events = upstream::cursor::run::run_with_credentials(state, request, credentials).await;
         let state_for_stream = state.clone();
         let plan_for_stream = plan.clone();
         let value_for_stream = value.clone();
@@ -196,8 +198,11 @@ async fn execute_cursor_responses(
             &plan.requested_model,
             stream_response_id.clone(),
         );
+        let initial = cursor_responses::emit_initial_response_created(&mut ctx)
+            .map(|frame| Bytes::from(frame.to_wire()))
+            .unwrap_or_default();
         let mut finalized = false;
-        let stream = events
+        let content_stream = events
             .map(move |mut event| {
                 if let crate::cursor_agent::CursorAgentEvent::Done { response_id, .. } = &mut event
                 {
@@ -229,6 +234,8 @@ async fn execute_cursor_responses(
                     other => Some(other),
                 }
             });
+        let stream =
+            stream::once(async move { Ok::<Bytes, AppError>(initial) }).chain(content_stream);
         let mut headers = HeaderMap::new();
         headers.insert(
             header::CONTENT_TYPE,
@@ -242,7 +249,7 @@ async fn execute_cursor_responses(
         ));
     }
 
-    let events: Vec<_> = upstream::cursor::run::run(state, request)
+    let events: Vec<_> = upstream::cursor::run::run_with_credentials(state, request, credentials)
         .await
         .collect()
         .await;
@@ -698,7 +705,7 @@ fn cursor_continuation_key_for_request(
         previous_response_id,
         conversation_id,
     );
-    if state.cursor_sessions.lookup_continuation(&key).is_none() {
+    if !state.cursor_sessions.contains_continuation(&key) {
         return Err(AppError::BadRequestCode {
             code: "unknown_previous_response_id",
             message: "unknown Cursor continuation state".into(),

@@ -268,6 +268,39 @@ impl CursorSessionStore {
         Some(cloned)
     }
 
+    /// Validate that a continuation exists without cloning the full state.
+    pub fn contains_continuation(&self, key: &CursorContinuationKey) -> bool {
+        let hash = continuation_hash(key);
+        let expected_stable = stable_field_hash(key);
+        let mut guard = self.write();
+        let Some(entry) = guard.map.get_mut(&hash) else {
+            return false;
+        };
+        if !entry_matches(entry, key, &expected_stable) {
+            return false;
+        }
+        entry.last_access = Instant::now();
+        guard.touch(&hash);
+        true
+    }
+
+    /// Return only the pending tool calls needed by the run engine's hot path.
+    pub fn pending_tool_calls_for(&self, key: &CursorContinuationKey) -> Vec<CursorToolCall> {
+        let hash = continuation_hash(key);
+        let expected_stable = stable_field_hash(key);
+        let mut guard = self.write();
+        let Some(entry) = guard.map.get_mut(&hash) else {
+            return Vec::new();
+        };
+        if !entry_matches(entry, key, &expected_stable) {
+            return Vec::new();
+        }
+        entry.last_access = Instant::now();
+        let pending = entry.pending_tool_calls.clone();
+        guard.touch(&hash);
+        pending
+    }
+
     /// Remove a pending tool call, returning it once and only once. Returns
     /// `None` if the call_id is missing, already consumed, the continuation
     /// key no longer matches, OR the entry has been evicted by LRU/TTL

@@ -56,6 +56,29 @@ fn responses_adapter_emits_response_failed_for_provider_error_after_started() {
 }
 
 #[test]
+fn responses_adapter_initial_prelude_is_single_response_created() {
+    let mut ctx = ResponseContext::new("composer-2", "resp_test");
+
+    let frame = cursor_responses::emit_initial_response_created(&mut ctx)
+        .expect("fresh context emits prelude");
+
+    assert_eq!(frame.event, "response.created");
+    assert!(ctx.started);
+    assert!(cursor_responses::emit_initial_response_created(&mut ctx).is_none());
+    let frames = cursor_responses::emit_event(
+        &CursorAgentEvent::TextDelta {
+            delta: "hello".into(),
+            content_index: 0,
+        },
+        &mut ctx,
+    );
+    assert!(
+        frames.iter().all(|frame| frame.event != "response.created"),
+        "prelude suppresses duplicate response.created: {frames:?}"
+    );
+}
+
+#[test]
 fn responses_adapter_emits_error_for_provider_error_before_started() {
     let mut ctx = ResponseContext::new("composer-2", "resp_test");
     assert!(!ctx.started);

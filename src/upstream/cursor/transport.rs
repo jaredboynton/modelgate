@@ -18,8 +18,11 @@
 //! The transport intentionally does not import `hyper`; the ADR pins the
 //! direct `h2::client::handshake` path.
 
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use bytes::Bytes;
 use h2::client::SendRequest;
@@ -83,6 +86,35 @@ pub type TransportResult<T> = Result<T, TransportError>;
 
 static TLS_CONNECTOR: OnceLock<TlsConnector> = OnceLock::new();
 
+struct PooledH2Connection {
+    sender: SendRequest<Bytes>,
+    _connection_handle: ConnectionGuard,
+}
+
+fn h2_pool() -> &'static Mutex<HashMap<&'static str, PooledH2Connection>> {
+    static CELL: OnceLock<Mutex<HashMap<&'static str, PooledH2Connection>>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub async fn pooled_send_request_for_host(
+    host: &'static str,
+) -> TransportResult<SendRequest<Bytes>> {
+    let mut pool = h2_pool().lock().await;
+    if let Some(connection) = pool.get(host) {
+        return Ok(connection.sender.clone());
+    }
+    let (sender, connection_handle) = connect_h2_host(host).await?;
+    let pooled_sender = sender.clone();
+    pool.insert(
+        host,
+        PooledH2Connection {
+            sender,
+            _connection_handle: connection_handle,
+        },
+    );
+    Ok(pooled_sender)
+}
+
 /// Build the rustls `TlsConnector` used for every Cursor request. ALPN is
 /// pinned to `h2` so a server fallback to HTTP/1.1 fails the handshake
 /// instead of silently switching protocols.
@@ -128,8 +160,9 @@ pub struct RunStream {
     /// Active stream send handle returned by `send_request`. Wrapped so the
     /// heartbeat task and the public `send_frame` API can both write.
     stream_send: Arc<Mutex<h2::SendStream<Bytes>>>,
-    /// h2 connection driver. Dropping it aborts the background connection.
-    _connection_handle: ConnectionGuard,
+    /// h2 connection driver for non-pooled streams. Pooled streams keep the
+    /// connection guard in the process-global h2 pool.
+    _connection_handle: Option<ConnectionGuard>,
     /// Cursor request id reflected from the response trailer / the outbound
     /// `x-request-id` header. Surfaced on `ConnectError`.
     request_id: String,
@@ -190,7 +223,7 @@ impl RunStream {
 /// (or call `close`) so the reader/heartbeat tasks shut down cleanly.
 pub async fn open_streaming_run(token: &str, request_body: Vec<u8>) -> TransportResult<RunStream> {
     let request_id = uuid::Uuid::new_v4().to_string();
-    let (mut send_request, connection_handle) = connect_h2().await?;
+    let mut send_request = pooled_send_request_for_host(CURSOR_API_HOST).await?;
 
     let request = Request::builder()
         .method("POST")
@@ -267,7 +300,7 @@ pub async fn open_streaming_run(token: &str, request_body: Vec<u8>) -> Transport
     Ok(RunStream {
         rx: frame_rx,
         stream_send,
-        _connection_handle: connection_handle,
+        _connection_handle: None,
         request_id,
         reader_handle,
         heartbeat_handle,
@@ -288,11 +321,13 @@ impl Drop for ConnectionGuard {
     }
 }
 
-async fn connect_h2() -> TransportResult<(SendRequest<Bytes>, ConnectionGuard)> {
+async fn connect_h2_host(
+    host: &'static str,
+) -> TransportResult<(SendRequest<Bytes>, ConnectionGuard)> {
     timeout(CONNECT_DEADLINE, async {
-        let tcp = TcpStream::connect((CURSOR_API_HOST, 443)).await?;
+        let tcp = TcpStream::connect((host, 443)).await?;
         let connector = tls_connector()?;
-        let server_name = ServerName::try_from(CURSOR_API_HOST)
+        let server_name = ServerName::try_from(host)
             .map_err(|err| TransportError::Tls(format!("invalid cursor server name: {err}")))?;
         let tls = connector
             .connect(server_name, tcp)
@@ -404,7 +439,7 @@ fn parse_grpc_trailers(payload: &[u8]) -> Option<ConnectError> {
 /// ADR's dual-shape contract.
 pub async fn unary_get_usable_models(token: &str) -> TransportResult<Vec<u8>> {
     let request_id = uuid::Uuid::new_v4().to_string();
-    let (mut send_request, _connection_handle) = connect_h2().await?;
+    let mut send_request = pooled_send_request_for_host(CURSOR_API_HOST).await?;
 
     let request = Request::builder()
         .method("POST")

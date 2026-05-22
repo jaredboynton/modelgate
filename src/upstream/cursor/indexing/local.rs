@@ -9,7 +9,12 @@
 //! `"found no matching files"`. The context-injection layer greps for that
 //! exact substring to suppress empty injections (`context-injection.ts:198`).
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock},
+    time::{Duration, Instant},
+};
 
 use tokio::fs;
 use tokio::task;
@@ -30,6 +35,8 @@ pub const MAX_RECORDS: usize = 500;
 
 /// Per-file size cap. Matches TS `readRecords` (`size <= 256_000`).
 pub const MAX_FILE_BYTES: u64 = 256_000;
+
+const RECORD_CACHE_TTL: Duration = Duration::from_secs(30);
 
 /// Default text extensions walked. Mirrors TS `TEXT_EXTENSIONS`.
 pub const TEXT_EXTENSIONS: &[&str] = &[
@@ -72,6 +79,17 @@ struct FileRecord {
     text: String,
 }
 
+#[derive(Clone)]
+struct RecordCacheEntry {
+    fetched_at: Instant,
+    records: Arc<Vec<FileRecord>>,
+}
+
+fn record_cache() -> &'static Mutex<HashMap<PathBuf, RecordCacheEntry>> {
+    static CELL: OnceLock<Mutex<HashMap<PathBuf, RecordCacheEntry>>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Run a bounded local search rooted at `workspace`. Errors during the walk
 /// silently collapse to fewer results; this function never returns an
 /// error. The allowlist gate is enforced before any filesystem read; an
@@ -85,13 +103,52 @@ pub async fn local_search(workspace: &Path, query: &str, allowlist: &[PathBuf]) 
     if tokens.is_empty() {
         return Vec::new();
     }
-    let records =
-        match task::spawn_blocking(move || read_records_blocking(&canonical, MAX_RECORDS)).await {
-            Ok(records) => records,
-            Err(_) => return Vec::new(),
-        };
+    let records = cached_records(canonical).await;
     let _ = fs::metadata(workspace).await; // touch to stay tokio-aware
     rank_and_render(&records, &tokens, DEFAULT_MAX_HITS)
+}
+
+async fn cached_records(canonical: PathBuf) -> Arc<Vec<FileRecord>> {
+    if let Some(records) = lookup_record_cache(&canonical) {
+        return records;
+    }
+    let cache_key = canonical.clone();
+    let records =
+        match task::spawn_blocking(move || read_records_blocking(&canonical, MAX_RECORDS)).await {
+            Ok(records) => Arc::new(records),
+            Err(_) => Arc::new(Vec::new()),
+        };
+    store_record_cache(cache_key, Arc::clone(&records));
+    records
+}
+
+fn lookup_record_cache(canonical: &Path) -> Option<Arc<Vec<FileRecord>>> {
+    let mut guard = record_cache().lock().ok()?;
+    if let Some(entry) = guard.get(canonical) {
+        if entry.fetched_at.elapsed() < RECORD_CACHE_TTL {
+            return Some(Arc::clone(&entry.records));
+        }
+    }
+    guard.remove(canonical);
+    None
+}
+
+fn store_record_cache(canonical: PathBuf, records: Arc<Vec<FileRecord>>) {
+    if let Ok(mut guard) = record_cache().lock() {
+        guard.insert(
+            canonical,
+            RecordCacheEntry {
+                fetched_at: Instant::now(),
+                records,
+            },
+        );
+        if guard.len() > 32 {
+            guard.retain(|_, entry| entry.fetched_at.elapsed() < RECORD_CACHE_TTL);
+        }
+        if guard.len() > 32 {
+            guard.clear();
+        }
+    }
 }
 
 /// Render the body of a search response. When `hits` is empty the function

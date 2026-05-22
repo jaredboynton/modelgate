@@ -45,6 +45,12 @@ pub async fn ensure_credentials(state: &crate::AppState) -> crate::AppResult<()>
         .map(|_| ())
 }
 
+pub async fn cursor_credentials(
+    state: &crate::AppState,
+) -> crate::AppResult<crate::auth::cursor::CursorCredentials> {
+    crate::auth::cursor::cached_cursor_credentials(state).await
+}
+
 pub async fn fetch_usable_models_for_state(
     state: &crate::AppState,
 ) -> crate::AppResult<std::sync::Arc<Vec<models::ModelDescriptor>>> {

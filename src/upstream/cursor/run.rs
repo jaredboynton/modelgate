@@ -14,7 +14,10 @@
 //! Returns an `impl Stream<Item = CursorAgentEvent>`. Callers (the public
 //! adapters) translate these neutral events into route-specific SSE.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    pin::Pin,
+};
 
 use bytes::Bytes;
 use futures::{stream, Stream};
@@ -24,7 +27,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    auth::cursor::cached_cursor_credentials,
+    auth::cursor::{cached_cursor_credentials, CursorCredentials},
     cursor_agent::{
         CursorAgentEvent, CursorAgentRequest, CursorClientProfile, CursorContentBlock,
         CursorFinishReason, CursorMessage, CursorToolCall, CursorToolKind, CursorToolResult,
@@ -53,10 +56,7 @@ const EVENT_CHANNEL_CAPACITY: usize = 64;
 /// `CursorAgentEvent::ProviderError` (transport, decode, or end-stream
 /// failure). Dropping the stream cancels the upstream task on the next
 /// channel send.
-pub async fn run(
-    state: &AppState,
-    request: CursorAgentRequest,
-) -> impl Stream<Item = CursorAgentEvent> {
+pub async fn run(state: &AppState, request: CursorAgentRequest) -> CursorAgentEventStream {
     let (tx, rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
 
     let credentials = match cached_cursor_credentials(state).await {
@@ -72,6 +72,16 @@ pub async fn run(
             return receiver_into_stream(rx);
         }
     };
+
+    run_with_credentials(state, request, credentials).await
+}
+
+pub async fn run_with_credentials(
+    state: &AppState,
+    request: CursorAgentRequest,
+    credentials: CursorCredentials,
+) -> CursorAgentEventStream {
+    let (tx, rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
 
     let proto_messages = build_proto_messages(&request);
     let message_id = Uuid::new_v4().to_string();
@@ -117,10 +127,7 @@ pub async fn run(
         let response_id = format!("resp_{}", Uuid::new_v4().simple());
         let mut pending_tool_calls: Vec<crate::cursor_agent::CursorToolCall> =
             match continuation_key.as_ref() {
-                Some(key) => cursor_sessions
-                    .lookup_continuation(key)
-                    .map(|state| state.pending_tool_calls)
-                    .unwrap_or_default(),
+                Some(key) => cursor_sessions.pending_tool_calls_for(key),
                 None => Vec::new(),
             };
         let mut finish_reason = CursorFinishReason::Stop;
@@ -554,11 +561,13 @@ fn hex_lower(bytes: &[u8]) -> String {
 
 fn receiver_into_stream<T: Send + 'static>(
     rx: mpsc::Receiver<T>,
-) -> impl Stream<Item = T> + Send + 'static {
-    stream::unfold(rx, |mut rx| async move {
+) -> Pin<Box<dyn Stream<Item = T> + Send + 'static>> {
+    Box::pin(stream::unfold(rx, |mut rx| async move {
         rx.recv().await.map(|item| (item, rx))
-    })
+    }))
 }
+
+pub type CursorAgentEventStream = Pin<Box<dyn Stream<Item = CursorAgentEvent> + Send + 'static>>;
 
 /// Convert neutral `CursorMessage`s into the flat `proto::Message` shape the
 /// AgentRunRequest encoder consumes today. The proto layer renders the full

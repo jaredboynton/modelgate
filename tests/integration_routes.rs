@@ -527,6 +527,13 @@ async fn integration_routes_health_route_reports_ok() {
     let (status, body) = request_json("GET", "/health", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "ok");
+    assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
+    assert!(body["git_revision"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
+    assert!(body["build_time_utc"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
 }
 
 #[tokio::test]

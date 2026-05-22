@@ -165,7 +165,24 @@ pub async fn attach_to_request(request: &mut CursorAgentRequest, headers: &Heade
     let Some(contract) = extract_from_headers(headers).or_else(fallback_from_env) else {
         return;
     };
-    let repo_meta = discover_repo_metadata(&contract.workspace).await;
+    let repo_meta = lookup_workspace_meta(&contract.workspace).unwrap_or_else(|| {
+        let workspace = contract.workspace.clone();
+        tokio::spawn(async move {
+            let _ = discover_repo_metadata(&workspace).await;
+        });
+        RepoMetadata {
+            workspace: contract.workspace.clone(),
+            worktree: contract.workspace.clone(),
+            relative_workspace_path: ".".into(),
+            repo_name: contract
+                .workspace
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned),
+            is_local: true,
+            ..RepoMetadata::default()
+        }
+    });
     request.workspace = Some(CursorWorkspaceContext {
         root: contract.workspace.clone(),
         worktree: contract.worktree.clone(),

@@ -24,7 +24,7 @@ fn process_event_block(block: &str, output_items: &mut Vec<serde_json::Value>) -
         return block.to_string();
     };
 
-    match event.as_str() {
+    match event {
         "response.output_item.done" => {
             if let Some(item) = event_data_json(block).and_then(extract_output_item) {
                 output_items.push(item);
@@ -42,20 +42,25 @@ fn process_event_block(block: &str, output_items: &mut Vec<serde_json::Value>) -
     }
 }
 
-fn event_name(block: &str) -> Option<String> {
-    block.lines().find_map(|line| {
-        line.strip_prefix("event:")
-            .map(str::trim_start)
-            .map(ToOwned::to_owned)
-    })
+fn event_name(block: &str) -> Option<&str> {
+    block
+        .lines()
+        .find_map(|line| line.strip_prefix("event:").map(str::trim_start))
 }
 
 fn event_data_json(block: &str) -> Option<serde_json::Value> {
-    let data = block
-        .lines()
-        .filter_map(|line| line.strip_prefix("data:").map(str::trim_start))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let mut data = String::new();
+    for line in block.lines() {
+        if let Some(value) = line.strip_prefix("data:") {
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(value.trim_start());
+        }
+    }
+    if data.is_empty() {
+        return None;
+    }
     serde_json::from_str(&data).ok()
 }
 

@@ -23,7 +23,7 @@
 	<string>dev.unified-model-proxy-v2</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Users/jaredboynton/__devlocal/unified-model-proxy-v2/target/release/unified-model-proxy-v2</string>
+		<string>/Users/jaredboynton/__devlocal/unified-model-proxy-v2/bin/unified-model-proxy-v2</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>

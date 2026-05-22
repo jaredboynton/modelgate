@@ -16,6 +16,13 @@ async fn live_health_route_reports_ok() {
     assert_eq!(response.status(), StatusCode::OK);
     let body: Value = response.json().await.expect("parse health response");
     assert_eq!(body["status"], "ok");
+    assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
+    assert!(body["git_revision"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
+    assert!(body["build_time_utc"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
 }
 
 #[tokio::test]

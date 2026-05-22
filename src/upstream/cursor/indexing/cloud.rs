@@ -14,19 +14,15 @@
 //! `EnsureResult::Failed`; the caller treats indexing as best-effort and
 //! never propagates indexing errors into normal chat.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use h2::client::SendRequest;
 use http::{Request, StatusCode};
-use rustls::pki_types::ServerName;
 use sha2::{Digest, Sha256};
-use tokio::net::TcpStream;
-use tokio::task::JoinHandle;
 use tokio::time::timeout;
-use tokio_rustls::TlsConnector;
 
 use crate::upstream::cursor::indexing::wire::{
     codebase_status, decode_fast_repo_init_handshake_v2_response,
@@ -37,7 +33,7 @@ use crate::upstream::cursor::indexing::wire::{
     strip_connect_unary_body, CodeResult, MetadataSource, RepositoryContext,
     RepositoryIndexMetadata, SyncCodebaseStatus, UploadFile, FAST_UPDATE_STATUS_SUCCESS,
 };
-use crate::upstream::cursor::transport::{tls_connector, TransportError};
+use crate::upstream::cursor::transport::{pooled_send_request_for_host, TransportError};
 use crate::upstream::cursor::workspace::{is_within_directory, RepoMetadata};
 use crate::upstream::cursor::{cursor_client_version, CURSOR_REPO_HOST};
 
@@ -65,6 +61,8 @@ pub const DEFAULT_TOP_K: i32 = 10;
 pub const DEFAULT_UPLOAD_MAX_FILES: usize = 300;
 pub const DEFAULT_UPLOAD_MAX_FILE_BYTES: u64 = 256_000;
 pub const DEFAULT_UPLOAD_MAX_BATCH_BYTES: usize = 900_000;
+
+const SEARCH_CACHE_TTL: Duration = Duration::from_secs(30);
 
 // Sensitive-filename allowlist (deny). Aligned with TS `SENSITIVE_FILENAMES`.
 const SENSITIVE_FILENAMES: &[&str] = &[
@@ -151,6 +149,17 @@ pub struct SearchResults {
     pub outcome: SearchOutcome,
     pub result_count: usize,
     pub diagnostic: CloudDiagnostic,
+}
+
+#[derive(Clone)]
+struct SearchCacheEntry {
+    fetched_at: Instant,
+    results: SearchResults,
+}
+
+fn search_cache() -> &'static Mutex<HashMap<String, SearchCacheEntry>> {
+    static CELL: OnceLock<Mutex<HashMap<String, SearchCacheEntry>>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 #[derive(Debug, Clone)]
@@ -240,6 +249,10 @@ pub async fn search_repository_v2(
     metadata: &RepositoryIndexMetadata,
     config: &CloudConfig,
 ) -> SearchResults {
+    let cache_key = search_cache_key(token, query, context, metadata, config);
+    if let Some(results) = lookup_search_cache(&cache_key) {
+        return results;
+    }
     let body = encode_search_repository_request(query, context, metadata, config.top_k);
     let started = Instant::now();
     let response = unary_call(
@@ -251,10 +264,65 @@ pub async fn search_repository_v2(
     )
     .await;
     let elapsed_ms = started.elapsed().as_millis();
-    match response {
+    let results = match response {
         Ok(payload) => decode_search_payload(payload, metadata, elapsed_ms),
         Err(err) => map_transport_error(err, elapsed_ms),
+    };
+    store_search_cache(cache_key, results.clone());
+    results
+}
+
+fn lookup_search_cache(key: &str) -> Option<SearchResults> {
+    let mut guard = search_cache().lock().ok()?;
+    if let Some(entry) = guard.get(key) {
+        if entry.fetched_at.elapsed() < SEARCH_CACHE_TTL {
+            return Some(entry.results.clone());
+        }
     }
+    guard.remove(key);
+    None
+}
+
+fn store_search_cache(key: String, results: SearchResults) {
+    if let Ok(mut guard) = search_cache().lock() {
+        guard.insert(
+            key,
+            SearchCacheEntry {
+                fetched_at: Instant::now(),
+                results,
+            },
+        );
+        if guard.len() > 128 {
+            guard.retain(|_, entry| entry.fetched_at.elapsed() < SEARCH_CACHE_TTL);
+        }
+        if guard.len() > 128 {
+            guard.clear();
+        }
+    }
+}
+
+fn search_cache_key(
+    token: &str,
+    query: &str,
+    context: &RepositoryContext,
+    metadata: &RepositoryIndexMetadata,
+    config: &CloudConfig,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(query.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(metadata.workspace_uri.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(metadata.path_encryption_key.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(context.repo_name.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(context.repo_owner.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(config.top_k.to_le_bytes());
+    hex_lower(&hasher.finalize())
 }
 
 fn decode_search_payload(
@@ -961,7 +1029,7 @@ async fn unary_call(
     config: &CloudConfig,
 ) -> Result<Vec<u8>, TransportError> {
     let request_id = uuid::Uuid::new_v4().to_string();
-    let (mut send_request, _guard) = connect_h2(CURSOR_REPO_HOST).await?;
+    let mut send_request = pooled_send_request_for_host(CURSOR_REPO_HOST).await?;
     let mut request_builder = Request::builder()
         .method("POST")
         .uri(format!("https://{CURSOR_REPO_HOST}{path}"))
@@ -1050,41 +1118,6 @@ fn platform_arch() -> String {
 
 fn os_release() -> String {
     std::env::var("UMP_CURSOR_INDEX_OS_VERSION").unwrap_or_else(|_| "0".into())
-}
-
-struct ConnectionGuard {
-    handle: JoinHandle<()>,
-}
-
-impl Drop for ConnectionGuard {
-    fn drop(&mut self) {
-        self.handle.abort();
-    }
-}
-
-async fn connect_h2(host: &str) -> Result<(SendRequest<Bytes>, ConnectionGuard), TransportError> {
-    let connect_deadline = Duration::from_secs(30);
-    timeout(connect_deadline, async {
-        let tcp = TcpStream::connect((host, 443)).await?;
-        let connector: TlsConnector = tls_connector()?;
-        let server_name = ServerName::try_from(host.to_string())
-            .map_err(|err| TransportError::Tls(format!("invalid repo server name: {err}")))?;
-        let tls = connector
-            .connect(server_name, tcp)
-            .await
-            .map_err(|err| TransportError::Tls(format!("repo TLS connect failed: {err}")))?;
-        let (client, connection) = h2::client::handshake(tls)
-            .await
-            .map_err(|err| TransportError::H2(format!("repo h2 handshake failed: {err}")))?;
-        let handle = tokio::spawn(async move {
-            if let Err(err) = connection.await {
-                tracing::debug!(?err, "repo h2 connection ended");
-            }
-        });
-        Ok::<_, TransportError>((client, ConnectionGuard { handle }))
-    })
-    .await
-    .map_err(|_| TransportError::ConnectTimeout)?
 }
 
 // ---------------------------------------------------------------------------

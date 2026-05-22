@@ -35,6 +35,15 @@ Nextest filter expressions are more precise than positional name matches:
 - SSE behavior: `cargo nextest run -E 'test(unit_sse) + test(integration_responses_sse)'`
 - WebSocket behavior: `cargo nextest run -E 'test(integration_websocket_facade) + test(integration_websocket_passthrough)'`
 
+For launchd-managed local runtime changes, verify the installed binary and live
+listener after the Rust checks:
+
+```sh
+launchctl print gui/$(id -u)/dev.unified-model-proxy-v2
+curl -fsS http://127.0.0.1:18743/health
+lsof -nP -iTCP:18743 -sTCP:LISTEN
+```
+
 ## Provider-aware compaction safety rail
 
 Until UMP implements provider-aware compaction, mixed-provider Codex profiles use

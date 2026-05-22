@@ -121,10 +121,24 @@ pub async fn search(
         let context = cloud::build_repository_context(&repo_meta);
         let config = cloud::CloudConfig::default();
         if bootstrap_enabled_env() {
-            let _ = cloud::bootstrap_cloud_index(
-                token, workspace, allowlist, &context, &metadata, false, &config,
-            )
-            .await;
+            let token = token.to_string();
+            let workspace = workspace.to_path_buf();
+            let allowlist = allowlist.to_vec();
+            let context_for_bootstrap = context.clone();
+            let metadata_for_bootstrap = metadata.clone();
+            let config_for_bootstrap = config.clone();
+            tokio::spawn(async move {
+                let _ = cloud::bootstrap_cloud_index(
+                    &token,
+                    &workspace,
+                    &allowlist,
+                    &context_for_bootstrap,
+                    &metadata_for_bootstrap,
+                    false,
+                    &config_for_bootstrap,
+                )
+                .await;
+            });
         }
         let results = cloud::search_repository_v2(token, query, &context, &metadata, &config).await;
         if results.outcome == cloud::SearchOutcome::Ok && !results.body.trim().is_empty() {

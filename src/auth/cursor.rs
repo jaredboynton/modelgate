@@ -89,8 +89,10 @@ pub async fn resolve_cursor_credentials(state: &AppState) -> AppResult<CursorCre
 }
 
 pub async fn cached_cursor_credentials(state: &AppState) -> AppResult<CursorCredentials> {
-    let mut cached = state.cursor_auth.lock().await;
-    if let Some(creds) = cached
+    if let Some(creds) = state
+        .cursor_auth
+        .lock()
+        .await
         .as_ref()
         .filter(|creds| !should_refresh(creds, SystemTime::now()))
         .cloned()
@@ -106,6 +108,14 @@ pub async fn cached_cursor_credentials(state: &AppState) -> AppResult<CursorCred
                 tracing::debug!(error = %err, "cursor credential refresh failed; using resolved credentials")
             }
         }
+    }
+    let mut cached = state.cursor_auth.lock().await;
+    if let Some(existing) = cached
+        .as_ref()
+        .filter(|existing| !should_refresh(existing, SystemTime::now()))
+        .cloned()
+    {
+        return Ok(existing);
     }
     *cached = Some(creds.clone());
     Ok(creds)

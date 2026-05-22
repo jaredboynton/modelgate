@@ -157,6 +157,17 @@ pub fn emit_event(event: &CursorAgentEvent, ctx: &mut ResponseContext) -> Vec<Re
     out
 }
 
+/// Emit the initial Responses stream prelude before the upstream Cursor stream
+/// produces its first semantic event. Returns `None` if the context has
+/// already started, preventing duplicate `response.created` frames.
+pub fn emit_initial_response_created(ctx: &mut ResponseContext) -> Option<ResponsesSseEvent> {
+    if ctx.started {
+        return None;
+    }
+    ctx.started = true;
+    Some(response_created(ctx))
+}
+
 /// Collect a complete Responses object from a finished event stream.
 ///
 /// Equivalent to the existing `anthropic_message_to_responses_json_with_context`

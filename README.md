@@ -26,7 +26,7 @@ secret or best-effort provider.
   and `/api/provider/google/*`.
 - Gemini GenerateContent compatibility paths: `/v1beta/models/*`, `/v1/models/*`,
   `/v1/projects/*`, and `/v1beta1/projects/*`.
-- Local admin/config: `/health`, `/config`, `/api/config`, and `/api/config/graph`.
+- Local admin/config: `/health` (status + build metadata), `/config`, `/api/config`, and `/api/config/graph`.
 - Amp compatibility: internal probes, telemetry, attachment storage, thread
   lookup/markdown, RSS, GitHub/Bitbucket helper stubs, and audio/realtime/image
   compatibility stubs where implemented.
@@ -371,13 +371,12 @@ as authoritative.
 ## launchd
 
 The development plist is `launchd/dev.unified-model-proxy-v2.plist`. It points at
-the release binary in this checkout and sets non-secret Bedrock region defaults:
+the repo-local installed binary at `bin/unified-model-proxy-v2` and sets
+non-secret Bedrock region defaults:
 `AWS_REGION=eu-west-1` and `AWS_DEFAULT_REGION=eu-west-1`. Build first:
 
 ```sh
-cargo build --release
-launchctl bootstrap gui/$(id -u) "$PWD/launchd/dev.unified-model-proxy-v2.plist"
-launchctl kickstart -k gui/$(id -u)/dev.unified-model-proxy-v2
+scripts/install-launchd-release.sh
 ```
 
 For the installed user LaunchAgent, copy the plist to
@@ -401,7 +400,12 @@ Troubleshooting:
 ```sh
 lsof -nP -iTCP:18743 -sTCP:LISTEN
 tail -f ~/Library/Logs/unified-model-proxy-v2.log
+launchctl print gui/$(id -u)/dev.unified-model-proxy-v2
 ```
 
 For active development, prefer `cargo run`; launchd is for exercising the same
 binary shape local agent clients use.
+
+The pre-commit hook automatically runs `scripts/install-launchd-release.sh` for
+staged runtime-affecting changes in `src/`, `Cargo.toml`, `Cargo.lock`,
+`build.rs`, or `launchd/`. Docs-only commits skip the rebuild/reload path.
