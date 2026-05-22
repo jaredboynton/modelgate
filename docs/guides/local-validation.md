@@ -36,7 +36,7 @@ Nextest filter expressions are more precise than positional name matches:
 - WebSocket behavior: `cargo nextest run -E 'test(integration_websocket_facade) + test(integration_websocket_passthrough)'`
 
 For launchd-managed local runtime changes, verify the installed binary and live
-listener after the Rust checks:
+listener after the Rust checks or after the `post-commit` hook runs:
 
 ```sh
 launchctl print gui/$(id -u)/dev.unified-model-proxy-v2

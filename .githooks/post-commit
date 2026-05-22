@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+runtime_commit_changes=$(
+  git diff-tree --no-commit-id --root --name-only -r HEAD |
+    grep -E '^(src/|Cargo\.toml$|Cargo\.lock$|build\.rs$|launchd/)' || true
+)
+
+if [ -z "$runtime_commit_changes" ]; then
+  echo "post-commit: no runtime-affecting committed changes; skipping launchd refresh"
+  exit 0
+fi
+
+echo "post-commit: runtime-affecting committed changes detected; rebuilding and reloading launchd"
+scripts/install-launchd-release.sh

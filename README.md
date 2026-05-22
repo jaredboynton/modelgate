@@ -406,6 +406,6 @@ launchctl print gui/$(id -u)/dev.unified-model-proxy-v2
 For active development, prefer `cargo run`; launchd is for exercising the same
 binary shape local agent clients use.
 
-The pre-commit hook automatically runs `scripts/install-launchd-release.sh` for
-staged runtime-affecting changes in `src/`, `Cargo.toml`, `Cargo.lock`,
-`build.rs`, or `launchd/`. Docs-only commits skip the rebuild/reload path.
+The `post-commit` hook automatically runs `scripts/install-launchd-release.sh`
+after commits that touch `src/`, `Cargo.toml`, `Cargo.lock`, `build.rs`, or
+`launchd/`. `pre-commit` stays lightweight and only runs the validation checks.
