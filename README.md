@@ -214,18 +214,19 @@ Common environment variables:
 - `UMP_V2_CODEX_TRANSPORT`, one of `wss`, `http`, `wss-then-http`; default `wss-then-http`
 - `UMP_V2_CODEX_RESPONSES_WSS_URL`, default `wss://chatgpt.com/backend-api/codex/responses`
 - `UMP_V2_CODEX_RESPONSES_HTTP_URL`, default `https://chatgpt.com/backend-api/codex/responses`
+- `UMP_V2_CODEX_MODELS_URL`, default `https://chatgpt.com/backend-api/codex/models`
 - `UMP_V2_CODEX_WSS_CONNECT_TIMEOUT_MS`, default `5000`
 - `UMP_V2_CODEX_MAX_CONCURRENT`, default `20`
 - `UMP_V2_CODEX_HANDSHAKES_PER_MIN`, default `55`
 - `UMP_V2_CODEX_CLIENT_VERSION`, default from `src/codex_catalog.rs`
-- `UMP_V2_CODEX_CATALOG_TTL_SECS`, default `600`
+- `UMP_V2_CODEX_CATALOG_TTL_SECS`, default `3600`; refreshed at startup and in the background
 - `AWS_REGION` / `AWS_DEFAULT_REGION`, default `us-west-2` for Bedrock Runtime
 - `UMP_V2_GOOGLE_GENERATE_BASE_URL`, default `https://generativelanguage.googleapis.com`
 - `UMP_V2_WINDSURF_CLOUD_BASE_URL`, default `https://server.codeium.com`
 - `UMP_V2_BEDROCK_DISCOVERY_TIMEOUT_MS`, default `5000`
 - `UMP_V2_CODEX_HOME`, default `~/.codex`
 - `UMP_V2_AUTH_HOME`, default `~/.ump`
-- `UMP_V2_CONFIG`, default `~/.ump/config.json`; re-read on each request
+- `UMP_V2_CONFIG`, default `~/.ump/config.json`; metadata-checked and parsed on change
 - Cursor knobs: `CURSOR_ACCESS_TOKEN`, `CURSOR_REFRESH_URL`,
   `CURSOR_CLIENT_VERSION`, `UMP_CURSOR_CLIENT_PROFILE_OVERRIDE`,
   `UMP_CURSOR_TRUST_CLIENT_HEADERS`, `UMP_CURSOR_WORKSPACE_DIR`,

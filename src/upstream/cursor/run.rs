@@ -59,7 +59,7 @@ pub async fn run(
 ) -> impl Stream<Item = CursorAgentEvent> {
     let (tx, rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
 
-    let credentials = match resolve_cursor_credentials(state.auth_home.as_path()).await {
+    let credentials = match resolve_cursor_credentials(state).await {
         Ok(creds) => creds,
         Err(err) => {
             let _ = tx

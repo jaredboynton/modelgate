@@ -4,28 +4,28 @@ use crate::{auth::read_json_string, AppError, AppResult, AppState};
 
 pub fn api_key(state: &AppState) -> AppResult<String> {
     let auth_json = state.auth_home.join("auth.json");
-    if let Some(key) = read_json_string(&auth_json, &["windsurf", "api_key"])? {
+    if let Some(key) = read_json_string(state, &auth_json, &["windsurf", "api_key"])? {
         return Ok(key);
     }
-    if let Some(key) = read_json_string(&auth_json, &["windsurf", "apiKey"])? {
+    if let Some(key) = read_json_string(state, &auth_json, &["windsurf", "apiKey"])? {
         return Ok(key);
     }
 
     let auth_home_legacy = state.auth_home.join("windsurf/auth.json");
-    if let Some(key) = read_json_string(&auth_home_legacy, &["apiKey"])? {
+    if let Some(key) = read_json_string(state, &auth_home_legacy, &["apiKey"])? {
         return Ok(key);
     }
-    if let Some(key) = read_json_string(&auth_home_legacy, &["api_key"])? {
+    if let Some(key) = read_json_string(state, &auth_home_legacy, &["api_key"])? {
         return Ok(key);
     }
 
     if state.auth_home.file_name().and_then(|value| value.to_str()) == Some(".ump") {
         if let Some(home) = state.auth_home.parent() {
             let legacy = home.join(".windsurf/auth.json");
-            if let Some(key) = read_json_string(&legacy, &["apiKey"])? {
+            if let Some(key) = read_json_string(state, &legacy, &["apiKey"])? {
                 return Ok(key);
             }
-            if let Some(key) = read_json_string(&legacy, &["api_key"])? {
+            if let Some(key) = read_json_string(state, &legacy, &["api_key"])? {
                 return Ok(key);
             }
         }

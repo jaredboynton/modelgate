@@ -1,13 +1,20 @@
 use std::{
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
 use unified_model_proxy_v2::{
     codex_catalog::{CodexCatalogCache, CodexCatalogConfig, DEFAULT_CODEX_CLIENT_VERSION},
-    route::models::{codex_catalog_to_openai_models, codex_models_endpoint},
-    AppError,
+    route::models::{
+        codex_catalog_to_openai_models, codex_models_endpoint, validate_codex_catalog_request,
+    },
+    upstream::codex::spawn_codex_model_catalog_refresher,
+    AppError, AppState,
 };
+use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
 
 fn ids(body: &serde_json::Value) -> Vec<&str> {
     let mut ids = body["data"]
@@ -255,6 +262,121 @@ async fn codex_catalog_cache_reuses_fresh_catalog_without_upstream() {
     assert_eq!(first, second);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert!(second.model("gpt-5.5").is_some());
+}
+
+#[tokio::test]
+async fn codex_catalog_cache_returns_shared_arc_without_deep_clone() {
+    let cache = CodexCatalogCache::new(CodexCatalogConfig {
+        client_version: DEFAULT_CODEX_CLIENT_VERSION.to_string(),
+        ttl: Duration::from_secs(60),
+    });
+    let stored = cache.store_validated(&catalog(&["gpt-5.5"])).unwrap();
+    let first = cache.get_if_fresh().unwrap();
+    let second = cache.get_if_fresh().unwrap();
+
+    assert!(Arc::ptr_eq(&stored, &first));
+    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(Arc::strong_count(&stored), 4);
+}
+
+#[tokio::test]
+async fn codex_catalog_cache_singleflights_concurrent_cold_refreshes() {
+    let cache = CodexCatalogCache::new(CodexCatalogConfig {
+        client_version: DEFAULT_CODEX_CLIENT_VERSION.to_string(),
+        ttl: Duration::from_secs(60),
+    });
+    let calls = Arc::new(AtomicUsize::new(0));
+    let barrier = Arc::new(tokio::sync::Barrier::new(8));
+    let mut handles = Vec::new();
+
+    for _ in 0..8 {
+        let cache = cache.clone();
+        let calls = Arc::clone(&calls);
+        let barrier = Arc::clone(&barrier);
+        handles.push(tokio::spawn(async move {
+            barrier.wait().await;
+            cache
+                .get_or_refresh_with(|_| {
+                    let calls = Arc::clone(&calls);
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(25)).await;
+                        Ok(catalog(&["gpt-5.5"]))
+                    }
+                })
+                .await
+                .unwrap()
+        }));
+    }
+
+    let mut catalogs = Vec::new();
+    for handle in handles {
+        catalogs.push(handle.await.unwrap());
+    }
+
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    for catalog in &catalogs[1..] {
+        assert!(Arc::ptr_eq(&catalogs[0], catalog));
+    }
+}
+
+#[tokio::test]
+async fn codex_request_validation_cold_cache_preserves_auth_gate_without_network_refresh() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = AppState::for_tests(temp.path().join("codex"), temp.path().join("ump"));
+
+    let error = validate_codex_catalog_request(
+        &state,
+        &serde_json::json!({ "model": "gpt-5.5", "input": "hi" }),
+        "gpt-5.5",
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(error, AppError::MissingCredential(_)));
+}
+
+#[tokio::test]
+async fn codex_catalog_background_refresher_populates_cache() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(catalog(&["gpt-5.5"])))
+        .mount(&server)
+        .await;
+
+    let temp = tempfile::tempdir().unwrap();
+    let codex_home = temp.path().join("codex");
+    let auth_home = temp.path().join("ump");
+    std::fs::create_dir_all(&codex_home).unwrap();
+    std::fs::write(
+        codex_home.join("auth.json"),
+        serde_json::json!({ "access_token": "access-token", "account_id": "acct-test" })
+            .to_string(),
+    )
+    .unwrap();
+    let mut state = AppState::for_tests(codex_home, auth_home);
+    state.runtime.codex_models_url = server.uri();
+    state.runtime.codex_catalog_ttl = Duration::from_millis(10);
+
+    let handle = spawn_codex_model_catalog_refresher(state.clone());
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if state
+                .codex_catalog
+                .get_latest()
+                .is_some_and(|catalog| catalog.model("gpt-5.5").is_some())
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("background catalog refresh should populate cache");
+    handle.abort();
+
+    let requests = server.received_requests().await.unwrap();
+    assert!(!requests.is_empty());
 }
 
 #[tokio::test]

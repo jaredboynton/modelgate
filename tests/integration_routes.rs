@@ -508,7 +508,8 @@ fn seed_codex_catalog(state: &AppState, models: &[(&str, &str, bool)]) {
                             { "effort": "xhigh", "description": "XHigh" }
                         ],
                         "service_tiers": [
-                            { "id": "auto", "name": "Auto", "description": "Default" }
+                            { "id": "auto", "name": "Auto", "description": "Default" },
+                            { "id": "priority", "name": "Priority", "description": "Fast lane" }
                         ],
                         "support_verbosity": true,
                         "truncation_policy": { "mode": "tokens", "limit": 12345 },

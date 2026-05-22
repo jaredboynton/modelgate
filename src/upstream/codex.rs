@@ -6,10 +6,11 @@ use futures::{
 };
 use serde_json::{json, Value};
 use specter::Message;
-use std::pin::Pin;
+use std::{pin::Pin, sync::Arc, time::Duration};
 
 use crate::{
     auth::codex::{load_codex_auth, refresh_codex_auth, CODEX_OPENAI_BETA, CODEX_ORIGINATOR},
+    codex_catalog::CodexCatalog,
     model_alias::{self, Provider, ResolvedModel},
     rate_limit,
     sse::{filter::filter_codex_events, splice::splice_completed_event},
@@ -40,6 +41,37 @@ const CODEX_RESPONSES_ALLOWED_FIELDS: &[&str] = &[
 ];
 
 pub type CodexResponseStream = Pin<Box<dyn Stream<Item = AppResult<Bytes>> + Send>>;
+
+pub async fn refresh_codex_model_catalog(state: &AppState) -> AppResult<Arc<CodexCatalog>> {
+    let headers = codex_headers(state)?;
+    state
+        .codex_catalog
+        .refresh_from_endpoint(&state.http, &headers, &state.runtime.codex_models_url)
+        .await
+}
+
+pub async fn warm_codex_model_catalog_with_timeout(state: &AppState, timeout: Duration) {
+    match tokio::time::timeout(timeout, refresh_codex_model_catalog(state)).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(err)) => tracing::warn!(%err, "Codex model catalog startup refresh failed"),
+        Err(_) => tracing::warn!(?timeout, "Codex model catalog startup refresh timed out"),
+    }
+}
+
+pub fn spawn_codex_model_catalog_refresher(state: AppState) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let interval = state
+            .runtime
+            .codex_catalog_ttl
+            .max(Duration::from_millis(1));
+        loop {
+            if let Err(err) = refresh_codex_model_catalog(&state).await {
+                tracing::warn!(%err, "Codex model catalog background refresh failed");
+            }
+            tokio::time::sleep(interval).await;
+        }
+    })
+}
 
 pub fn codex_headers(state: &AppState) -> AppResult<HeaderMap> {
     let auth = load_codex_auth(state)?;
@@ -174,20 +206,21 @@ fn normalize_input(object: &mut serde_json::Map<String, serde_json::Value>) -> A
 }
 
 fn reject_unsupported_input_items(input: Option<&serde_json::Value>) -> AppResult<()> {
-    for item_type in [
-        "input_audio",
-        "input_file",
-        "file",
-        "localImage",
-        "local_image",
-        "image_asset_pointer",
-        "image_asset_pointer_citation",
-    ] {
-        if contains_typed_item(input, item_type) {
-            return Err(AppError::BadRequest(format!(
-                "{item_type} is not supported for Codex responses"
-            )));
-        }
+    if let Some(item_type) = contains_any_typed_item(
+        input,
+        &[
+            "input_audio",
+            "input_file",
+            "file",
+            "localImage",
+            "local_image",
+            "image_asset_pointer",
+            "image_asset_pointer_citation",
+        ],
+    ) {
+        return Err(AppError::BadRequest(format!(
+            "{item_type} is not supported for Codex responses"
+        )));
     }
     if contains_input_image_file_id(input) {
         return Err(AppError::BadRequest(
@@ -198,39 +231,51 @@ fn reject_unsupported_input_items(input: Option<&serde_json::Value>) -> AppResul
 }
 
 fn reject_unsupported_tools(tools: Option<&serde_json::Value>) -> AppResult<()> {
-    for tool_type in [
-        "apply_patch",
-        "file_search",
-        "code_interpreter",
-        "mcp",
-        "shell",
-        "local_shell",
-        "computer",
-    ] {
-        if contains_typed_item(tools, tool_type) {
-            return Err(AppError::BadRequest(format!(
-                "{tool_type} tool is not supported for Codex responses"
-            )));
-        }
+    if let Some(tool_type) = contains_any_typed_item(
+        tools,
+        &[
+            "apply_patch",
+            "file_search",
+            "code_interpreter",
+            "mcp",
+            "shell",
+            "local_shell",
+            "computer",
+        ],
+    ) {
+        return Err(AppError::BadRequest(format!(
+            "{tool_type} tool is not supported for Codex responses"
+        )));
     }
     Ok(())
 }
 
-fn contains_typed_item(value: Option<&serde_json::Value>, item_type: &str) -> bool {
+fn contains_any_typed_item<'a>(
+    value: Option<&serde_json::Value>,
+    item_types: &'a [&'a str],
+) -> Option<&'a str> {
     match value {
         Some(Value::Object(object)) => {
-            object
+            if let Some(found) = object
                 .get("type")
                 .and_then(Value::as_str)
-                .is_some_and(|value| value == item_type)
-                || object
-                    .values()
-                    .any(|value| contains_typed_item(Some(value), item_type))
+                .and_then(|value| {
+                    item_types
+                        .iter()
+                        .copied()
+                        .find(|item_type| value == *item_type)
+                })
+            {
+                return Some(found);
+            }
+            object
+                .values()
+                .find_map(|value| contains_any_typed_item(Some(value), item_types))
         }
         Some(Value::Array(values)) => values
             .iter()
-            .any(|value| contains_typed_item(Some(value), item_type)),
-        _ => false,
+            .find_map(|value| contains_any_typed_item(Some(value), item_types)),
+        _ => None,
     }
 }
 
@@ -302,11 +347,16 @@ where
         return Ok(flat_response_create_event(prepared));
     }
 
-    let object = body
-        .as_object_mut()
-        .ok_or_else(|| AppError::BadRequest("response.create must be an object".into()))?;
+    let mut object = match body {
+        Value::Object(object) => object,
+        _ => {
+            return Err(AppError::BadRequest(
+                "response.create must be an object".into(),
+            ))
+        }
+    };
     object.remove("type");
-    let prepared = prepare_responses_body_with_resolver(Value::Object(object.clone()), resolve)?;
+    let prepared = prepare_responses_body_with_resolver(Value::Object(object), resolve)?;
     Ok(flat_response_create_event(prepared))
 }
 
@@ -316,10 +366,45 @@ fn flat_response_create_event(prepared: serde_json::Value) -> serde_json::Value 
         "type".into(),
         serde_json::Value::String("response.create".into()),
     );
-    if let Some(response) = prepared.as_object() {
-        event.extend(response.clone());
+    if let Value::Object(response) = prepared {
+        event.extend(response);
     }
     serde_json::Value::Object(event)
+}
+
+/// Serialize `body` as the flat `response.create` event without producing
+/// an intermediate `Value` clone. Mirrors [`flat_response_create_event`]
+/// when `body` is already a JSON object: the `"type"` key is emitted
+/// first, followed by every entry of the object.
+fn serialize_flat_response_create_event(body: &Value) -> String {
+    use serde::{
+        ser::{SerializeMap, Serializer},
+        Serialize,
+    };
+
+    struct Wrap<'a>(&'a Value);
+
+    impl<'a> Serialize for Wrap<'a> {
+        fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+            match self.0 {
+                Value::Object(map) => {
+                    let mut out = ser.serialize_map(Some(map.len() + 1))?;
+                    out.serialize_entry("type", "response.create")?;
+                    for (key, value) in map {
+                        out.serialize_entry(key, value)?;
+                    }
+                    out.end()
+                }
+                _ => {
+                    let mut out = ser.serialize_map(Some(1))?;
+                    out.serialize_entry("type", "response.create")?;
+                    out.end()
+                }
+            }
+        }
+    }
+
+    serde_json::to_string(&Wrap(body)).expect("serde_json::Value is infallibly serializable")
 }
 
 pub async fn responses(state: &AppState, body: serde_json::Value) -> AppResult<Bytes> {
@@ -445,7 +530,7 @@ async fn send_wss_stream_with_refresh(
 
 async fn send_wss(state: &AppState, wss_url: &str, body: &serde_json::Value) -> AppResult<Bytes> {
     let mut ws = connect_responses_wss_for_body(state, wss_url, body).await?;
-    ws.send_text(flat_response_create_event(body.clone()).to_string())
+    ws.send_text(serialize_flat_response_create_event(body))
         .await
         .map_err(|err| AppError::Upstream(format!("Codex WSS send failed: {err}")))?;
 
@@ -483,7 +568,7 @@ async fn send_wss_stream(
     body: &serde_json::Value,
 ) -> AppResult<CodexResponseStream> {
     let mut ws = connect_responses_wss_for_body(state, wss_url, body).await?;
-    ws.send_text(flat_response_create_event(body.clone()).to_string())
+    ws.send_text(serialize_flat_response_create_event(body))
         .await
         .map_err(|err| AppError::Upstream(format!("Codex WSS send failed: {err}")))?;
 
@@ -1040,5 +1125,27 @@ mod tests {
             "event: response.output_text.delta\n\
 data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\n"
         );
+    }
+
+    #[test]
+    fn serialize_flat_response_create_event_matches_value_round_trip() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": [
+                {"role": "user", "content": [{"type": "input_text", "text": "hi"}]}
+            ],
+            "stream": true,
+            "store": false
+        });
+
+        let from_value = flat_response_create_event(body.clone()).to_string();
+        let direct = serialize_flat_response_create_event(&body);
+
+        let parsed_value: Value = serde_json::from_str(&from_value).unwrap();
+        let parsed_direct: Value = serde_json::from_str(&direct).unwrap();
+        assert_eq!(parsed_value, parsed_direct);
+        assert_eq!(parsed_direct["type"], "response.create");
+        assert_eq!(parsed_direct["model"], "upstream-model");
+        assert_eq!(parsed_direct["stream"], true);
     }
 }

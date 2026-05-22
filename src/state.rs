@@ -12,7 +12,13 @@ use std::{
 
 use crate::{
     amp_compat::AmpStore,
-    codex_catalog::{CodexCatalogCache, CodexCatalogConfig},
+    auth::{
+        bedrock::BedrockAuth,
+        codex::CodexAuth,
+        cursor::CursorCredentials,
+        file_cache::{AuthFileCache, ResolvedAuthCache},
+    },
+    codex_catalog::{CodexCatalogCache, CodexCatalogConfig, CODEX_MODELS_URL},
     hot_config::HotRoutingConfig,
     model_alias::{resolve_target_required, ResolvedModel, ResolvedTarget},
     upstream::cursor::session::CursorSessionStore,
@@ -40,6 +46,12 @@ pub struct AppState {
     pub routing_config: HotRoutingConfig,
     pub codex_catalog: CodexCatalogCache,
     pub cursor_sessions: Arc<CursorSessionStore>,
+    pub auth_files: AuthFileCache,
+    pub codex_auth: ResolvedAuthCache<CodexAuth>,
+    pub cursor_auth: Arc<tokio::sync::Mutex<Option<CursorCredentials>>>,
+    pub google_auth: ResolvedAuthCache<String>,
+    pub windsurf_auth: ResolvedAuthCache<String>,
+    pub bedrock_auth: ResolvedAuthCache<BedrockAuth>,
     response_storage: ResponseStorage,
     codex_wss_latched: Arc<AtomicBool>,
     codex_wss_failures: Arc<AtomicU32>,
@@ -51,6 +63,7 @@ pub struct RuntimeConfig {
     pub codex_transport: CodexTransport,
     pub codex_responses_wss_url: String,
     pub codex_responses_http_url: String,
+    pub codex_models_url: String,
     pub codex_wss_connect_timeout: Duration,
     pub codex_max_concurrent: usize,
     pub codex_handshakes_per_min: u32,
@@ -158,6 +171,12 @@ impl AppState {
             routing_config,
             codex_catalog,
             cursor_sessions: Arc::new(CursorSessionStore::new()),
+            auth_files: AuthFileCache::new(),
+            codex_auth: ResolvedAuthCache::new(),
+            cursor_auth: Arc::new(tokio::sync::Mutex::new(None)),
+            google_auth: ResolvedAuthCache::new(),
+            windsurf_auth: ResolvedAuthCache::new(),
+            bedrock_auth: ResolvedAuthCache::new(),
             response_storage: ResponseStorage::default(),
             codex_wss_latched: Arc::new(AtomicBool::new(false)),
             codex_wss_failures: Arc::new(AtomicU32::new(0)),
@@ -183,6 +202,12 @@ impl AppState {
             routing_config,
             codex_catalog,
             cursor_sessions: Arc::new(CursorSessionStore::new()),
+            auth_files: AuthFileCache::new(),
+            codex_auth: ResolvedAuthCache::new(),
+            cursor_auth: Arc::new(tokio::sync::Mutex::new(None)),
+            google_auth: ResolvedAuthCache::new(),
+            windsurf_auth: ResolvedAuthCache::new(),
+            bedrock_auth: ResolvedAuthCache::new(),
             response_storage: ResponseStorage::default(),
             codex_wss_latched: Arc::new(AtomicBool::new(false)),
             codex_wss_failures: Arc::new(AtomicU32::new(0)),
@@ -361,6 +386,8 @@ impl RuntimeConfig {
                 .unwrap_or_else(|_| CODEX_RESPONSES_WSS_URL.to_string()),
             codex_responses_http_url: var("UMP_V2_CODEX_RESPONSES_HTTP_URL")
                 .unwrap_or_else(|_| CODEX_RESPONSES_HTTP_URL.to_string()),
+            codex_models_url: var("UMP_V2_CODEX_MODELS_URL")
+                .unwrap_or_else(|_| CODEX_MODELS_URL.to_string()),
             codex_wss_connect_timeout: duration_ms_env(
                 &mut var,
                 "UMP_V2_CODEX_WSS_CONNECT_TIMEOUT_MS",
@@ -405,6 +432,7 @@ impl Default for RuntimeConfig {
             codex_transport: CodexTransport::WssThenHttp,
             codex_responses_wss_url: CODEX_RESPONSES_WSS_URL.to_string(),
             codex_responses_http_url: CODEX_RESPONSES_HTTP_URL.to_string(),
+            codex_models_url: CODEX_MODELS_URL.to_string(),
             codex_wss_connect_timeout: Duration::from_millis(5000),
             codex_max_concurrent: 20,
             codex_handshakes_per_min: 55,
@@ -505,6 +533,10 @@ mod tests {
             "https://chatgpt.com/backend-api/codex/responses"
         );
         assert_eq!(
+            config.codex_models_url,
+            "https://chatgpt.com/backend-api/codex/models"
+        );
+        assert_eq!(
             config.codex_wss_connect_timeout,
             Duration::from_millis(5000)
         );
@@ -528,6 +560,7 @@ mod tests {
             ("UMP_V2_CODEX_TRANSPORT", "http"),
             ("UMP_V2_CODEX_RESPONSES_WSS_URL", "ws://127.0.0.1:1/ws"),
             ("UMP_V2_CODEX_RESPONSES_HTTP_URL", "http://127.0.0.1:1/http"),
+            ("UMP_V2_CODEX_MODELS_URL", "http://127.0.0.1:1/models"),
             ("UMP_V2_CODEX_WSS_CONNECT_TIMEOUT_MS", "250"),
             ("UMP_V2_CODEX_MAX_CONCURRENT", "7"),
             ("UMP_V2_CODEX_HANDSHAKES_PER_MIN", "9"),
@@ -541,6 +574,7 @@ mod tests {
         assert_eq!(config.codex_transport, CodexTransport::Http);
         assert_eq!(config.codex_responses_wss_url, "ws://127.0.0.1:1/ws");
         assert_eq!(config.codex_responses_http_url, "http://127.0.0.1:1/http");
+        assert_eq!(config.codex_models_url, "http://127.0.0.1:1/models");
         assert_eq!(config.codex_wss_connect_timeout, Duration::from_millis(250));
         assert_eq!(config.codex_max_concurrent, 7);
         assert_eq!(config.codex_handshakes_per_min, 9);

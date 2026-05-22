@@ -9,7 +9,7 @@ pub enum BedrockAuth {
 
 pub fn resolve_bedrock_auth(state: &AppState) -> AppResult<BedrockAuth> {
     let auth_json = state.auth_home.join("auth.json");
-    if let Some(token) = read_json_string(&auth_json, &["bedrock", "bearer"])? {
+    if let Some(token) = read_json_string(state, &auth_json, &["bedrock", "bearer"])? {
         return Ok(BedrockAuth::Bearer {
             token,
             source: "bearer_file",

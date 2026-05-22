@@ -32,22 +32,22 @@ pub fn auth_path(state: &AppState) -> PathBuf {
 
 pub fn load_codex_auth(state: &AppState) -> AppResult<CodexAuth> {
     let path = auth_path(state);
-    load_codex_auth_from_path(&path)
-}
-
-fn load_codex_auth_from_path(path: &Path) -> AppResult<CodexAuth> {
-    let raw = fs::read_to_string(path).map_err(|err| {
-        if err.kind() == std::io::ErrorKind::NotFound {
-            AppError::MissingCredential("~/.codex/auth.json")
-        } else {
-            AppError::Io(err)
-        }
-    })?;
-    parse_codex_auth(&raw)
+    let key = crate::auth::file_cache::AuthCacheKey::new().file(path.clone())?;
+    state.codex_auth.get_or_try_insert_with(key, || {
+        let value = state
+            .auth_files
+            .get_or_load(&path)?
+            .ok_or(AppError::MissingCredential("~/.codex/auth.json"))?;
+        parse_codex_auth_value(value.as_ref())
+    })
 }
 
 pub fn parse_codex_auth(raw: &str) -> AppResult<CodexAuth> {
     let value: serde_json::Value = serde_json::from_str(raw)?;
+    parse_codex_auth_value(&value)
+}
+
+fn parse_codex_auth_value(value: &serde_json::Value) -> AppResult<CodexAuth> {
     if let Some(tokens) = value.get("tokens") {
         return from_ump_tokens(tokens, value.get("account_id"));
     }
@@ -81,7 +81,7 @@ pub fn parse_codex_auth(raw: &str) -> AppResult<CodexAuth> {
         });
     }
 
-    from_ump_tokens(&value, value.get("account_id"))
+    from_ump_tokens(value, value.get("account_id"))
 }
 
 fn from_ump_tokens(
@@ -186,10 +186,14 @@ pub async fn refresh_codex_auth_with_endpoint(
     let refreshed = merge_refreshed_auth(auth, token_body)?;
     let current = read_auth_snapshot(&path)?;
     if current.hash != before.hash {
-        return load_codex_auth_from_path(&path);
+        state.auth_files.invalidate(&path);
+        state.codex_auth.invalidate();
+        return load_codex_auth(state);
     }
 
     write_codex_auth(state, &refreshed)?;
+    state.auth_files.invalidate(&path);
+    state.codex_auth.invalidate();
     Ok(refreshed)
 }
 

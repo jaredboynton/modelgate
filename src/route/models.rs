@@ -5,11 +5,12 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::sync::Arc;
 
 use crate::{
     codex_catalog::{
         codex_models_endpoint as shared_codex_models_endpoint, CodexCatalog, CodexCatalogRequest,
-        CODEX_MODELS_URL, DEFAULT_CODEX_CLIENT_VERSION,
+        DEFAULT_CODEX_CLIENT_VERSION,
     },
     compaction::RemoteCompactionPolicy,
     model_alias::KNOWN_MODELS,
@@ -65,7 +66,7 @@ pub async fn models(
         }));
     }
     if let Ok(descriptors) = crate::upstream::cursor::fetch_usable_models_for_state(&state).await {
-        for descriptor in descriptors {
+        for descriptor in descriptors.iter() {
             let discovery = match descriptor.discovery {
                 crate::upstream::cursor::models::DiscoverySource::Live => "live",
                 crate::upstream::cursor::models::DiscoverySource::Fallback => "fallback",
@@ -134,7 +135,7 @@ pub async fn validate_codex_catalog_request(
     request: &Value,
     upstream_model: &str,
 ) -> AppResult<()> {
-    let catalog = codex_catalog(state).await?;
+    let catalog = codex_catalog(state)?;
     validate_codex_catalog_request_with_catalog(&catalog, request, upstream_model)
 }
 
@@ -143,21 +144,17 @@ pub async fn validate_codex_catalog_websocket_request(
     request: &Value,
     upstream_model: &str,
 ) -> AppResult<()> {
-    if let Some(catalog) = state.codex_catalog.get_if_fresh() {
-        return validate_codex_catalog_request_with_catalog(&catalog, request, upstream_model);
-    }
     validate_codex_catalog_request(state, request, upstream_model).await
 }
 
-async fn codex_catalog(state: &AppState) -> AppResult<CodexCatalog> {
-    if let Some(catalog) = state.codex_catalog.get_if_fresh() {
+fn codex_catalog(state: &AppState) -> AppResult<Arc<CodexCatalog>> {
+    if let Some(catalog) = state.codex_catalog.get_latest() {
         return Ok(catalog);
     }
-    let headers = codex_headers(state)?;
-    state
-        .codex_catalog
-        .refresh_from_endpoint(&state.http, &headers, CODEX_MODELS_URL)
-        .await
+    codex_headers(state)?;
+    Err(AppError::Upstream(
+        "Codex model catalog is not available yet; background refresh has not completed".into(),
+    ))
 }
 
 async fn codex_catalog_for_client_version(
@@ -165,11 +162,11 @@ async fn codex_catalog_for_client_version(
     client_version: &str,
 ) -> AppResult<CodexCatalog> {
     if client_version == state.codex_catalog.client_version() {
-        return codex_catalog(state).await;
+        return Ok((*codex_catalog(state)?).clone());
     }
 
     let headers = codex_headers(state)?;
-    let url = shared_codex_models_endpoint(CODEX_MODELS_URL, client_version)?;
+    let url = shared_codex_models_endpoint(&state.runtime.codex_models_url, client_version)?;
     let mut request = state.http.get(url);
     for (name, value) in headers.iter() {
         request = request.header(name, value);

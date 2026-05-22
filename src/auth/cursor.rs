@@ -1,5 +1,5 @@
 use std::{
-    env, fs,
+    env,
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -9,7 +9,7 @@ use serde_json::json;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use crate::{AppError, AppResult};
+use crate::{AppError, AppResult, AppState};
 
 /// Default Cursor refresh exchange URL. Cross-checked with v1
 /// `cursor-oauth.ts:5-7` which pins
@@ -84,7 +84,8 @@ pub struct CursorCredentials {
 ///    `apiKey`).
 ///
 /// Returns `AppError::MissingCredential("cursor")` if no source resolves.
-pub async fn resolve_cursor_credentials(home: &Path) -> AppResult<CursorCredentials> {
+pub async fn resolve_cursor_credentials(state: &AppState) -> AppResult<CursorCredentials> {
+    let home = state.auth_home.as_path();
     if let Some(token) = env_access_token() {
         return Ok(CursorCredentials {
             access_token: token,
@@ -123,7 +124,7 @@ pub async fn resolve_cursor_credentials(home: &Path) -> AppResult<CursorCredenti
         }
     }
 
-    if let Some(creds) = file_access_credentials(home)? {
+    if let Some(creds) = file_access_credentials(state, home)? {
         return Ok(creds);
     }
 
@@ -341,15 +342,12 @@ async fn run_secret_command(mut command: Command, source_label: &str) -> Option<
     }
 }
 
-fn file_access_credentials(home: &Path) -> AppResult<Option<CursorCredentials>> {
+fn file_access_credentials(state: &AppState, home: &Path) -> AppResult<Option<CursorCredentials>> {
     let path = home.join(".cursor").join("auth.json");
-    let raw = match fs::read_to_string(&path) {
-        Ok(raw) => raw,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(AppError::Io(err)),
+    let Some(value) = state.auth_files.get_or_load(&path)? else {
+        return Ok(None);
     };
 
-    let value: serde_json::Value = serde_json::from_str(&raw)?;
     let access_token = value
         .get("accessToken")
         .and_then(|token| token.as_str())

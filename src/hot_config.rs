@@ -1,7 +1,8 @@
 use std::{
     env, fs,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, RwLock},
+    time::SystemTime,
 };
 
 use serde::Deserialize;
@@ -19,6 +20,20 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct HotRoutingConfig {
     path: Option<Arc<PathBuf>>,
+    cache: Arc<RwLock<Option<CachedRoutingConfig>>>,
+}
+
+#[derive(Clone, Debug)]
+struct CachedRoutingConfig {
+    metadata: ConfigMetadata,
+    config: Option<Arc<RoutingConfigFile>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ConfigMetadata {
+    exists: bool,
+    modified: Option<SystemTime>,
+    len: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -135,11 +150,15 @@ impl HotRoutingConfig {
     pub fn from_path(path: PathBuf) -> Self {
         Self {
             path: Some(Arc::new(path)),
+            cache: Arc::new(RwLock::new(None)),
         }
     }
 
     pub fn disabled() -> Self {
-        Self { path: None }
+        Self {
+            path: None,
+            cache: Arc::new(RwLock::new(None)),
+        }
     }
 
     pub fn resolve_model(&self, model: &str) -> AppResult<Option<ResolvedModel>> {
@@ -164,7 +183,7 @@ impl HotRoutingConfig {
         let Some(config) = self.load()? else {
             return Ok(None);
         };
-        let Some(route) = config.routes.into_iter().find(|route| {
+        let Some(route) = config.routes.iter().find(|route| {
             route.enabled
                 && route.source.model == model
                 && source_format_matches(route.source.format.as_deref(), source_format)
@@ -181,7 +200,7 @@ impl HotRoutingConfig {
         };
         Ok(Some(ResolvedTarget {
             provider: route.target.provider,
-            upstream_model: route.target.model,
+            upstream_model: route.target.model.clone(),
             target_format,
         }))
     }
@@ -195,7 +214,7 @@ impl HotRoutingConfig {
         let Some(config) = self.load()? else {
             return Ok(target.default_remote_compaction_policy());
         };
-        if let Some(route) = config.routes.into_iter().find(|route| {
+        if let Some(route) = config.routes.iter().find(|route| {
             route.enabled
                 && route.source.model == model
                 && source_format_matches(route.source.format.as_deref(), source_format)
@@ -206,6 +225,7 @@ impl HotRoutingConfig {
         }
         Ok(config
             .compaction
+            .as_ref()
             .and_then(|compaction| compaction.default_policy)
             .unwrap_or_else(|| {
                 default_remote_compaction_policy(target.provider, target.target_format)
@@ -222,7 +242,7 @@ impl HotRoutingConfig {
             .and_then(|compaction| compaction.default_policy);
         Ok(config
             .routes
-            .into_iter()
+            .iter()
             .filter(|route| route.enabled)
             .map(|route| {
                 let target_format = route
@@ -241,7 +261,7 @@ impl HotRoutingConfig {
                     })
                     .unwrap_or(RemoteCompactionPolicy::Local);
                 ConfiguredModel {
-                    id: route.source.model,
+                    id: route.source.model.clone(),
                     provider: route.target.provider,
                     remote_compaction_policy,
                 }
@@ -286,22 +306,65 @@ impl HotRoutingConfig {
         Ok(())
     }
 
-    fn load(&self) -> AppResult<Option<RoutingConfigFile>> {
+    fn load(&self) -> AppResult<Option<Arc<RoutingConfigFile>>> {
         let Some(path) = &self.path else {
             return Ok(None);
         };
+        let metadata = config_metadata(path.as_ref())?;
+        if let Some(cached) = self
+            .cache
+            .read()
+            .expect("routing config cache poisoned")
+            .as_ref()
+            .filter(|cached| cached.metadata == metadata)
+        {
+            return Ok(cached.config.clone());
+        }
+        if !metadata.exists {
+            *self.cache.write().expect("routing config cache poisoned") =
+                Some(CachedRoutingConfig {
+                    metadata,
+                    config: None,
+                });
+            return Ok(None);
+        }
         let raw = match fs::read_to_string(path.as_ref()) {
             Ok(raw) => raw,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(AppError::Io(error)),
         };
         if raw.trim().is_empty() {
+            *self.cache.write().expect("routing config cache poisoned") =
+                Some(CachedRoutingConfig {
+                    metadata,
+                    config: None,
+                });
             return Ok(None);
         }
         let value: Value = serde_json::from_str(&raw)
             .map_err(|error| AppError::BadRequest(format!("invalid routing config: {error}")))?;
-        let config = parse_config_value(value)?;
+        let config = Arc::new(parse_config_value(value)?);
+        *self.cache.write().expect("routing config cache poisoned") = Some(CachedRoutingConfig {
+            metadata,
+            config: Some(Arc::clone(&config)),
+        });
         Ok(Some(config))
+    }
+}
+
+fn config_metadata(path: &Path) -> AppResult<ConfigMetadata> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(ConfigMetadata {
+            exists: true,
+            modified: metadata.modified().ok(),
+            len: metadata.len(),
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(ConfigMetadata {
+            exists: false,
+            modified: None,
+            len: 0,
+        }),
+        Err(error) => Err(AppError::Io(error)),
     }
 }
 

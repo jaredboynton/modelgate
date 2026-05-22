@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use anyhow::Context;
 use unified_model_proxy_v2::{build_router, AppState, RuntimeConfig};
@@ -15,6 +15,13 @@ async fn main() -> anyhow::Result<()> {
     let runtime = RuntimeConfig::from_env().map_err(anyhow::Error::msg)?;
     let addr: SocketAddr = runtime.listen_addr;
     let state = AppState::from_env_with_config(runtime);
+    unified_model_proxy_v2::upstream::codex::warm_codex_model_catalog_with_timeout(
+        &state,
+        Duration::from_secs(2),
+    )
+    .await;
+    let _codex_catalog_refresher =
+        unified_model_proxy_v2::upstream::codex::spawn_codex_model_catalog_refresher(state.clone());
     install_sighup_latch_reset(state.clone());
     let app = build_router(state);
     let listener = tokio::net::TcpListener::bind(addr)

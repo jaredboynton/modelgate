@@ -6,7 +6,7 @@
 //! always get a complete row set even when discovery is unreachable.
 
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
@@ -108,7 +108,7 @@ pub fn fallback_descriptors() -> Vec<ModelDescriptor> {
 #[derive(Debug, Clone)]
 struct CacheEntry {
     fetched_at: Instant,
-    descriptors: Vec<ModelDescriptor>,
+    descriptors: Arc<Vec<ModelDescriptor>>,
 }
 
 /// 10-minute cache TTL. Live invalidation is the caller's responsibility
@@ -119,6 +119,11 @@ const CACHE_TTL: Duration = Duration::from_secs(600);
 fn cache() -> &'static Mutex<HashMap<String, CacheEntry>> {
     static CELL: OnceLock<Mutex<HashMap<String, CacheEntry>>> = OnceLock::new();
     CELL.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn fetch_lock() -> &'static Mutex<()> {
+    static CELL: OnceLock<Mutex<()>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(()))
 }
 
 /// 16-hex SHA-256 prefix keyed on the access token. Matches the v1
@@ -133,28 +138,38 @@ pub fn cache_key(token: &str) -> String {
 /// fallback table on any transport / decode error so callers always get a
 /// non-empty list. Successful live rows are tagged `DiscoverySource::Live`,
 /// deduped by id, and sorted alphabetically.
-pub async fn fetch_usable_models(token: &str) -> Vec<ModelDescriptor> {
+pub async fn fetch_usable_models(token: &str) -> Arc<Vec<ModelDescriptor>> {
     let key = cache_key(token);
     {
         let cache_guard = cache().lock().await;
         if let Some(entry) = cache_guard.get(&key) {
             if entry.fetched_at.elapsed() < CACHE_TTL {
-                return entry.descriptors.clone();
+                return Arc::clone(&entry.descriptors);
             }
         }
     }
 
-    let descriptors = match fetch_live(token).await {
+    let _fetch_guard = fetch_lock().lock().await;
+    {
+        let cache_guard = cache().lock().await;
+        if let Some(entry) = cache_guard.get(&key) {
+            if entry.fetched_at.elapsed() < CACHE_TTL {
+                return Arc::clone(&entry.descriptors);
+            }
+        }
+    }
+
+    let descriptors = Arc::new(match fetch_live(token).await {
         Some(rows) if !rows.is_empty() => rows,
         _ => fallback_descriptors(),
-    };
+    });
 
     let mut cache_guard = cache().lock().await;
     cache_guard.insert(
         key,
         CacheEntry {
             fetched_at: Instant::now(),
-            descriptors: descriptors.clone(),
+            descriptors: Arc::clone(&descriptors),
         },
     );
     descriptors

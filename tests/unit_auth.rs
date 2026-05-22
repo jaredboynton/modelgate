@@ -443,6 +443,59 @@ fn windsurf_resolves_auth_home_api_key_legacy_file_then_env_and_fails_closed() {
     );
 }
 
+#[test]
+fn auth_file_cache_serves_same_arc_until_file_changes() {
+    use std::sync::Arc;
+    let auth_home = tempdir().unwrap();
+    let codex_home = tempdir().unwrap();
+    let state = AppState::for_tests(
+        codex_home.path().to_path_buf(),
+        auth_home.path().to_path_buf(),
+    );
+    let path = auth_home.path().join("auth.json");
+
+    assert!(state.auth_files.get_or_load(&path).unwrap().is_none());
+
+    fs::write(&path, r#"{"google":{"api_key":"k1"}}"#).unwrap();
+    let first = state.auth_files.get_or_load(&path).unwrap().unwrap();
+    let second = state.auth_files.get_or_load(&path).unwrap().unwrap();
+    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(first["google"]["api_key"], "k1");
+
+    // Different length forces re-parse even on coarse-resolution mtime.
+    fs::write(&path, r#"{"google":{"api_key":"longer_key_value"}}"#).unwrap();
+    let third = state.auth_files.get_or_load(&path).unwrap().unwrap();
+    assert!(!Arc::ptr_eq(&first, &third));
+    assert_eq!(third["google"]["api_key"], "longer_key_value");
+
+    fs::remove_file(&path).unwrap();
+    assert!(state.auth_files.get_or_load(&path).unwrap().is_none());
+}
+
+#[test]
+fn google_api_key_picks_up_rotated_file_through_cache() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let auth_home = tempdir().unwrap();
+    let codex_home = tempdir().unwrap();
+    let state = AppState::for_tests(
+        codex_home.path().to_path_buf(),
+        auth_home.path().to_path_buf(),
+    );
+    fs::write(
+        auth_home.path().join("auth.json"),
+        r#"{"google":{"api_key":"cached_key"}}"#,
+    )
+    .unwrap();
+    assert_eq!(google_api_key(&state).unwrap(), "cached_key");
+
+    fs::write(
+        auth_home.path().join("auth.json"),
+        r#"{"google":{"api_key":"rotated_key_value"}}"#,
+    )
+    .unwrap();
+    assert_eq!(google_api_key(&state).unwrap(), "rotated_key_value");
+}
+
 fn id_token_with_account(account_id: &str) -> String {
     let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"none"}"#);
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD

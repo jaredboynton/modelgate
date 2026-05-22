@@ -13,7 +13,7 @@ use crate::{AppError, AppResult};
 
 pub const CODEX_MODELS_URL: &str = "https://chatgpt.com/backend-api/codex/models";
 pub const DEFAULT_CODEX_CLIENT_VERSION: &str = "26.506.31421";
-pub const DEFAULT_CODEX_CATALOG_TTL_SECS: u64 = 600;
+pub const DEFAULT_CODEX_CATALOG_TTL_SECS: u64 = 60 * 60;
 
 const HIDDEN_CODEX_MODEL_IDS: &[&str] = &["codex-auto-review"];
 
@@ -26,12 +26,13 @@ pub struct CodexCatalogConfig {
 #[derive(Clone, Debug)]
 pub struct CodexCatalogCache {
     inner: Arc<Mutex<Option<CachedCodexCatalog>>>,
+    refresh_lock: Arc<tokio::sync::Mutex<()>>,
     config: CodexCatalogConfig,
 }
 
 #[derive(Clone, Debug)]
 struct CachedCodexCatalog {
-    catalog: CodexCatalog,
+    catalog: Arc<CodexCatalog>,
     fetched_at: SystemTime,
 }
 
@@ -53,7 +54,6 @@ pub struct CodexCatalogModel {
     pub truncation_policy: Vec<String>,
     pub input_modalities: Vec<String>,
     pub output_modalities: Vec<String>,
-    pub raw: Value,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -107,6 +107,7 @@ impl CodexCatalogCache {
     pub fn new(config: CodexCatalogConfig) -> Self {
         Self {
             inner: Arc::new(Mutex::new(None)),
+            refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
             config,
         }
     }
@@ -123,24 +124,34 @@ impl CodexCatalogCache {
         self.config.ttl
     }
 
-    pub fn get_if_fresh(&self) -> Option<CodexCatalog> {
+    pub fn get_if_fresh(&self) -> Option<Arc<CodexCatalog>> {
         self.lock()
             .as_ref()
             .filter(|cached| !cached.is_expired(self.config.ttl))
-            .map(|cached| cached.catalog.clone())
+            .map(|cached| Arc::clone(&cached.catalog))
     }
 
-    pub fn store_validated(&self, raw: &Value) -> AppResult<CodexCatalog> {
+    pub fn get_latest(&self) -> Option<Arc<CodexCatalog>> {
+        self.lock()
+            .as_ref()
+            .map(|cached| Arc::clone(&cached.catalog))
+    }
+
+    pub fn store_validated(&self, raw: &Value) -> AppResult<Arc<CodexCatalog>> {
         let catalog = CodexCatalog::parse(self.client_version(), raw)?;
-        self.replace(catalog.clone());
-        Ok(catalog)
+        Ok(self.replace(catalog))
     }
 
-    pub async fn get_or_refresh_with<F, Fut>(&self, fetch: F) -> AppResult<CodexCatalog>
+    pub async fn get_or_refresh_with<F, Fut>(&self, fetch: F) -> AppResult<Arc<CodexCatalog>>
     where
         F: FnOnce(String) -> Fut,
         Fut: Future<Output = AppResult<Value>>,
     {
+        if let Some(catalog) = self.get_if_fresh() {
+            return Ok(catalog);
+        }
+
+        let _refresh = self.refresh_lock.lock().await;
         if let Some(catalog) = self.get_if_fresh() {
             return Ok(catalog);
         }
@@ -154,7 +165,7 @@ impl CodexCatalogCache {
         http: &reqwest::Client,
         headers: &HeaderMap,
         base_url: &str,
-    ) -> AppResult<CodexCatalog> {
+    ) -> AppResult<Arc<CodexCatalog>> {
         self.get_or_refresh_with(|client_version| async move {
             let url = codex_models_endpoint(base_url, &client_version)?;
             let mut request = http.get(url);
@@ -178,11 +189,13 @@ impl CodexCatalogCache {
         .await
     }
 
-    pub fn replace(&self, catalog: CodexCatalog) {
+    pub fn replace(&self, catalog: CodexCatalog) -> Arc<CodexCatalog> {
+        let catalog = Arc::new(catalog);
         *self.lock() = Some(CachedCodexCatalog {
-            catalog,
+            catalog: Arc::clone(&catalog),
             fetched_at: SystemTime::now(),
         });
+        catalog
     }
 
     pub fn clear(&self) {
@@ -377,7 +390,6 @@ fn parse_model(value: &Value) -> AppResult<CodexCatalogModel> {
                 "modalities",
             ],
         ),
-        raw: value.clone(),
     })
 }
 
