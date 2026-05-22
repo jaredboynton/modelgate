@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use futures::stream;
 use http::{header, HeaderMap, HeaderName, HeaderValue, Method};
 use serde_json::{json, Value};
 
@@ -253,53 +252,22 @@ pub async fn send_google_direct(
     body: Bytes,
     stream_response: bool,
 ) -> AppResult<UpstreamResponse> {
-    if stream_response && request.url.starts_with("http://") {
-        let response = state
-            .http
-            .request(method, &request.url)
-            .headers(request.headers)
-            .body(body)
-            .send()
-            .await
-            .map_err(|err| AppError::Upstream(format!("Google streaming transport: {err}")))?;
-        return Ok(UpstreamResponse::from_reqwest(GOOGLE_PROVIDER, response));
-    }
-
-    let builder = state
-        .specter
-        .request(method, request.url)
-        .headers(specter::Headers::from(request.headers))
-        .body(body);
-
-    if stream_response {
-        let (response, rx) = builder
-            .send_streaming()
-            .await
-            .map_err(|err| AppError::Upstream(format!("Google streaming transport: {err}")))?;
-        let headers = specter_headers_to_http(response.headers())?;
-        let stream = stream::unfold(rx, |mut rx| async {
-            rx.recv().await.map(|chunk| (chunk, rx))
-        });
-        return Ok(UpstreamResponse::stream(
-            GOOGLE_PROVIDER,
-            response.status(),
-            headers,
-            stream,
-        ));
-    }
-
-    let response = builder
+    let response = state
+        .http
+        .request(method, &request.url)
+        .headers(request.headers)
+        .body(body)
         .send()
         .await
-        .map_err(|err| AppError::Upstream(format!("Google transport: {err}")))?;
-    let status = response.status();
-    let headers = specter_headers_to_http(response.headers())?;
-    Ok(UpstreamResponse::bytes(
-        GOOGLE_PROVIDER,
-        status,
-        headers,
-        response.into_body(),
-    ))
+        .map_err(|err| {
+            let kind = if stream_response {
+                "streaming transport"
+            } else {
+                "transport"
+            };
+            AppError::Upstream(format!("Google {kind}: {err}"))
+        })?;
+    Ok(UpstreamResponse::from_reqwest(GOOGLE_PROVIDER, response))
 }
 
 pub async fn forward_generate_content_direct_response(
@@ -393,18 +361,6 @@ fn should_forward_google_header(name: &HeaderName) -> bool {
             | "cookie"
             | "x-goog-api-key"
     )
-}
-
-fn specter_headers_to_http(headers: &specter::Headers) -> AppResult<HeaderMap> {
-    let mut out = HeaderMap::new();
-    for (name, value) in headers.iter() {
-        let name = HeaderName::from_bytes(name.as_bytes())
-            .map_err(|err| AppError::Upstream(format!("invalid upstream header name: {err}")))?;
-        let value = HeaderValue::from_str(value)
-            .map_err(|err| AppError::Upstream(format!("invalid upstream header value: {err}")))?;
-        out.append(name, value);
-    }
-    Ok(out)
 }
 
 fn is_sse_request(path: &str) -> bool {

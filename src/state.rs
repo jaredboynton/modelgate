@@ -163,7 +163,7 @@ impl AppState {
         let codex_max_concurrent = runtime.codex_max_concurrent;
 
         Self {
-            http: reqwest::Client::new(),
+            http: build_http_client(),
             specter: specter::Client::new().expect("failed to construct Specter client"),
             amp_store: AmpStore::from_env(),
             codex_home,
@@ -203,7 +203,7 @@ impl AppState {
         let codex_max_concurrent = runtime.codex_max_concurrent;
 
         Self {
-            http: reqwest::Client::new(),
+            http: build_http_client(),
             specter: specter::Client::new().expect("failed to construct Specter client"),
             amp_store: AmpStore::new(auth_home.join("amp-threads")),
             codex_home,
@@ -389,6 +389,15 @@ impl AppState {
             .public_retrievable
             .retain(|_, record| !self.response_storage.is_expired(record));
     }
+}
+
+fn build_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(16)
+        .tcp_keepalive(Duration::from_secs(60))
+        .build()
+        .expect("failed to construct shared reqwest client")
 }
 
 impl ResponseStorage {

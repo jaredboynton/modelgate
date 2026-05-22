@@ -330,19 +330,11 @@ fn text_chunks_from_envelope(flags: u8, body: &[u8]) -> AppResult<Vec<String>> {
     }
 
     let mut chunks = Vec::new();
-    for field in parse_fields(body) {
-        if field.field_num == 3 {
-            let FieldValue::Bytes(bytes) = field.value;
-            chunks.push(String::from_utf8(bytes).map_err(|error| {
-                AppError::Upstream(format!("Windsurf text chunk was not UTF-8: {error}"))
-            })?);
-        }
-    }
+    collect_text_fields(body, &mut chunks)?;
     Ok(chunks)
 }
 
-fn parse_fields(buffer: &[u8]) -> Vec<Field> {
-    let mut fields = Vec::new();
+fn collect_text_fields(buffer: &[u8], chunks: &mut Vec<String>) -> AppResult<()> {
     let mut offset = 0;
     while offset < buffer.len() {
         let Some((key, next)) = read_varint(buffer, offset) else {
@@ -369,14 +361,21 @@ fn parse_fields(buffer: &[u8]) -> Vec<Field> {
                     break;
                 };
                 offset = next;
-                let end = offset + length as usize;
+                let Some(end) = offset.checked_add(length as usize) else {
+                    break;
+                };
                 if end > buffer.len() {
                     break;
                 }
-                fields.push(Field {
-                    field_num,
-                    value: FieldValue::Bytes(buffer[offset..end].to_vec()),
-                });
+                if field_num == 3 {
+                    chunks.push(String::from_utf8(buffer[offset..end].to_vec()).map_err(
+                        |error| {
+                            AppError::Upstream(format!(
+                                "Windsurf text chunk was not UTF-8: {error}"
+                            ))
+                        },
+                    )?);
+                }
                 offset = end;
             }
             5 => {
@@ -388,7 +387,7 @@ fn parse_fields(buffer: &[u8]) -> Vec<Field> {
             _ => break,
         }
     }
-    fields
+    Ok(())
 }
 
 fn read_varint(buffer: &[u8], offset: usize) -> Option<(u64, usize)> {
@@ -429,17 +428,6 @@ struct StreamState {
     buffer: Vec<u8>,
     pending: VecDeque<AppResult<String>>,
     finished: bool,
-}
-
-#[derive(Debug)]
-struct Field {
-    field_num: u32,
-    value: FieldValue,
-}
-
-#[derive(Debug)]
-enum FieldValue {
-    Bytes(Vec<u8>),
 }
 
 #[cfg(test)]

@@ -6,14 +6,14 @@ use futures::{
 };
 use serde_json::{json, Value};
 use specter::Message;
-use std::{pin::Pin, sync::Arc, time::Duration};
+use std::{borrow::Cow, pin::Pin, sync::Arc, time::Duration};
 
 use crate::{
     auth::codex::{load_codex_auth, refresh_codex_auth, CODEX_OPENAI_BETA, CODEX_ORIGINATOR},
     codex_catalog::CodexCatalog,
     model_alias::{self, Provider, ResolvedModel},
     rate_limit,
-    sse::{filter::filter_codex_events, splice::splice_completed_event},
+    sse::splice::splice_completed_event_filtered,
     state::CodexTransport,
     AppError, AppResult, AppState,
 };
@@ -724,15 +724,18 @@ async fn send_http(
     state.codex_acquire_handshake().await?;
     let headers = codex_headers_for_body(state, body)?;
     let response = state
-        .specter
+        .http
         .post(http_url)
-        .headers(specter::Headers::from(headers))
+        .headers(headers)
         .json(body)
         .send()
         .await
         .map_err(|err| AppError::Upstream(format!("Codex HTTP request failed: {err}")))?;
     let status = response.status();
-    let bytes = response.into_body();
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| AppError::Upstream(format!("Codex HTTP response failed: {err}")))?;
     Ok(CodexHttpResponse { status, bytes })
 }
 
@@ -797,7 +800,7 @@ impl CodexHttpResponse {
 }
 
 fn normalize_sse(input: String) -> Bytes {
-    Bytes::from(filter_codex_events(&splice_completed_event(&input)))
+    Bytes::from(splice_completed_event_filtered(&input))
 }
 
 fn normalize_sse_stream(
@@ -878,7 +881,7 @@ impl CodexSseNormalizer {
         if event.starts_with("codex.") {
             return String::new();
         }
-        match event.as_str() {
+        match event {
             "response.output_item.done" => {
                 if let Some(item) = sse_event_data_json(block).and_then(extract_output_item) {
                     self.output_items.push(item);
@@ -910,12 +913,10 @@ fn join_chunks(first: Bytes, second: Bytes) -> Bytes {
     Bytes::from(output)
 }
 
-fn sse_event_name(block: &str) -> Option<String> {
-    block.lines().find_map(|line| {
-        line.strip_prefix("event:")
-            .map(str::trim_start)
-            .map(ToOwned::to_owned)
-    })
+fn sse_event_name(block: &str) -> Option<&str> {
+    block
+        .lines()
+        .find_map(|line| line.strip_prefix("event:").map(str::trim_start))
 }
 
 fn sse_event_data_json(block: &str) -> Option<serde_json::Value> {
@@ -998,14 +999,20 @@ fn contains_terminal_response_event(text: &str) -> bool {
     response_event_type(text).as_deref().is_some_and(terminal)
 }
 
-fn response_event_type(text: &str) -> Option<String> {
-    serde_json::from_str::<Value>(text).ok().and_then(|value| {
-        value
-            .get("type")
-            .or_else(|| value.get("event"))
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-    })
+fn response_event_type(text: &str) -> Option<Cow<'_, str>> {
+    #[derive(serde::Deserialize)]
+    struct EventType<'a> {
+        #[serde(borrow)]
+        #[serde(default)]
+        r#type: Option<Cow<'a, str>>,
+        #[serde(borrow)]
+        #[serde(default)]
+        event: Option<Cow<'a, str>>,
+    }
+
+    serde_json::from_str::<EventType<'_>>(text)
+        .ok()
+        .and_then(|value| value.r#type.or(value.event))
 }
 
 fn maybe_auth_failure(err: &AppError) -> bool {

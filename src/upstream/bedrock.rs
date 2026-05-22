@@ -352,8 +352,9 @@ impl AwsEventStreamDecoder {
             let payload_end = total_len - 4;
             let headers = parse_event_stream_headers(&message[12..headers_end])?;
             let payload = &message[headers_end..payload_end];
-            if let Some(chunk) = runtime_event_stream_message_to_sse(&headers, payload)? {
-                if chunk_contains_terminal_event(&chunk) {
+            if let Some((chunk, terminal)) = runtime_event_stream_message_to_sse(&headers, payload)?
+            {
+                if terminal {
                     self.has_seen_terminal_event = true;
                 }
                 chunks.push(chunk);
@@ -363,15 +364,10 @@ impl AwsEventStreamDecoder {
     }
 }
 
-fn chunk_contains_terminal_event(chunk: &Bytes) -> bool {
-    let s = String::from_utf8_lossy(chunk);
-    s.contains("event: message_stop")
-}
-
 fn runtime_event_stream_message_to_sse(
     headers: &HashMap<String, String>,
     payload: &[u8],
-) -> AppResult<Option<Bytes>> {
+) -> AppResult<Option<(Bytes, bool)>> {
     let event_type = headers.get(":event-type").map(String::as_str);
     match event_type {
         Some("chunk") => runtime_chunk_payload_to_sse(payload),
@@ -390,13 +386,16 @@ fn runtime_event_stream_message_to_sse(
     }
 }
 
-fn runtime_chunk_payload_to_sse(payload: &[u8]) -> AppResult<Option<Bytes>> {
+fn runtime_chunk_payload_to_sse(payload: &[u8]) -> AppResult<Option<(Bytes, bool)>> {
     let payload_bytes = runtime_chunk_payload_bytes(payload)?;
     if payload_bytes.is_empty() {
         return Ok(None);
     }
     if payload_bytes.starts_with(b"data:") || payload_bytes.starts_with(b"event:") {
-        return Ok(Some(Bytes::from(payload_bytes)));
+        let terminal = std::str::from_utf8(&payload_bytes)
+            .ok()
+            .is_some_and(|text| text.contains("event: message_stop"));
+        return Ok(Some((Bytes::from(payload_bytes), terminal)));
     }
     let text = std::str::from_utf8(&payload_bytes).map_err(|error| {
         AppError::Upstream(format!("Bedrock Runtime chunk was not UTF-8: {error}"))
@@ -406,13 +405,14 @@ fn runtime_chunk_payload_to_sse(payload: &[u8]) -> AppResult<Option<Bytes>> {
     // Parse payload as Anthropic messages stream JSON
     if let Ok(value) = serde_json::from_str::<Value>(text) {
         if let Some(event_type) = value.get("type").and_then(Value::as_str) {
-            return Ok(Some(Bytes::from(format!(
-                "event: {event_type}\ndata: {text}\n\n"
-            ))));
+            return Ok(Some((
+                Bytes::from(format!("event: {event_type}\ndata: {text}\n\n")),
+                event_type == "message_stop",
+            )));
         }
     }
 
-    Ok(Some(Bytes::from(format!("data: {text}\n\n"))))
+    Ok(Some((Bytes::from(format!("data: {text}\n\n")), false)))
 }
 
 fn runtime_chunk_payload_bytes(payload: &[u8]) -> AppResult<Vec<u8>> {

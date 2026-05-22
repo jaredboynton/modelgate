@@ -1,4 +1,12 @@
 pub fn splice_completed_event(input: &str) -> String {
+    splice_completed_event_with_filter(input, |_| false)
+}
+
+pub fn splice_completed_event_filtered(input: &str) -> String {
+    splice_completed_event_with_filter(input, is_codex_event)
+}
+
+fn splice_completed_event_with_filter(input: &str, should_drop: impl Fn(&str) -> bool) -> String {
     let mut output = String::new();
     let mut current = String::new();
     let mut output_items = Vec::new();
@@ -7,16 +15,22 @@ pub fn splice_completed_event(input: &str) -> String {
         current.push_str(line);
         current.push('\n');
         if line.is_empty() {
-            output.push_str(&process_event_block(&current, &mut output_items));
+            if !should_drop(&current) {
+                output.push_str(&process_event_block(&current, &mut output_items));
+            }
             current.clear();
         }
     }
 
-    if !current.is_empty() {
+    if !current.is_empty() && !should_drop(&current) {
         output.push_str(&process_event_block(&current, &mut output_items));
     }
 
     output
+}
+
+fn is_codex_event(block: &str) -> bool {
+    event_name(block).is_some_and(|event| event.starts_with("codex."))
 }
 
 fn process_event_block(block: &str, output_items: &mut Vec<serde_json::Value>) -> String {

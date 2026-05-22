@@ -1,4 +1,7 @@
-use unified_model_proxy_v2::sse::{filter::filter_codex_events, splice::splice_completed_event};
+use unified_model_proxy_v2::sse::{
+    filter::filter_codex_events,
+    splice::{splice_completed_event, splice_completed_event_filtered},
+};
 
 #[test]
 fn unit_sse_drops_codex_events_and_keeps_response_events() {
@@ -41,6 +44,27 @@ fn unit_sse_splices_output_item_done_items_into_response_completed() {
     let completed: serde_json::Value = serde_json::from_str(&completed_data).unwrap();
     assert_eq!(completed["response"]["output"][0]["id"], "call_1");
     assert_eq!(completed["response"]["output"][0]["type"], "function_call");
+}
+
+#[test]
+fn unit_sse_filtered_splice_drops_codex_events_in_same_pass() {
+    let input = concat!(
+        "event: codex.debug\n",
+        "data: nope\n",
+        "\n",
+        "event: response.output_item.done\n",
+        "data: {\"item\":{\"id\":\"call_1\",\"type\":\"function_call\"}}\n",
+        "\n",
+        "event: response.completed\n",
+        "data: {\"response\":{\"id\":\"resp_1\"}}\n",
+        "\n",
+    );
+
+    let spliced = splice_completed_event_filtered(input);
+
+    assert!(!spliced.contains("codex.debug"));
+    assert!(spliced.contains("response.output_item.done"));
+    assert!(spliced.contains(r#""output":[{"id":"call_1""#));
 }
 
 #[test]

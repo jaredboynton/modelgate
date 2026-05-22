@@ -1349,7 +1349,7 @@ async fn run_bridge_provider_task(
     provider_request: Value,
     full_request: Value,
 ) -> AppResult<Option<BridgeExecutionResult>> {
-    let (sender, mut receiver) = mpsc::channel(8);
+    let (sender, mut receiver) = mpsc::channel(REALTIME_WS_QUEUE_CAPACITY);
     let mut terminal_forwarded = false;
     let mut task = tokio::spawn(async move {
         let response = match execute_responses_request(

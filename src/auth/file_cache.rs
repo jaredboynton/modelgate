@@ -3,7 +3,7 @@ use std::{
     env,
     ffi::OsStr,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
     time::SystemTime,
 };
 
@@ -26,7 +26,7 @@ use crate::{AppError, AppResult};
 ///   subsequent fix is picked up immediately on the next request.
 #[derive(Clone, Debug, Default)]
 pub struct AuthFileCache {
-    inner: Arc<Mutex<HashMap<PathBuf, CachedAuthFile>>>,
+    inner: Arc<RwLock<HashMap<PathBuf, CachedAuthFile>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -61,7 +61,7 @@ impl AuthFileCache {
         let metadata = current_metadata(path)?;
         if let Some(cached) = self
             .inner
-            .lock()
+            .read()
             .expect("auth file cache poisoned")
             .get(path)
             .filter(|cached| cached.metadata == metadata)
@@ -70,13 +70,16 @@ impl AuthFileCache {
         }
 
         if !metadata.exists {
-            self.inner.lock().expect("auth file cache poisoned").insert(
-                path.to_path_buf(),
-                CachedAuthFile {
-                    metadata,
-                    value: None,
-                },
-            );
+            self.inner
+                .write()
+                .expect("auth file cache poisoned")
+                .insert(
+                    path.to_path_buf(),
+                    CachedAuthFile {
+                        metadata,
+                        value: None,
+                    },
+                );
             return Ok(None);
         }
 
@@ -84,32 +87,38 @@ impl AuthFileCache {
             Ok(bytes) => bytes,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 let metadata = AuthFileMetadata::absent();
-                self.inner.lock().expect("auth file cache poisoned").insert(
-                    path.to_path_buf(),
-                    CachedAuthFile {
-                        metadata,
-                        value: None,
-                    },
-                );
+                self.inner
+                    .write()
+                    .expect("auth file cache poisoned")
+                    .insert(
+                        path.to_path_buf(),
+                        CachedAuthFile {
+                            metadata,
+                            value: None,
+                        },
+                    );
                 return Ok(None);
             }
             Err(err) => return Err(AppError::Io(err)),
         };
         let value: Value = serde_json::from_slice(&bytes).map_err(AppError::Json)?;
         let value = Arc::new(value);
-        self.inner.lock().expect("auth file cache poisoned").insert(
-            path.to_path_buf(),
-            CachedAuthFile {
-                metadata,
-                value: Some(Arc::clone(&value)),
-            },
-        );
+        self.inner
+            .write()
+            .expect("auth file cache poisoned")
+            .insert(
+                path.to_path_buf(),
+                CachedAuthFile {
+                    metadata,
+                    value: Some(Arc::clone(&value)),
+                },
+            );
         Ok(Some(value))
     }
 
     pub fn invalidate(&self, path: &Path) {
         self.inner
-            .lock()
+            .write()
             .expect("auth file cache poisoned")
             .remove(path);
     }
@@ -166,7 +175,7 @@ impl AuthCacheKey {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedAuthCache<T> {
-    inner: Arc<Mutex<Option<ResolvedAuthEntry<T>>>>,
+    inner: Arc<RwLock<Option<ResolvedAuthEntry<T>>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -178,7 +187,7 @@ struct ResolvedAuthEntry<T> {
 impl<T> Default for ResolvedAuthCache<T> {
     fn default() -> Self {
         Self {
-            inner: Arc::new(Mutex::new(None)),
+            inner: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -197,7 +206,7 @@ where
     {
         if let Some(entry) = self
             .inner
-            .lock()
+            .read()
             .expect("resolved auth cache poisoned")
             .as_ref()
             .filter(|entry| entry.key == key)
@@ -207,7 +216,11 @@ where
         }
 
         let value = resolve()?;
-        *self.inner.lock().expect("resolved auth cache poisoned") = Some(ResolvedAuthEntry {
+        let mut guard = self.inner.write().expect("resolved auth cache poisoned");
+        if let Some(entry) = guard.as_ref().filter(|entry| entry.key == key).cloned() {
+            return Ok(entry.value);
+        }
+        *guard = Some(ResolvedAuthEntry {
             key,
             value: value.clone(),
         });
@@ -215,6 +228,6 @@ where
     }
 
     pub(crate) fn invalidate(&self) {
-        *self.inner.lock().expect("resolved auth cache poisoned") = None;
+        *self.inner.write().expect("resolved auth cache poisoned") = None;
     }
 }
