@@ -2141,15 +2141,15 @@ mod tests {
 
     #[tokio::test]
     async fn bridge_stream_eof_after_created_emits_response_failed() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/event-stream"),
-        );
         let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(Bytes::from_static(
             b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n",
         ))]);
-        let response = UpstreamResponse::stream("bedrock", StatusCode::OK, headers, stream);
+        let response = UpstreamResponse::stream(
+            "bedrock",
+            StatusCode::OK,
+            crate::upstream_response::sse_headers(),
+            stream,
+        );
         let (sender, mut receiver) = mpsc::channel(8);
 
         let error = forward_responses_response_to_ws(sender, response, json!({}))
@@ -2245,15 +2245,15 @@ mod tests {
 
     #[tokio::test]
     async fn bridge_top_level_stream_error_after_created_emits_single_response_failed() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/event-stream"),
-        );
         let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(Bytes::from_static(
             b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\nevent: error\ndata: {\"type\":\"error\",\"error\":{\"code\":\"provider_error\",\"message\":\"boom\"}}\n\n",
         ))]);
-        let response = UpstreamResponse::stream("bedrock", StatusCode::OK, headers, stream);
+        let response = UpstreamResponse::stream(
+            "bedrock",
+            StatusCode::OK,
+            crate::upstream_response::sse_headers(),
+            stream,
+        );
         let (sender, mut receiver) = mpsc::channel(8);
 
         let result = forward_responses_response_to_ws(sender, response, json!({}))

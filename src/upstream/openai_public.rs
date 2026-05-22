@@ -5,6 +5,7 @@ use serde_json::Value;
 use crate::{
     auth::codex::{load_codex_auth, refresh_codex_auth},
     error::openai_error_body,
+    upstream_response::observe_reqwest_response,
     AppError, AppResult, AppState, UpstreamResponse,
 };
 
@@ -242,14 +243,16 @@ async fn send_public_openai_http_once(
     body: Bytes,
 ) -> AppResult<reqwest::Response> {
     let request = build_public_openai_request(state, url, inbound_headers)?;
-    state
+    let response = state
         .http
         .request(method, request.url)
         .headers(request.headers)
         .body(body)
         .send()
         .await
-        .map_err(|error| AppError::Upstream(format!("OpenAI public transport: {error}")))
+        .map_err(|error| AppError::Upstream(format!("OpenAI public transport: {error}")))?;
+    observe_reqwest_response(OPENAI_PUBLIC_PROVIDER, &response);
+    Ok(response)
 }
 
 fn classify_or_passthrough_response(

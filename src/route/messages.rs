@@ -12,7 +12,9 @@ use crate::{
         plan_for_target, plan_with_resolver, plan_with_state, DispatchAction, DispatchEdge,
         RequestFormat,
     },
-    upstream, AppError, AppResult, AppState, UpstreamResponse,
+    upstream,
+    upstream_response::sse_headers,
+    AppError, AppResult, AppState, UpstreamResponse,
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -83,15 +85,10 @@ async fn execute_cursor_messages(
                     other => Some(other),
                 }
             });
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/event-stream"),
-        );
         return Ok(UpstreamResponse::stream(
             "cursor",
             StatusCode::OK,
-            headers,
+            sse_headers(),
             stream,
         ));
     }

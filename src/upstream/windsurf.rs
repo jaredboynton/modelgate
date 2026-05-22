@@ -5,7 +5,7 @@ use futures::{stream, StreamExt};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::{auth, AppError, AppResult, AppState};
+use crate::{auth, upstream_response::observe_reqwest_response, AppError, AppResult, AppState};
 
 pub const WINDSURF_PROVIDER: &str = "windsurf";
 const GET_CHAT_MESSAGE_PATH: &str = "/exa.api_server_pb.ApiServerService/GetChatMessage";
@@ -123,6 +123,7 @@ async fn send_chat_request(
         .send()
         .await
         .map_err(|error| AppError::Upstream(format!("Windsurf request failed: {error}")))?;
+    observe_reqwest_response(WINDSURF_PROVIDER, &response);
 
     if !response.status().is_success() {
         let status = response.status();
@@ -403,13 +404,10 @@ fn collect_text_fields(buffer: &[u8], chunks: &mut Vec<String>) -> AppResult<()>
                     break;
                 }
                 if field_num == 3 {
-                    chunks.push(String::from_utf8(buffer[offset..end].to_vec()).map_err(
-                        |error| {
-                            AppError::Upstream(format!(
-                                "Windsurf text chunk was not UTF-8: {error}"
-                            ))
-                        },
-                    )?);
+                    let text = std::str::from_utf8(&buffer[offset..end]).map_err(|error| {
+                        AppError::Upstream(format!("Windsurf text chunk was not UTF-8: {error}"))
+                    })?;
+                    chunks.push(text.to_owned());
                 }
                 offset = end;
             }

@@ -15,11 +15,13 @@ use crate::{
     rate_limit,
     sse::splice::splice_completed_event_filtered,
     state::CodexTransport,
+    upstream_response::observe_reqwest_response,
     AppError, AppResult, AppState,
 };
 
 pub const CODEX_RESPONSES_WSS_URL: &str = "wss://chatgpt.com/backend-api/codex/responses";
 pub const CODEX_RESPONSES_HTTP_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
+pub const CODEX_PROVIDER: &str = "codex";
 const CODEX_REMOTE_COMPACTION_V2_FEATURE: &str = "remote_compaction_v2";
 const CODEX_RESPONSES_ALLOWED_FIELDS: &[&str] = &[
     "model",
@@ -731,6 +733,7 @@ async fn send_http(
         .send()
         .await
         .map_err(|err| AppError::Upstream(format!("Codex HTTP request failed: {err}")))?;
+    observe_reqwest_response(CODEX_PROVIDER, &response);
     let status = response.status();
     let bytes = response
         .bytes()
@@ -751,10 +754,12 @@ async fn send_http_stream(
     for (name, value) in headers.iter() {
         request = request.header(name, value);
     }
-    request
+    let response = request
         .send()
         .await
-        .map_err(|err| AppError::Upstream(format!("Codex HTTP request failed: {err}")))
+        .map_err(|err| AppError::Upstream(format!("Codex HTTP request failed: {err}")))?;
+    observe_reqwest_response(CODEX_PROVIDER, &response);
+    Ok(response)
 }
 
 async fn response_to_stream(response: reqwest::Response) -> AppResult<CodexResponseStream> {
@@ -860,8 +865,12 @@ impl CodexSseNormalizer {
         self.pending.push_str(text);
         let mut output = String::new();
         while let Some(index) = self.pending.find("\n\n") {
-            let block = self.pending.drain(..index + 2).collect::<String>();
-            output.push_str(&self.process_block(&block));
+            let consumed = index + 2;
+            output.push_str(&process_sse_block(
+                &self.pending[..consumed],
+                &mut self.output_items,
+            ));
+            let _ = self.pending.drain(..consumed);
         }
         Bytes::from(output)
     }
@@ -871,32 +880,32 @@ impl CodexSseNormalizer {
             return Bytes::new();
         }
         let block = std::mem::take(&mut self.pending);
-        Bytes::from(self.process_block(&block))
+        Bytes::from(process_sse_block(&block, &mut self.output_items))
     }
+}
 
-    fn process_block(&mut self, block: &str) -> String {
-        let Some(event) = sse_event_name(block) else {
-            return block.to_string();
-        };
-        if event.starts_with("codex.") {
-            return String::new();
-        }
-        match event {
-            "response.output_item.done" => {
-                if let Some(item) = sse_event_data_json(block).and_then(extract_output_item) {
-                    self.output_items.push(item);
-                }
-                block.to_string()
+fn process_sse_block(block: &str, output_items: &mut Vec<serde_json::Value>) -> String {
+    let Some(event) = sse_event_name(block) else {
+        return block.to_string();
+    };
+    if event.starts_with("codex.") {
+        return String::new();
+    }
+    match event {
+        "response.output_item.done" => {
+            if let Some(item) = sse_event_data_json(block).and_then(extract_output_item) {
+                output_items.push(item);
             }
-            "response.completed" if !self.output_items.is_empty() => {
-                let Some(mut data) = sse_event_data_json(block) else {
-                    return block.to_string();
-                };
-                splice_output_items(&mut data, &self.output_items);
-                rewrite_sse_data(block, &data)
-            }
-            _ => block.to_string(),
+            block.to_string()
         }
+        "response.completed" if !output_items.is_empty() => {
+            let Some(mut data) = sse_event_data_json(block) else {
+                return block.to_string();
+            };
+            splice_output_items(&mut data, output_items);
+            rewrite_sse_data(block, &data)
+        }
+        _ => block.to_string(),
     }
 }
 
@@ -920,11 +929,15 @@ fn sse_event_name(block: &str) -> Option<&str> {
 }
 
 fn sse_event_data_json(block: &str) -> Option<serde_json::Value> {
-    let data = block
-        .lines()
-        .filter_map(|line| line.strip_prefix("data:").map(str::trim_start))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let mut data = String::new();
+    for line in block.lines() {
+        if let Some(value) = line.strip_prefix("data:") {
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(value.trim_start());
+        }
+    }
     serde_json::from_str(&data).ok()
 }
 

@@ -10,13 +10,14 @@ use axum::{
 };
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use bytes::Bytes;
-use futures::{stream, StreamExt};
+use futures::{future::Either, stream, StreamExt};
 use rand_core::{OsRng, RngCore};
 use serde_json::Value;
 
 use crate::{
     auth::bedrock::{resolve_bedrock_auth, BedrockAuth},
     model_alias::{self, Provider},
+    upstream_response::{observe_reqwest_response, sse_headers},
     AppError, AppResult, AppState, UpstreamResponse,
 };
 
@@ -261,12 +262,8 @@ async fn send_runtime_once(
 }
 
 fn runtime_eventstream_response_from_reqwest(response: reqwest::Response) -> UpstreamResponse {
+    observe_reqwest_response(BEDROCK_PROVIDER, &response);
     let status = response.status();
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/event-stream"),
-    );
     let decoder = AwsEventStreamDecoder::default();
     let stream = stream::unfold(
         (response.bytes_stream(), decoder, false),
@@ -296,14 +293,11 @@ fn runtime_eventstream_response_from_reqwest(response: reqwest::Response) -> Ups
         },
     )
     .flat_map(|result| match result {
-        Ok(chunks) => {
-            let mapped = chunks.into_iter().map(Ok).collect::<Vec<_>>();
-            stream::iter(mapped)
-        }
-        Err(error) => stream::iter(vec![Err(error)]),
+        Ok(chunks) => Either::Left(stream::iter(chunks.into_iter().map(Ok))),
+        Err(error) => Either::Right(stream::once(async { Err(error) })),
     });
 
-    UpstreamResponse::stream(BEDROCK_PROVIDER, status, headers, stream)
+    UpstreamResponse::stream(BEDROCK_PROVIDER, status, sse_headers(), stream)
 }
 
 #[derive(Default)]
@@ -403,17 +397,23 @@ fn runtime_chunk_payload_to_sse(payload: &[u8]) -> AppResult<Option<(Bytes, bool
     })?;
     let text = text.trim_end_matches(['\r', '\n']);
 
-    // Parse payload as Anthropic messages stream JSON
-    if let Ok(value) = serde_json::from_str::<Value>(text) {
-        if let Some(event_type) = value.get("type").and_then(Value::as_str) {
+    if let Ok(event) = serde_json::from_str::<RuntimeChunkEvent<'_>>(text) {
+        if let Some(event_type) = event.r#type {
+            let terminal = event_type == "message_stop";
             return Ok(Some((
                 Bytes::from(format!("event: {event_type}\ndata: {text}\n\n")),
-                event_type == "message_stop",
+                terminal,
             )));
         }
     }
 
     Ok(Some((Bytes::from(format!("data: {text}\n\n")), false)))
+}
+
+#[derive(serde::Deserialize)]
+struct RuntimeChunkEvent<'a> {
+    #[serde(borrow)]
+    r#type: Option<Cow<'a, str>>,
 }
 
 fn runtime_chunk_payload_bytes(payload: &[u8]) -> AppResult<Cow<'_, [u8]>> {

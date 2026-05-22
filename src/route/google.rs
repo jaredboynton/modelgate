@@ -1,7 +1,7 @@
 use axum::{
     body::{to_bytes, Bytes},
     extract::State,
-    http::{header, HeaderMap, HeaderValue, Method, Uri},
+    http::{HeaderMap, Method, Uri},
 };
 use futures::StreamExt;
 
@@ -10,7 +10,9 @@ use crate::{
         format_generate_content_response_for_caller, parse_google_generate_content_route,
         GoogleGenerateContentCaller, GoogleGenerateContentSseTranslator,
     },
-    upstream, AppError, AppResult, AppState, UpstreamResponse,
+    upstream,
+    upstream_response::sse_headers,
+    AppError, AppResult, AppState, UpstreamResponse,
 };
 
 pub async fn google(
@@ -91,15 +93,10 @@ async fn generate_content_response_for_caller(
                     other => Some(other),
                 }
             });
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/event-stream"),
-        );
         return Ok(UpstreamResponse::stream(
             provider,
             response.status,
-            headers,
+            sse_headers(),
             stream,
         ));
     }

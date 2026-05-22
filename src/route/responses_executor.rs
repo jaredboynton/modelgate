@@ -1,6 +1,6 @@
 use axum::{
     body::{to_bytes, Bytes},
-    http::{header, HeaderMap, HeaderValue, StatusCode},
+    http::{header, HeaderMap, StatusCode},
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -45,6 +45,7 @@ use crate::{
         self,
         cursor::session::{PendingToolContinuationLookup, PendingToolContinuationQuery},
     },
+    upstream_response::sse_headers,
     AppError, AppResult, AppState, UpstreamResponse,
 };
 
@@ -236,15 +237,10 @@ async fn execute_cursor_responses(
             });
         let stream =
             stream::once(async move { Ok::<Bytes, AppError>(initial) }).chain(content_stream);
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/event-stream"),
-        );
         return Ok(UpstreamResponse::stream(
             "cursor",
             StatusCode::OK,
-            headers,
+            sse_headers(),
             stream,
         ));
     }
@@ -413,15 +409,10 @@ async fn execute_windsurf_responses(
         let stream = stream::once(async move { Ok::<Bytes, AppError>(start) })
             .chain(content_stream)
             .chain(finish);
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/event-stream"),
-        );
         return Ok(UpstreamResponse::stream(
             "windsurf",
             StatusCode::OK,
-            headers,
+            sse_headers(),
             stream,
         ));
     }
@@ -436,15 +427,10 @@ async fn execute_windsurf_responses(
 }
 
 fn windsurf_static_responses_sse(response: Value) -> UpstreamResponse {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/event-stream"),
-    );
     UpstreamResponse::stream(
         "windsurf",
         StatusCode::OK,
-        headers,
+        sse_headers(),
         stream::once(async move {
             Ok::<Bytes, AppError>(crate::adapter::windsurf_responses::static_response_sse(
                 &response,
@@ -1070,15 +1056,10 @@ pub fn required_model(value: &serde_json::Value) -> AppResult<&str> {
 fn codex_response_stream(
     stream: upstream::codex::CodexResponseStream,
 ) -> AppResult<UpstreamResponse> {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/event-stream"),
-    );
     Ok(UpstreamResponse::stream(
         "codex",
         StatusCode::OK,
-        headers,
+        sse_headers(),
         stream,
     ))
 }
@@ -1116,15 +1097,10 @@ async fn anthropic_messages_response_to_responses(
                     other => Some(other),
                 }
             });
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/event-stream"),
-        );
         return Ok(UpstreamResponse::stream(
             provider,
             response.status,
-            headers,
+            sse_headers(),
             stream,
         ));
     }
@@ -1177,15 +1153,10 @@ async fn google_generate_content_response_to_responses(
                     other => Some(other),
                 }
             });
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/event-stream"),
-        );
         return Ok(UpstreamResponse::stream(
             provider,
             response.status,
-            headers,
+            sse_headers(),
             stream,
         ));
     }
@@ -1208,6 +1179,7 @@ mod tests {
         route::dispatch::{DispatchAction, DispatchEdge, RequestFormat},
     };
     use axum::body::to_bytes;
+    use http::HeaderValue;
 
     #[tokio::test]
     async fn anthropic_non_success_response_bypasses_success_conversion() {

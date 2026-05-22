@@ -13,6 +13,7 @@ use crate::AppError;
 const PRESERVED_HEADERS: &[&str] = &[
     "content-type",
     "cache-control",
+    "x-accel-buffering",
     "x-request-id",
     "request-id",
     "anthropic-request-id",
@@ -103,6 +104,7 @@ impl UpstreamResponse {
     }
 
     pub fn from_reqwest(provider: &'static str, response: reqwest::Response) -> Self {
+        observe_reqwest_response(provider, &response);
         let status = response.status();
         let headers = sanitize_headers(response.headers());
         let stream = response.bytes_stream().map_err(io::Error::other);
@@ -120,6 +122,32 @@ impl UpstreamResponse {
         self.latency_ms = Some(latency_ms);
         self
     }
+}
+
+pub fn sse_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/event-stream"),
+    );
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-cache, no-transform"),
+    );
+    headers.insert(
+        HeaderName::from_static("x-accel-buffering"),
+        HeaderValue::from_static("no"),
+    );
+    headers
+}
+
+pub fn observe_reqwest_response(provider: &'static str, response: &reqwest::Response) {
+    tracing::debug!(
+        provider,
+        status = %response.status(),
+        version = ?response.version(),
+        "upstream HTTP response"
+    );
 }
 
 impl IntoResponse for UpstreamResponse {

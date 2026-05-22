@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::stream;
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
 use unified_model_proxy_v2::{
     auth::bedrock::BedrockAuth,
-    error::AppError,
     upstream::{
         bedrock::{
             resolve_bedrock_runtime_model_id, runtime_forward_headers, runtime_invoke_url,
@@ -20,8 +20,28 @@ use unified_model_proxy_v2::{
             GoogleRequest,
         },
     },
-    AppState,
+    AppError, AppState, UpstreamResponse,
 };
+
+#[test]
+fn sse_headers_disable_intermediary_buffering() {
+    let headers = unified_model_proxy_v2::upstream_response::sse_headers();
+
+    assert_eq!(headers[http::header::CONTENT_TYPE], "text/event-stream");
+    assert_eq!(
+        headers[http::header::CACHE_CONTROL],
+        "no-cache, no-transform"
+    );
+    assert_eq!(headers["x-accel-buffering"], "no");
+
+    let response = UpstreamResponse::stream(
+        "test",
+        StatusCode::OK,
+        headers,
+        stream::empty::<Result<Bytes, AppError>>(),
+    );
+    assert_eq!(response.headers["x-accel-buffering"], "no");
+}
 
 fn state_with_google_key(key: Option<&str>) -> AppState {
     let codex_home = tempfile::tempdir().unwrap();

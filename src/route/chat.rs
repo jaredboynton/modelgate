@@ -18,7 +18,9 @@ use crate::{
         },
         models::validate_codex_catalog_request,
     },
-    upstream, AppError, AppResult, AppState, UpstreamResponse,
+    upstream,
+    upstream_response::sse_headers,
+    AppError, AppResult, AppState, UpstreamResponse,
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -103,15 +105,10 @@ async fn execute_cursor_chat(
                     other => Some(other),
                 }
             });
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/event-stream"),
-        );
         return Ok(UpstreamResponse::stream(
             "cursor",
             StatusCode::OK,
-            headers,
+            sse_headers(),
             stream,
         ));
     }
@@ -233,15 +230,10 @@ async fn execute_windsurf_chat(
         let stream = stream::once(async move { Ok::<Bytes, AppError>(initial) })
             .chain(content_stream)
             .chain(stream::once(async move { Ok::<Bytes, AppError>(finish) }));
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/event-stream"),
-        );
         return Ok(UpstreamResponse::stream(
             "windsurf",
             StatusCode::OK,
-            headers,
+            sse_headers(),
             stream,
         ));
     }
@@ -294,15 +286,10 @@ fn windsurf_chat_tool_stream(
 }
 
 fn windsurf_static_sse(bytes: Vec<u8>) -> UpstreamResponse {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/event-stream"),
-    );
     UpstreamResponse::stream(
         "windsurf",
         StatusCode::OK,
-        headers,
+        sse_headers(),
         stream::once(async move { Ok::<Bytes, AppError>(Bytes::from(bytes)) }),
     )
 }
