@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     env,
     net::SocketAddr,
     path::PathBuf,
@@ -9,6 +9,7 @@ use std::{
     },
     time::{Duration, SystemTime},
 };
+use tokio::sync::OwnedSemaphorePermit;
 
 use crate::{
     amp_compat::AmpStore,
@@ -32,17 +33,19 @@ const WINDSURF_CLOUD_BASE_URL: &str = "https://server.codeium.com";
 const TEST_CODEX_RESPONSES_WSS_URL: &str = "ws://127.0.0.1:1/backend-api/codex/responses";
 const TEST_CODEX_RESPONSES_HTTP_URL: &str = "http://127.0.0.1:1/backend-api/codex/responses";
 const DEFAULT_BEDROCK_REGION: &str = "us-west-2";
+const DEFAULT_CODEX_WSS_POOL_SIZE: usize = 4;
+const RESPONSE_STORAGE_MAX_ENTRIES: usize = 4096;
+pub type CodexHandshakePermit = Option<OwnedSemaphorePermit>;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub http: reqwest::Client,
     pub specter: specter::Client,
     pub amp_store: AmpStore,
-    pub codex_home: PathBuf,
-    pub auth_home: PathBuf,
+    pub codex_home: Arc<PathBuf>,
+    pub auth_home: Arc<PathBuf>,
     pub google_api_key: Option<Arc<str>>,
     pub bedrock_region: Arc<str>,
-    pub runtime: RuntimeConfig,
+    pub runtime: Arc<RuntimeConfig>,
     pub routing_config: HotRoutingConfig,
     pub codex_catalog: CodexCatalogCache,
     pub cursor_sessions: Arc<CursorSessionStore>,
@@ -54,9 +57,15 @@ pub struct AppState {
     pub(crate) bedrock_auth: ResolvedAuthCache<BedrockAuth>,
     codex_handshake_sem: Option<Arc<tokio::sync::Semaphore>>,
     codex_handshake_times: Arc<std::sync::Mutex<std::collections::VecDeque<std::time::Instant>>>,
+    codex_ws_pool: Arc<tokio::sync::Mutex<VecDeque<CodexWsPoolEntry>>>,
     response_storage: ResponseStorage,
     codex_wss_latched: Arc<AtomicBool>,
     codex_wss_failures: Arc<AtomicU32>,
+}
+
+struct CodexWsPoolEntry {
+    key: String,
+    websocket: specter::WebSocket,
 }
 
 #[derive(Clone, Debug)]
@@ -69,6 +78,7 @@ pub struct RuntimeConfig {
     pub codex_wss_connect_timeout: Duration,
     pub codex_max_concurrent: usize,
     pub codex_handshakes_per_min: u32,
+    pub codex_wss_pool_size: usize,
     pub codex_catalog_client_version: String,
     pub codex_catalog_ttl: Duration,
     pub google_generate_base_url: String,
@@ -116,6 +126,7 @@ pub struct NewResponseStateRecord {
 struct ResponseStorage {
     inner: Arc<Mutex<ResponseStorageInner>>,
     ttl: Duration,
+    max_entries: usize,
 }
 
 #[derive(Default)]
@@ -129,6 +140,7 @@ impl Default for ResponseStorage {
         Self {
             inner: Arc::new(Mutex::new(ResponseStorageInner::default())),
             ttl: Duration::from_secs(60 * 60),
+            max_entries: RESPONSE_STORAGE_MAX_ENTRIES,
         }
     }
 }
@@ -163,14 +175,13 @@ impl AppState {
         let codex_max_concurrent = runtime.codex_max_concurrent;
 
         Self {
-            http: build_http_client(),
-            specter: specter::Client::new().expect("failed to construct Specter client"),
+            specter: build_specter_client(),
             amp_store: AmpStore::from_env(),
-            codex_home,
-            auth_home,
+            codex_home: Arc::new(codex_home),
+            auth_home: Arc::new(auth_home),
             google_api_key,
             bedrock_region,
-            runtime,
+            runtime: Arc::new(runtime),
             routing_config,
             codex_catalog,
             cursor_sessions: Arc::new(CursorSessionStore::new()),
@@ -188,6 +199,7 @@ impl AppState {
             codex_handshake_times: Arc::new(std::sync::Mutex::new(
                 std::collections::VecDeque::new(),
             )),
+            codex_ws_pool: Arc::new(tokio::sync::Mutex::new(VecDeque::new())),
             response_storage: ResponseStorage::default(),
             codex_wss_latched: Arc::new(AtomicBool::new(false)),
             codex_wss_failures: Arc::new(AtomicU32::new(0)),
@@ -203,14 +215,13 @@ impl AppState {
         let codex_max_concurrent = runtime.codex_max_concurrent;
 
         Self {
-            http: build_http_client(),
-            specter: specter::Client::new().expect("failed to construct Specter client"),
+            specter: build_specter_client(),
             amp_store: AmpStore::new(auth_home.join("amp-threads")),
-            codex_home,
-            auth_home,
+            codex_home: Arc::new(codex_home),
+            auth_home: Arc::new(auth_home),
             google_api_key: None,
             bedrock_region: Arc::<str>::from(DEFAULT_BEDROCK_REGION),
-            runtime,
+            runtime: Arc::new(runtime),
             routing_config,
             codex_catalog,
             cursor_sessions: Arc::new(CursorSessionStore::new()),
@@ -228,6 +239,7 @@ impl AppState {
             codex_handshake_times: Arc::new(std::sync::Mutex::new(
                 std::collections::VecDeque::new(),
             )),
+            codex_ws_pool: Arc::new(tokio::sync::Mutex::new(VecDeque::new())),
             response_storage: ResponseStorage::default(),
             codex_wss_latched: Arc::new(AtomicBool::new(false)),
             codex_wss_failures: Arc::new(AtomicU32::new(0)),
@@ -285,11 +297,49 @@ impl AppState {
         self.codex_wss_failures.store(0, Ordering::Relaxed);
     }
 
+    pub(crate) async fn take_codex_ws(&self, key: &str) -> Option<specter::WebSocket> {
+        if self.runtime.codex_wss_pool_size == 0 {
+            return None;
+        }
+        let mut pool = self.codex_ws_pool.lock().await;
+        let index = pool.iter().position(|entry| entry.key == key)?;
+        pool.remove(index).map(|entry| entry.websocket)
+    }
+
+    pub(crate) async fn store_codex_ws(&self, key: String, websocket: specter::WebSocket) {
+        let max_size = self.runtime.codex_wss_pool_size;
+        if max_size == 0 {
+            return;
+        }
+        let mut pool = self.codex_ws_pool.lock().await;
+        pool.retain(|entry| entry.key != key);
+        pool.push_back(CodexWsPoolEntry { key, websocket });
+        while pool.len() > max_size {
+            pool.pop_front();
+        }
+    }
+
     /// Acquire a handshake permit for Codex (WSS connect or HTTP call).
-    /// Enforces the configured `codex_max_concurrent` (at handshake start) and
+    /// Enforces the configured `codex_max_concurrent` (across handshake / HTTP
+    /// request start) and
     /// `codex_handshakes_per_min` rolling window. Returns a rate-limit error
     /// with a short retry-after when either limit is hit.
-    pub async fn codex_acquire_handshake(&self) -> AppResult<()> {
+    pub async fn codex_acquire_handshake(&self) -> AppResult<CodexHandshakePermit> {
+        // Concurrency limit on simultaneous Codex WSS handshakes / HTTP call starts.
+        // The owned permit is returned to the caller and is dropped only after the
+        // network handshake/request future resolves. Acquire before recording the
+        // rolling rate-limit timestamp so queued callers do not burn handshake budget.
+        let permit = if let Some(sem) = &self.codex_handshake_sem {
+            Some(
+                sem.clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| AppError::Upstream("codex concurrency semaphore closed".into()))?,
+            )
+        } else {
+            None
+        };
+
         // Rate limit (handshakes per minute window)
         if self.runtime.codex_handshakes_per_min > 0 {
             let mut times = self
@@ -314,19 +364,7 @@ impl AppState {
             times.push_back(now);
         }
 
-        // Concurrency limit on handshake starts (not full stream lifetime in this pass)
-        if let Some(sem) = &self.codex_handshake_sem {
-            // Acquire and immediately release the permit; this bounds the number of
-            // simultaneous *new* Codex conversations starting. Holding across the
-            // full stream would require threading the permit into the response future.
-            let _permit = sem
-                .acquire()
-                .await
-                .map_err(|_| AppError::Upstream("codex concurrency semaphore closed".into()))?;
-            drop(_permit);
-        }
-
-        Ok(())
+        Ok(permit)
     }
 
     pub fn remember_response_for_continuation(
@@ -338,6 +376,7 @@ impl AppState {
         storage
             .volatile
             .insert(record.adapter_response_id.clone(), Arc::clone(&record));
+        self.response_storage.prune_locked(&mut storage);
         (*record).clone()
     }
 
@@ -350,6 +389,7 @@ impl AppState {
         storage
             .public_retrievable
             .insert(record.adapter_response_id.clone(), Arc::clone(&record));
+        self.response_storage.prune_locked(&mut storage);
         (*record).clone()
     }
 
@@ -382,22 +422,8 @@ impl AppState {
 
     pub fn cleanup_expired_responses(&self) {
         let mut storage = self.response_storage.lock();
-        storage
-            .volatile
-            .retain(|_, record| !self.response_storage.is_expired(record));
-        storage
-            .public_retrievable
-            .retain(|_, record| !self.response_storage.is_expired(record));
+        self.response_storage.prune_locked(&mut storage);
     }
-}
-
-fn build_http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .pool_idle_timeout(Duration::from_secs(90))
-        .pool_max_idle_per_host(16)
-        .tcp_keepalive(Duration::from_secs(60))
-        .build()
-        .expect("failed to construct shared reqwest client")
 }
 
 impl ResponseStorage {
@@ -411,6 +437,49 @@ impl ResponseStorage {
             .elapsed()
             .map(|elapsed| elapsed > self.ttl)
             .unwrap_or(false)
+    }
+
+    fn prune_locked(&self, storage: &mut ResponseStorageInner) {
+        let ttl = self.ttl;
+        storage
+            .volatile
+            .retain(|_, record| !is_expired(ttl, record));
+        storage
+            .public_retrievable
+            .retain(|_, record| !is_expired(ttl, record));
+        prune_map_to_max(&mut storage.public_retrievable, self.max_entries);
+        prune_map_to_max(&mut storage.volatile, self.max_entries);
+    }
+}
+
+fn build_specter_client() -> specter::Client {
+    specter::Client::builder()
+        .streaming_timeouts()
+        .pool_acquire_timeout(Duration::from_millis(250))
+        .prefer_http2(true)
+        .h3_upgrade(false)
+        .build()
+        .expect("failed to construct Specter client")
+}
+
+fn is_expired(ttl: Duration, record: &ResponseStateRecord) -> bool {
+    record
+        .updated_at
+        .elapsed()
+        .map(|elapsed| elapsed > ttl)
+        .unwrap_or(false)
+}
+
+fn prune_map_to_max(map: &mut HashMap<String, Arc<ResponseStateRecord>>, max_entries: usize) {
+    while map.len() > max_entries {
+        let Some(oldest_key) = map
+            .iter()
+            .min_by_key(|(_, record)| record.updated_at)
+            .map(|(key, _)| key.clone())
+        else {
+            break;
+        };
+        map.remove(&oldest_key);
     }
 }
 
@@ -468,6 +537,11 @@ impl RuntimeConfig {
             )?,
             codex_max_concurrent: usize_env(&mut var, "UMP_V2_CODEX_MAX_CONCURRENT", 20)?,
             codex_handshakes_per_min: u32_env(&mut var, "UMP_V2_CODEX_HANDSHAKES_PER_MIN", 55)?,
+            codex_wss_pool_size: usize_env(
+                &mut var,
+                "UMP_V2_CODEX_WSS_POOL_SIZE",
+                DEFAULT_CODEX_WSS_POOL_SIZE,
+            )?,
             codex_catalog_client_version: codex_catalog_config.client_version,
             codex_catalog_ttl: codex_catalog_config.ttl,
             google_generate_base_url: var("UMP_V2_GOOGLE_GENERATE_BASE_URL")
@@ -509,6 +583,7 @@ impl Default for RuntimeConfig {
             codex_wss_connect_timeout: Duration::from_millis(5000),
             codex_max_concurrent: 20,
             codex_handshakes_per_min: 55,
+            codex_wss_pool_size: DEFAULT_CODEX_WSS_POOL_SIZE,
             codex_catalog_client_version: CodexCatalogConfig::default().client_version,
             codex_catalog_ttl: CodexCatalogConfig::default().ttl,
             google_generate_base_url: GOOGLE_GENERATE_BASE_URL.to_string(),
@@ -615,6 +690,7 @@ mod tests {
         );
         assert_eq!(config.codex_max_concurrent, 20);
         assert_eq!(config.codex_handshakes_per_min, 55);
+        assert_eq!(config.codex_wss_pool_size, 4);
         assert_eq!(
             config.google_generate_base_url,
             "https://generativelanguage.googleapis.com"
@@ -637,6 +713,7 @@ mod tests {
             ("UMP_V2_CODEX_WSS_CONNECT_TIMEOUT_MS", "250"),
             ("UMP_V2_CODEX_MAX_CONCURRENT", "7"),
             ("UMP_V2_CODEX_HANDSHAKES_PER_MIN", "9"),
+            ("UMP_V2_CODEX_WSS_POOL_SIZE", "3"),
             ("UMP_V2_GOOGLE_GENERATE_BASE_URL", "http://127.0.0.1:9999"),
             ("UMP_V2_WINDSURF_CLOUD_BASE_URL", "http://127.0.0.1:19999"),
             ("UMP_V2_BEDROCK_DISCOVERY_TIMEOUT_MS", "125"),
@@ -651,6 +728,7 @@ mod tests {
         assert_eq!(config.codex_wss_connect_timeout, Duration::from_millis(250));
         assert_eq!(config.codex_max_concurrent, 7);
         assert_eq!(config.codex_handshakes_per_min, 9);
+        assert_eq!(config.codex_wss_pool_size, 3);
         assert_eq!(config.google_generate_base_url, "http://127.0.0.1:9999");
         assert_eq!(config.windsurf_cloud_base_url, "http://127.0.0.1:19999");
         assert_eq!(config.bedrock_discovery_timeout, Duration::from_millis(125));
@@ -690,5 +768,26 @@ mod tests {
 
         state.reset_codex_wss_latch();
         assert!(!state.codex_wss_latched());
+    }
+
+    #[tokio::test]
+    async fn codex_handshake_permit_is_held_until_dropped() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState::for_tests(temp.path().join("codex"), temp.path().join("ump"));
+        state.codex_handshake_sem = Some(Arc::new(tokio::sync::Semaphore::new(1)));
+        Arc::make_mut(&mut state.runtime).codex_handshakes_per_min = 0;
+
+        let first = state.codex_acquire_handshake().await.unwrap();
+        assert!(first.is_some());
+
+        let blocked =
+            tokio::time::timeout(Duration::from_millis(10), state.codex_acquire_handshake()).await;
+        assert!(
+            blocked.is_err(),
+            "second acquire should wait while permit is held"
+        );
+
+        drop(first);
+        assert!(state.codex_acquire_handshake().await.unwrap().is_some());
     }
 }

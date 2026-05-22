@@ -1,12 +1,13 @@
 use std::{convert::Infallible, io};
 
 use axum::{
-    body::Body,
+    body::{to_bytes, Body},
     http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
+use specter::{Headers as SpecterHeaders, Response as SpecterResponse};
 
 use crate::AppError;
 
@@ -31,6 +32,9 @@ const HOP_BY_HOP_HEADERS: &[&str] = &[
     "transfer-encoding",
     "upgrade",
 ];
+
+pub const MAX_UPSTREAM_BODY_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_UPSTREAM_ERROR_BODY_BYTES: usize = 1024 * 1024;
 
 pub struct UpstreamResponse {
     pub status: StatusCode,
@@ -103,15 +107,13 @@ impl UpstreamResponse {
         }
     }
 
-    pub fn from_reqwest(provider: &'static str, response: reqwest::Response) -> Self {
-        observe_reqwest_response(provider, &response);
+    pub fn from_specter(provider: &'static str, response: SpecterResponse) -> Self {
+        observe_specter_response(provider, &response);
         let status = response.status();
-        let headers = sanitize_headers(response.headers());
-        let stream = response.bytes_stream().map_err(io::Error::other);
         Self {
             status,
-            headers,
-            body: Body::from_stream(stream),
+            headers: sanitize_specter_headers(response.headers()),
+            body: Body::from(response.into_body()),
             provider,
             upstream_status: Some(status),
             latency_ms: None,
@@ -141,13 +143,50 @@ pub fn sse_headers() -> HeaderMap {
     headers
 }
 
-pub fn observe_reqwest_response(provider: &'static str, response: &reqwest::Response) {
+pub fn observe_specter_response(provider: &'static str, response: &SpecterResponse) {
     tracing::debug!(
         provider,
         status = %response.status(),
-        version = ?response.version(),
+        version = response.http_version(),
         "upstream HTTP response"
     );
+}
+
+pub async fn collect_upstream_body(body: Body) -> Result<Bytes, AppError> {
+    collect_limited_body(body, MAX_UPSTREAM_BODY_BYTES, "upstream response").await
+}
+
+pub async fn collect_upstream_error_body(body: Body) -> Result<Bytes, AppError> {
+    collect_limited_body(
+        body,
+        MAX_UPSTREAM_ERROR_BODY_BYTES,
+        "upstream error response",
+    )
+    .await
+}
+
+async fn collect_limited_body(body: Body, limit: usize, context: &str) -> Result<Bytes, AppError> {
+    to_bytes(body, limit).await.map_err(|error| {
+        AppError::Upstream(format!(
+            "{context} body exceeded {limit} bytes or could not be read: {error}"
+        ))
+    })
+}
+
+pub fn sanitize_specter_headers(headers: &SpecterHeaders) -> HeaderMap {
+    let mut sanitized = HeaderMap::new();
+    for (name, value) in headers.iter() {
+        let Ok(name) = HeaderName::from_bytes(name.as_bytes()) else {
+            continue;
+        };
+        let Ok(value) = HeaderValue::from_str(value) else {
+            continue;
+        };
+        if should_preserve_header(&name) {
+            sanitized.insert(name, value);
+        }
+    }
+    sanitized
 }
 
 impl IntoResponse for UpstreamResponse {
