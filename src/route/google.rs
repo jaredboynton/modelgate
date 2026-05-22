@@ -1,5 +1,5 @@
 use axum::{
-    body::{to_bytes, Bytes},
+    body::Bytes,
     extract::State,
     http::{HeaderMap, Method, Uri},
 };
@@ -11,7 +11,7 @@ use crate::{
         GoogleGenerateContentCaller, GoogleGenerateContentSseTranslator,
     },
     upstream,
-    upstream_response::sse_headers,
+    upstream_response::{collect_upstream_body, sse_headers},
     AppError, AppResult, AppState, UpstreamResponse,
 };
 
@@ -101,9 +101,7 @@ async fn generate_content_response_for_caller(
         ));
     }
 
-    let body = to_bytes(response.body, usize::MAX)
-        .await
-        .map_err(|error| AppError::Upstream(error.to_string()))?;
+    let body = collect_upstream_body(response.body).await?;
     let google: serde_json::Value = serde_json::from_slice(&body)?;
     let shaped = format_generate_content_response_for_caller(google, caller)?;
     UpstreamResponse::json(provider, shaped).map_err(AppError::Json)

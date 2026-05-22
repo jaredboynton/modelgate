@@ -167,10 +167,7 @@ async fn codex_catalog_for_client_version(
 
     let headers = codex_headers(state)?;
     let url = shared_codex_models_endpoint(&state.runtime.codex_models_url, client_version)?;
-    let mut request = state.http.get(url);
-    for (name, value) in headers.iter() {
-        request = request.header(name, value);
-    }
+    let request = state.specter.get(url).headers(headers.clone());
     let response = request
         .send()
         .await
@@ -178,7 +175,6 @@ async fn codex_catalog_for_client_version(
     let status = response.status();
     let text = response
         .text()
-        .await
         .map_err(|error| AppError::Upstream(format!("Codex models body failed: {error}")))?;
     if !status.is_success() {
         return Err(AppError::Upstream(format!(

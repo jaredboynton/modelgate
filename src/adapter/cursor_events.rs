@@ -51,14 +51,19 @@ impl ResponsesSseEvent {
     /// existing Responses adapter:
     /// `event: <event-name>\ndata: <single-line compact JSON>\n\n`.
     pub fn to_wire(&self) -> String {
-        let mut out = String::with_capacity(self.event.len() + 64);
-        out.push_str("event: ");
-        out.push_str(&self.event);
-        out.push('\n');
-        out.push_str("data: ");
-        out.push_str(&self.data.to_string());
-        out.push_str("\n\n");
-        out
+        let mut out = Vec::with_capacity(self.event.len() + 64);
+        self.write_wire(&mut out);
+        String::from_utf8(out).expect("Responses SSE frames are UTF-8")
+    }
+
+    pub fn write_wire(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(b"event: ");
+        out.extend_from_slice(self.event.as_bytes());
+        out.push(b'\n');
+        out.extend_from_slice(b"data: ");
+        serde_json::to_writer(&mut *out, &self.data)
+            .expect("serde_json::Value is infallibly serializable");
+        out.extend_from_slice(b"\n\n");
     }
 }
 

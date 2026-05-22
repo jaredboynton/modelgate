@@ -1,7 +1,6 @@
 use std::{borrow::Cow, collections::VecDeque, time::Duration};
 
 use axum::{
-    body::to_bytes,
     extract::{
         ws::{close_code, CloseFrame, Message, WebSocket, WebSocketUpgrade},
         State,
@@ -37,7 +36,7 @@ use crate::{
 pub const REALTIME_WS_HANDSHAKE_TIMEOUT_MS: u64 = 5000;
 pub const REALTIME_WS_HEARTBEAT_TIMEOUT_MS: u64 = 30000;
 pub const REALTIME_WS_MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
-pub const REALTIME_WS_QUEUE_CAPACITY: usize = 32;
+pub const REALTIME_WS_QUEUE_CAPACITY: usize = 128;
 pub const REALTIME_WS_QUEUE_SATURATION_TIMEOUT_MS: u64 = 2000;
 
 const OPENAI_PUBLIC_REALTIME_MODEL: &str = "gpt-realtime-2";
@@ -1164,9 +1163,7 @@ async fn forward_responses_response_to_ws(
 ) -> AppResult<BridgeExecutionResult> {
     if !response.status.is_success() {
         let status = response.status;
-        let body = to_bytes(response.body, usize::MAX)
-            .await
-            .map_err(|error| AppError::Upstream(error.to_string()))?;
+        let body = crate::upstream_response::collect_upstream_error_body(response.body).await?;
         let message = String::from_utf8_lossy(&body);
         send_bridge_frame(
             &sender,
@@ -1179,9 +1176,7 @@ async fn forward_responses_response_to_ws(
     }
 
     if !is_sse_response(&response.headers) {
-        let body = to_bytes(response.body, usize::MAX)
-            .await
-            .map_err(|error| AppError::Upstream(error.to_string()))?;
+        let body = crate::upstream_response::collect_upstream_body(response.body).await?;
         let response_json: Value = serde_json::from_slice(&body)?;
         let response_id = response_json
             .get("id")

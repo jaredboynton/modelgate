@@ -1,4 +1,4 @@
-use bytes::Bytes;
+use bytes::{Buf, Bytes, BytesMut};
 use serde_json::Value;
 
 use crate::{AppError, AppResult};
@@ -11,7 +11,7 @@ pub struct ResponsesSseFrame {
 
 #[derive(Debug, Default)]
 pub struct ResponsesSseParser {
-    buffer: Vec<u8>,
+    buffer: BytesMut,
     saw_completed: bool,
 }
 
@@ -31,7 +31,7 @@ impl ResponsesSseParser {
                 }
                 frames.push(frame);
             }
-            let _ = self.buffer.drain(..end.consumed);
+            self.buffer.advance(end.consumed);
         }
 
         Ok(frames)
@@ -40,7 +40,7 @@ impl ResponsesSseParser {
     pub fn finish(&mut self) -> AppResult<Vec<ResponsesSseFrame>> {
         let mut frames = Vec::new();
         if !self.buffer.iter().all(|byte| byte.is_ascii_whitespace()) {
-            let remaining = std::mem::take(&mut self.buffer);
+            let remaining = self.buffer.split().freeze();
             if let Some(frame) = self.parse_event(&remaining)? {
                 if is_responses_terminal_event(&frame.data) {
                     self.saw_completed = true;
@@ -58,37 +58,37 @@ impl ResponsesSseParser {
     }
 
     fn parse_event(&self, event: &[u8]) -> AppResult<Option<ResponsesSseFrame>> {
-        let event = std::str::from_utf8(event)
-            .map_err(|error| AppError::Upstream(format!("invalid Responses SSE UTF-8: {error}")))?;
         let mut event_name = None;
-        let mut data = String::new();
+        let mut data = DataField::default();
 
-        for raw_line in event.lines() {
-            let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
-            if line.is_empty() || line.starts_with(':') {
+        for raw_line in event.split(|byte| *byte == b'\n') {
+            let line = raw_line.strip_suffix(b"\r").unwrap_or(raw_line);
+            if line.is_empty() || line.starts_with(b":") {
                 continue;
             }
-            let Some((field, raw_value)) = line.split_once(':') else {
+            let Some(colon) = line.iter().position(|byte| *byte == b':') else {
                 continue;
             };
-            let value = raw_value.strip_prefix(' ').unwrap_or(raw_value);
+            let field = &line[..colon];
+            let raw_value = &line[colon + 1..];
+            let value = raw_value.strip_prefix(b" ").unwrap_or(raw_value);
             match field {
-                "event" => event_name = Some(value.to_string()),
-                "data" => {
-                    if !data.is_empty() {
-                        data.push('\n');
-                    }
-                    data.push_str(value);
+                b"event" => {
+                    let value = std::str::from_utf8(value).map_err(|error| {
+                        AppError::Upstream(format!("invalid Responses SSE UTF-8: {error}"))
+                    })?;
+                    event_name = Some(value.to_string());
                 }
+                b"data" => data.push(value),
                 _ => {}
             }
         }
 
-        if data.is_empty() {
+        let Some(data) = data.into_bytes() else {
             return Ok(None);
-        }
+        };
 
-        if data == "[DONE]" {
+        if data.as_ref() == b"[DONE]" {
             if self.saw_completed {
                 return Ok(None);
             }
@@ -97,11 +97,48 @@ impl ResponsesSseParser {
             ));
         }
 
-        let data = serde_json::from_str(&data)?;
+        std::str::from_utf8(data.as_ref())
+            .map_err(|error| AppError::Upstream(format!("invalid Responses SSE UTF-8: {error}")))?;
+        let data = serde_json::from_slice(data.as_ref())?;
         Ok(Some(ResponsesSseFrame {
             event: event_name,
             data,
         }))
+    }
+}
+
+#[derive(Default)]
+enum DataField<'a> {
+    #[default]
+    Empty,
+    Borrowed(&'a [u8]),
+    Owned(Vec<u8>),
+}
+
+impl<'a> DataField<'a> {
+    fn push(&mut self, value: &'a [u8]) {
+        match self {
+            Self::Empty => *self = Self::Borrowed(value),
+            Self::Borrowed(first) => {
+                let mut data = Vec::with_capacity(first.len() + 1 + value.len());
+                data.extend_from_slice(first);
+                data.push(b'\n');
+                data.extend_from_slice(value);
+                *self = Self::Owned(data);
+            }
+            Self::Owned(data) => {
+                data.push(b'\n');
+                data.extend_from_slice(value);
+            }
+        }
+    }
+
+    fn into_bytes(self) -> Option<std::borrow::Cow<'a, [u8]>> {
+        match self {
+            Self::Empty => None,
+            Self::Borrowed(data) => Some(std::borrow::Cow::Borrowed(data)),
+            Self::Owned(data) => Some(std::borrow::Cow::Owned(data)),
+        }
     }
 }
 

@@ -1,5 +1,5 @@
 use axum::{
-    body::{to_bytes, Bytes},
+    body::Bytes,
     http::{header, HeaderMap, StatusCode},
 };
 use std::{
@@ -45,7 +45,7 @@ use crate::{
         self,
         cursor::session::{PendingToolContinuationLookup, PendingToolContinuationQuery},
     },
-    upstream_response::sse_headers,
+    upstream_response::{collect_upstream_body, sse_headers},
     AppError, AppResult, AppState, UpstreamResponse,
 };
 
@@ -211,7 +211,7 @@ async fn execute_cursor_responses(
                 }
                 let mut bytes = Vec::new();
                 for frame in cursor_responses::emit_event(&event, &mut ctx) {
-                    bytes.extend_from_slice(frame.to_wire().as_bytes());
+                    frame.write_wire(&mut bytes);
                 }
                 if !finalized {
                     if let Some(response) = cursor_response_from_context_if_done(&ctx) {
@@ -1105,9 +1105,7 @@ async fn anthropic_messages_response_to_responses(
         ));
     }
 
-    let body = to_bytes(response.body, usize::MAX)
-        .await
-        .map_err(|error| AppError::Upstream(error.to_string()))?;
+    let body = collect_upstream_body(response.body).await?;
 
     let mut message: serde_json::Value = serde_json::from_slice(&body)?;
     if let Some(object) = message.as_object_mut() {
@@ -1161,9 +1159,7 @@ async fn google_generate_content_response_to_responses(
         ));
     }
 
-    let body = to_bytes(response.body, usize::MAX)
-        .await
-        .map_err(|error| AppError::Upstream(error.to_string()))?;
+    let body = collect_upstream_body(response.body).await?;
     let google: serde_json::Value = serde_json::from_slice(&body)?;
     let responses =
         google_generate_content_to_responses_with_context(google, requested_model, &tool_context)?;
