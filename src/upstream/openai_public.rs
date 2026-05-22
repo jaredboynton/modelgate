@@ -5,7 +5,7 @@ use serde_json::Value;
 use crate::{
     auth::codex::{load_codex_auth, refresh_codex_auth},
     error::openai_error_body,
-    upstream_response::observe_reqwest_response,
+    upstream_response::{observe_specter_response, sanitize_specter_headers},
     AppError, AppResult, AppState, UpstreamResponse,
 };
 
@@ -162,10 +162,9 @@ pub async fn send_public_openai_http_with_refresh(
     };
 
     let first_status = first.status();
-    let first_headers = first.headers().clone();
+    let first_headers = sanitize_specter_headers(first.headers());
     let first_body = first
         .bytes()
-        .await
         .map_err(|error| AppError::Upstream(format!("OpenAI public response: {error}")))?;
     if !is_refresh_eligible_401(first_status, &first_body, false) {
         return Ok(classify_or_passthrough_response(
@@ -184,10 +183,9 @@ pub async fn send_public_openai_http_with_refresh(
 
     let second = send_public_openai_http_once(state, method, &url, &inbound_headers, body).await?;
     let second_status = second.status();
-    let second_headers = second.headers().clone();
+    let second_headers = sanitize_specter_headers(second.headers());
     let second_body = second
         .bytes()
-        .await
         .map_err(|error| AppError::Upstream(format!("OpenAI public response: {error}")))?;
     Ok(classify_or_passthrough_response(
         second_status,
@@ -241,17 +239,17 @@ async fn send_public_openai_http_once(
     url: &str,
     inbound_headers: &HeaderMap,
     body: Bytes,
-) -> AppResult<reqwest::Response> {
+) -> AppResult<specter::Response> {
     let request = build_public_openai_request(state, url, inbound_headers)?;
     let response = state
-        .http
+        .specter
         .request(method, request.url)
         .headers(request.headers)
         .body(body)
         .send()
         .await
         .map_err(|error| AppError::Upstream(format!("OpenAI public transport: {error}")))?;
-    observe_reqwest_response(OPENAI_PUBLIC_PROVIDER, &response);
+    observe_specter_response(OPENAI_PUBLIC_PROVIDER, &response);
     Ok(response)
 }
 

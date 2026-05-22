@@ -3,9 +3,10 @@ use std::collections::VecDeque;
 use bytes::Bytes;
 use futures::{stream, StreamExt};
 use serde_json::Value;
+use specter::{transport::h2::H2Error, HttpVersion};
 use uuid::Uuid;
 
-use crate::{auth, upstream_response::observe_reqwest_response, AppError, AppResult, AppState};
+use crate::{auth, upstream_response::observe_specter_response, AppError, AppResult, AppState};
 
 pub const WINDSURF_PROVIDER: &str = "windsurf";
 const GET_CHAT_MESSAGE_PATH: &str = "/exa.api_server_pb.ApiServerService/GetChatMessage";
@@ -23,7 +24,6 @@ pub async fn collect_chat_text(
     let response = send_chat_request(state, request, upstream_model).await?;
     let bytes = response
         .bytes()
-        .await
         .map_err(|error| AppError::Upstream(format!("Windsurf stream failed: {error}")))?;
     parse_complete_response(&bytes)
 }
@@ -33,73 +33,99 @@ pub async fn stream_chat_text(
     request: &Value,
     upstream_model: &str,
 ) -> AppResult<futures::stream::BoxStream<'static, AppResult<String>>> {
-    let response = send_chat_request(state, request, upstream_model).await?;
-    let source = response.bytes_stream().boxed();
-    let state = StreamState {
-        source,
-        buffer: Vec::new(),
-        pending: VecDeque::new(),
-        finished: false,
-    };
-    Ok(stream::unfold(state, |mut state| async move {
-        if let Some(item) = state.pending.pop_front() {
-            return Some((item, state));
+    match send_chat_request_streaming(state, request, upstream_model).await? {
+        WindsurfStreamResponse::Buffered(response) => {
+            let status = response.status();
+            let body = response
+                .bytes()
+                .map_err(|error| AppError::Upstream(format!("Windsurf stream failed: {error}")))?;
+            if !status.is_success() {
+                return Err(AppError::Upstream(format!(
+                    "Windsurf returned {status}: {}",
+                    String::from_utf8_lossy(&body)
+                )));
+            }
+            let text = parse_complete_response(&body)?;
+            Ok(stream::once(async move { Ok(text) }).boxed())
         }
-        if state.finished {
-            return None;
-        }
-
-        loop {
-            match state.source.next().await {
-                Some(Ok(bytes)) => {
-                    state.buffer.extend_from_slice(&bytes);
-                    match drain_text_chunks(&mut state.buffer) {
-                        Ok(chunks) => {
-                            if chunks.is_empty() {
-                                continue;
-                            }
-                            state.pending = chunks.into_iter().map(Ok).collect();
-                            let item = state.pending.pop_front().expect("pending chunk");
-                            return Some((item, state));
-                        }
-                        Err(error) => {
-                            state.finished = true;
-                            return Some((Err(error), state));
-                        }
-                    }
+        WindsurfStreamResponse::Streaming(response, receiver) => {
+            if !response.status().is_success() {
+                let body = collect_h2_stream(receiver, "Windsurf stream failed").await?;
+                return Err(AppError::Upstream(format!(
+                    "Windsurf returned {}: {}",
+                    response.status(),
+                    String::from_utf8_lossy(&body)
+                )));
+            }
+            let source = h2_receiver_stream(receiver);
+            let state = StreamState {
+                source,
+                buffer: Vec::new(),
+                pending: VecDeque::new(),
+                finished: false,
+            };
+            Ok(stream::unfold(state, |mut state| async move {
+                if let Some(item) = state.pending.pop_front() {
+                    return Some((item, state));
                 }
-                Some(Err(error)) => {
-                    state.finished = true;
-                    return Some((
-                        Err(AppError::Upstream(format!(
-                            "Windsurf stream failed: {error}"
-                        ))),
-                        state,
-                    ));
-                }
-                None => {
-                    state.finished = true;
-                    if state.buffer.iter().any(|byte| !byte.is_ascii_whitespace()) {
-                        return Some((
-                            Err(AppError::Upstream(
-                                "Windsurf response ended with an incomplete Connect frame".into(),
-                            )),
-                            state,
-                        ));
-                    }
+                if state.finished {
                     return None;
                 }
-            }
+
+                loop {
+                    match state.source.next().await {
+                        Some(Ok(bytes)) => {
+                            state.buffer.extend_from_slice(&bytes);
+                            match drain_text_chunks(&mut state.buffer) {
+                                Ok(chunks) => {
+                                    if chunks.is_empty() {
+                                        continue;
+                                    }
+                                    state.pending = chunks.into_iter().map(Ok).collect();
+                                    let item = state.pending.pop_front().expect("pending chunk");
+                                    return Some((item, state));
+                                }
+                                Err(error) => {
+                                    state.finished = true;
+                                    return Some((Err(error), state));
+                                }
+                            }
+                        }
+                        Some(Err(error)) => {
+                            state.finished = true;
+                            return Some((
+                                Err(AppError::Upstream(format!(
+                                    "Windsurf stream failed: {error}"
+                                ))),
+                                state,
+                            ));
+                        }
+                        None => {
+                            state.finished = true;
+                            if state.buffer.iter().any(|byte| !byte.is_ascii_whitespace()) {
+                                return Some((
+                                    Err(AppError::Upstream(
+                                        "Windsurf response ended with an incomplete Connect frame"
+                                            .into(),
+                                    )),
+                                    state,
+                                ));
+                            }
+                            return None;
+                        }
+                    }
+                }
+            })
+            .boxed())
         }
-    })
-    .boxed())
+    }
 }
 
 async fn send_chat_request(
     state: &AppState,
     request: &Value,
     upstream_model: &str,
-) -> AppResult<reqwest::Response> {
+) -> AppResult<specter::Response> {
     let api_key = auth::windsurf::api_key(state)?;
     let payload = build_get_chat_message_request(
         request,
@@ -114,22 +140,21 @@ async fn send_chat_request(
         GET_CHAT_MESSAGE_PATH
     );
     let response = state
-        .http
+        .specter
         .post(url)
-        .header(reqwest::header::CONTENT_TYPE, "application/connect+proto")
+        .header("content-type", "application/connect+proto")
         .header("connect-protocol-version", "1")
-        .header(reqwest::header::ACCEPT, "application/connect+proto")
+        .header("accept", "application/connect+proto")
         .body(body)
         .send()
         .await
         .map_err(|error| AppError::Upstream(format!("Windsurf request failed: {error}")))?;
-    observe_reqwest_response(WINDSURF_PROVIDER, &response);
+    observe_specter_response(WINDSURF_PROVIDER, &response);
 
     if !response.status().is_success() {
         let status = response.status();
         let text = response
             .text()
-            .await
             .unwrap_or_else(|error| format!("failed to read Windsurf error body: {error}"));
         return Err(AppError::Upstream(format!(
             "Windsurf returned {status}: {text}"
@@ -137,6 +162,47 @@ async fn send_chat_request(
     }
 
     Ok(response)
+}
+
+async fn send_chat_request_streaming(
+    state: &AppState,
+    request: &Value,
+    upstream_model: &str,
+) -> AppResult<WindsurfStreamResponse> {
+    let api_key = auth::windsurf::api_key(state)?;
+    let payload = build_get_chat_message_request(
+        request,
+        &api_key,
+        DEFAULT_WINDSURF_VERSION,
+        upstream_model,
+    )?;
+    let body = connect_envelope(&payload);
+    let url = format!(
+        "{}{}",
+        state.runtime.windsurf_cloud_base_url.trim_end_matches('/'),
+        GET_CHAT_MESSAGE_PATH
+    );
+    let request_builder = state
+        .specter
+        .post(url)
+        .header("content-type", "application/connect+proto")
+        .header("connect-protocol-version", "1")
+        .header("accept", "application/connect+proto")
+        .body(body)
+        .version(HttpVersion::Http2);
+    match request_builder.send_streaming().await {
+        Ok((response, receiver)) => {
+            observe_specter_response(WINDSURF_PROVIDER, &response);
+            Ok(WindsurfStreamResponse::Streaming(response, receiver))
+        }
+        Err(error) if is_non_h2_streaming_error(&error) => {
+            let response = send_chat_request(state, request, upstream_model).await?;
+            Ok(WindsurfStreamResponse::Buffered(response))
+        }
+        Err(error) => Err(AppError::Upstream(format!(
+            "Windsurf request failed: {error}"
+        ))),
+    }
 }
 
 pub fn build_get_chat_message_request(
@@ -443,10 +509,44 @@ fn read_varint(buffer: &[u8], offset: usize) -> Option<(u64, usize)> {
 }
 
 struct StreamState {
-    source: futures::stream::BoxStream<'static, Result<Bytes, reqwest::Error>>,
+    source: futures::stream::BoxStream<'static, Result<Bytes, H2Error>>,
     buffer: Vec<u8>,
     pending: VecDeque<AppResult<String>>,
     finished: bool,
+}
+
+fn h2_receiver_stream(
+    receiver: tokio::sync::mpsc::Receiver<std::result::Result<Bytes, H2Error>>,
+) -> futures::stream::BoxStream<'static, Result<Bytes, H2Error>> {
+    Box::pin(stream::unfold(receiver, |mut receiver| async move {
+        receiver.recv().await.map(|item| (item, receiver))
+    }))
+}
+
+async fn collect_h2_stream(
+    mut receiver: tokio::sync::mpsc::Receiver<std::result::Result<Bytes, H2Error>>,
+    context: &str,
+) -> AppResult<Bytes> {
+    let mut collected = Vec::new();
+    while let Some(chunk) = receiver.recv().await {
+        match chunk {
+            Ok(bytes) => collected.extend_from_slice(&bytes),
+            Err(error) => return Err(AppError::Upstream(format!("{context}: {error}"))),
+        }
+    }
+    Ok(Bytes::from(collected))
+}
+
+enum WindsurfStreamResponse {
+    Buffered(specter::Response),
+    Streaming(
+        specter::Response,
+        tokio::sync::mpsc::Receiver<std::result::Result<Bytes, H2Error>>,
+    ),
+}
+
+fn is_non_h2_streaming_error(error: &specter::Error) -> bool {
+    matches!(error, specter::Error::HttpProtocol(message) if message.contains("Expected h2 ALPN"))
 }
 
 #[cfg(test)]
