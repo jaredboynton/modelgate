@@ -49,9 +49,12 @@ impl GoogleGenerateContentSseTranslator {
 
         let mut output = String::new();
         while let Some(frame_end) = find_sse_frame_end(&self.buffer) {
-            let frame: String = self.buffer.drain(..frame_end).collect();
+            output.push_str(&format_generate_content_sse_frame(
+                &self.buffer[..frame_end],
+                self.caller,
+            )?);
+            let _ = self.buffer.drain(..frame_end);
             drain_frame_separator(&mut self.buffer);
-            output.push_str(&format_generate_content_sse_frame(&frame, self.caller)?);
         }
 
         Ok(output.into_bytes())

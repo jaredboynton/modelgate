@@ -25,14 +25,13 @@ impl ResponsesSseParser {
         let mut frames = Vec::new();
 
         while let Some(end) = next_event_end(&self.buffer) {
-            let event = self.buffer.drain(..end.consumed).collect::<Vec<_>>();
-            let event = &event[..end.event_len];
-            if let Some(frame) = self.parse_event(event)? {
+            if let Some(frame) = self.parse_event(&self.buffer[..end.event_len])? {
                 if is_responses_terminal_event(&frame.data) {
                     self.saw_completed = true;
                 }
                 frames.push(frame);
             }
+            let _ = self.buffer.drain(..end.consumed);
         }
 
         Ok(frames)

@@ -161,8 +161,11 @@ pub async fn send_public_openai_http_with_refresh(
     };
 
     let first_status = first.status();
-    let first_headers = specter_headers_to_http(first.headers())?;
-    let first_body = first.into_body();
+    let first_headers = first.headers().clone();
+    let first_body = first
+        .bytes()
+        .await
+        .map_err(|error| AppError::Upstream(format!("OpenAI public response: {error}")))?;
     if !is_refresh_eligible_401(first_status, &first_body, false) {
         return Ok(classify_or_passthrough_response(
             first_status,
@@ -180,8 +183,11 @@ pub async fn send_public_openai_http_with_refresh(
 
     let second = send_public_openai_http_once(state, method, &url, &inbound_headers, body).await?;
     let second_status = second.status();
-    let second_headers = specter_headers_to_http(second.headers())?;
-    let second_body = second.into_body();
+    let second_headers = second.headers().clone();
+    let second_body = second
+        .bytes()
+        .await
+        .map_err(|error| AppError::Upstream(format!("OpenAI public response: {error}")))?;
     Ok(classify_or_passthrough_response(
         second_status,
         second_headers,
@@ -234,12 +240,12 @@ async fn send_public_openai_http_once(
     url: &str,
     inbound_headers: &HeaderMap,
     body: Bytes,
-) -> AppResult<specter::Response> {
+) -> AppResult<reqwest::Response> {
     let request = build_public_openai_request(state, url, inbound_headers)?;
     state
-        .specter
+        .http
         .request(method, request.url)
-        .headers(specter::Headers::from(request.headers))
+        .headers(request.headers)
         .body(body)
         .send()
         .await
@@ -369,18 +375,6 @@ fn openai_error_response(
 
 fn is_missing_codex_auth_error(error: &AppError) -> bool {
     matches!(error, AppError::MissingCredential("~/.codex/auth.json"))
-}
-
-fn specter_headers_to_http(headers: &specter::Headers) -> AppResult<HeaderMap> {
-    let mut out = HeaderMap::new();
-    for (name, value) in headers.iter() {
-        let name = HeaderName::from_bytes(name.as_bytes())
-            .map_err(|err| AppError::Upstream(format!("invalid upstream header name: {err}")))?;
-        let value = HeaderValue::from_str(value)
-            .map_err(|err| AppError::Upstream(format!("invalid upstream header value: {err}")))?;
-        out.append(name, value);
-    }
-    Ok(out)
 }
 
 #[cfg(test)]

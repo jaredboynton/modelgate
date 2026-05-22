@@ -152,8 +152,9 @@ pub fn build_get_chat_message_request(
         .and_then(Value::as_array)
         .ok_or_else(|| AppError::BadRequest("messages must be an array".into()))?;
 
-    let mut out = Vec::new();
-    out.extend(encode_message(1, &build_metadata(api_key, version)));
+    let mut out = Vec::with_capacity(512);
+    let metadata = build_metadata(api_key, version);
+    extend_message(&mut out, 1, &metadata);
 
     let mut prompt_count = 0;
     for message in messages {
@@ -166,7 +167,8 @@ pub fn build_get_chat_message_request(
         if prompt_text.is_empty() && !has_assistant_tool_calls {
             continue;
         }
-        out.extend(encode_message(3, &build_chat_prompt(message)));
+        let prompt = build_chat_prompt(message);
+        extend_message(&mut out, 3, &prompt);
         prompt_count += 1;
     }
 
@@ -176,8 +178,8 @@ pub fn build_get_chat_message_request(
         ));
     }
 
-    out.extend(encode_varint_field(7, 5));
-    out.extend(encode_string(21, upstream_model));
+    extend_varint_field(&mut out, 7, 5);
+    extend_string(&mut out, 21, upstream_model);
     Ok(out)
 }
 
@@ -201,38 +203,34 @@ pub fn connect_envelope(payload: &[u8]) -> Vec<u8> {
 }
 
 pub fn encode_string(field_num: u32, value: &str) -> Vec<u8> {
-    let bytes = value.as_bytes();
-    let mut out = encode_key(field_num, 2);
-    out.extend(encode_varint(bytes.len() as u64));
-    out.extend_from_slice(bytes);
+    let mut out = Vec::with_capacity(value.len() + 8);
+    extend_string(&mut out, field_num, value);
     out
 }
 
 pub fn encode_message(field_num: u32, value: &[u8]) -> Vec<u8> {
-    let mut out = encode_key(field_num, 2);
-    out.extend(encode_varint(value.len() as u64));
-    out.extend_from_slice(value);
+    let mut out = Vec::with_capacity(value.len() + 8);
+    extend_message(&mut out, field_num, value);
     out
 }
 
 pub fn encode_varint_field(field_num: u32, value: u64) -> Vec<u8> {
-    let mut out = encode_key(field_num, 0);
-    out.extend(encode_varint(value));
+    let mut out = Vec::with_capacity(16);
+    extend_varint_field(&mut out, field_num, value);
     out
 }
 
 fn build_metadata(api_key: &str, version: &str) -> Vec<u8> {
-    [
-        encode_string(3, api_key),
-        encode_string(1, "windsurf"),
-        encode_string(7, version),
-        encode_string(2, version),
-        encode_string(12, "windsurf"),
-        encode_string(10, &Uuid::new_v4().to_string()),
-        encode_string(4, "en-US"),
-        encode_string(28, "windsurf"),
-    ]
-    .concat()
+    let mut out = Vec::with_capacity(api_key.len() + version.len() * 2 + 96);
+    extend_string(&mut out, 3, api_key);
+    extend_string(&mut out, 1, "windsurf");
+    extend_string(&mut out, 7, version);
+    extend_string(&mut out, 2, version);
+    extend_string(&mut out, 12, "windsurf");
+    extend_string(&mut out, 10, &Uuid::new_v4().to_string());
+    extend_string(&mut out, 4, "en-US");
+    extend_string(&mut out, 28, "windsurf");
+    out
 }
 
 fn build_chat_prompt(message: &Value) -> Vec<u8> {
@@ -261,25 +259,62 @@ fn build_chat_prompt(message: &Value) -> Vec<u8> {
         prompt = format!("TOOL RESULT{call_id}: {prompt}");
     }
 
-    [
-        encode_string(1, &Uuid::new_v4().to_string()),
-        encode_varint_field(2, source_for_role(role)),
-        encode_string(3, &prompt),
-    ]
-    .concat()
+    let mut out = Vec::with_capacity(prompt.len() + 64);
+    extend_string(&mut out, 1, &Uuid::new_v4().to_string());
+    extend_varint_field(&mut out, 2, source_for_role(role));
+    extend_string(&mut out, 3, &prompt);
+    out
 }
 
 fn text_content(value: Option<&Value>) -> String {
     match value {
         Some(Value::String(text)) => text.clone(),
-        Some(Value::Array(parts)) => parts
-            .iter()
-            .filter(|part| part.get("type").and_then(Value::as_str) == Some("text"))
-            .filter_map(|part| part.get("text").and_then(Value::as_str))
-            .collect::<Vec<_>>()
-            .join("\n"),
+        Some(Value::Array(parts)) => {
+            let mut out = String::new();
+            for text in parts
+                .iter()
+                .filter(|part| part.get("type").and_then(Value::as_str) == Some("text"))
+                .filter_map(|part| part.get("text").and_then(Value::as_str))
+            {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(text);
+            }
+            out
+        }
         _ => String::new(),
     }
+}
+
+fn extend_string(out: &mut Vec<u8>, field_num: u32, value: &str) {
+    let bytes = value.as_bytes();
+    extend_key(out, field_num, 2);
+    extend_varint(out, bytes.len() as u64);
+    out.extend_from_slice(bytes);
+}
+
+fn extend_message(out: &mut Vec<u8>, field_num: u32, value: &[u8]) {
+    extend_key(out, field_num, 2);
+    extend_varint(out, value.len() as u64);
+    out.extend_from_slice(value);
+}
+
+fn extend_varint_field(out: &mut Vec<u8>, field_num: u32, value: u64) {
+    extend_key(out, field_num, 0);
+    extend_varint(out, value);
+}
+
+fn extend_key(out: &mut Vec<u8>, field_num: u32, wire_type: u8) {
+    extend_varint(out, ((field_num << 3) | u32::from(wire_type)) as u64);
+}
+
+fn extend_varint(out: &mut Vec<u8>, mut value: u64) {
+    while value > 127 {
+        out.push(((value & 0x7f) as u8) | 0x80);
+        value >>= 7;
+    }
+    out.push(value as u8);
 }
 
 fn source_for_role(role: &str) -> u64 {
@@ -407,20 +442,6 @@ fn read_varint(buffer: &[u8], offset: usize) -> Option<(u64, usize)> {
         }
     }
     None
-}
-
-fn encode_key(field_num: u32, wire_type: u8) -> Vec<u8> {
-    encode_varint(((field_num << 3) | u32::from(wire_type)) as u64)
-}
-
-fn encode_varint(mut value: u64) -> Vec<u8> {
-    let mut out = Vec::new();
-    while value > 127 {
-        out.push(((value & 0x7f) as u8) | 0x80);
-        value >>= 7;
-    }
-    out.push(value as u8);
-    out
 }
 
 struct StreamState {

@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     time::{Duration, Instant},
 };
@@ -347,11 +348,10 @@ impl AwsEventStreamDecoder {
                 break;
             }
 
-            let message = self.pending.drain(..total_len).collect::<Vec<_>>();
             let headers_end = 12 + headers_len;
             let payload_end = total_len - 4;
-            let headers = parse_event_stream_headers(&message[12..headers_end])?;
-            let payload = &message[headers_end..payload_end];
+            let headers = parse_event_stream_headers(&self.pending[12..headers_end])?;
+            let payload = &self.pending[headers_end..payload_end];
             if let Some((chunk, terminal)) = runtime_event_stream_message_to_sse(&headers, payload)?
             {
                 if terminal {
@@ -359,6 +359,7 @@ impl AwsEventStreamDecoder {
                 }
                 chunks.push(chunk);
             }
+            let _ = self.pending.drain(..total_len);
         }
         Ok(chunks)
     }
@@ -395,7 +396,7 @@ fn runtime_chunk_payload_to_sse(payload: &[u8]) -> AppResult<Option<(Bytes, bool
         let terminal = std::str::from_utf8(&payload_bytes)
             .ok()
             .is_some_and(|text| text.contains("event: message_stop"));
-        return Ok(Some((Bytes::from(payload_bytes), terminal)));
+        return Ok(Some((cow_bytes_into_bytes(payload_bytes), terminal)));
     }
     let text = std::str::from_utf8(&payload_bytes).map_err(|error| {
         AppError::Upstream(format!("Bedrock Runtime chunk was not UTF-8: {error}"))
@@ -415,18 +416,34 @@ fn runtime_chunk_payload_to_sse(payload: &[u8]) -> AppResult<Option<(Bytes, bool
     Ok(Some((Bytes::from(format!("data: {text}\n\n")), false)))
 }
 
-fn runtime_chunk_payload_bytes(payload: &[u8]) -> AppResult<Vec<u8>> {
-    let Ok(value) = serde_json::from_slice::<Value>(payload) else {
-        return Ok(payload.to_vec());
-    };
-    if let Some(encoded) = value.get("bytes").and_then(Value::as_str) {
-        return BASE64_STANDARD.decode(encoded).map_err(|error| {
-            AppError::Upstream(format!(
-                "Bedrock Runtime chunk bytes were not base64: {error}"
-            ))
-        });
+fn runtime_chunk_payload_bytes(payload: &[u8]) -> AppResult<Cow<'_, [u8]>> {
+    #[derive(serde::Deserialize)]
+    struct RuntimeChunkPayload<'a> {
+        #[serde(borrow)]
+        bytes: Option<Cow<'a, str>>,
     }
-    Ok(payload.to_vec())
+
+    let Ok(value) = serde_json::from_slice::<RuntimeChunkPayload<'_>>(payload) else {
+        return Ok(Cow::Borrowed(payload));
+    };
+    if let Some(encoded) = value.bytes {
+        return BASE64_STANDARD
+            .decode(encoded.as_bytes())
+            .map(Cow::Owned)
+            .map_err(|error| {
+                AppError::Upstream(format!(
+                    "Bedrock Runtime chunk bytes were not base64: {error}"
+                ))
+            });
+    }
+    Ok(Cow::Borrowed(payload))
+}
+
+fn cow_bytes_into_bytes(bytes: Cow<'_, [u8]>) -> Bytes {
+    match bytes {
+        Cow::Borrowed(bytes) => Bytes::copy_from_slice(bytes),
+        Cow::Owned(bytes) => Bytes::from(bytes),
+    }
 }
 
 fn runtime_event_stream_error(event: &str, payload: &[u8]) -> AppError {

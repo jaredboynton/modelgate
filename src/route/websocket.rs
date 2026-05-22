@@ -1248,10 +1248,7 @@ async fn forward_responses_response_to_ws(
             }
         };
         for frame in frames {
-            let event = normalize_bridge_stream_event(
-                frame.data,
-                response_id.as_deref().map(str::to_owned),
-            );
+            let event = normalize_bridge_stream_event(frame.data, response_id.as_deref());
             observe_bridge_event(
                 &event,
                 &mut response_id,
@@ -1264,11 +1261,11 @@ async fn forward_responses_response_to_ws(
             send_bridge_frame(&sender, event).await?;
             if terminal {
                 return Ok(BridgeExecutionResult {
-                    response_id: response_id.clone().unwrap_or_else(|| {
+                    response_id: response_id.take().unwrap_or_else(|| {
                         format!("resp_ws_bridge_{}", uuid::Uuid::new_v4().simple())
                     }),
-                    full_request: full_request.clone(),
-                    output_item_done_items: output_item_done_items.clone(),
+                    full_request,
+                    output_item_done_items,
                 });
             }
         }
@@ -1282,8 +1279,7 @@ async fn forward_responses_response_to_ws(
         }
     };
     for frame in frames {
-        let event =
-            normalize_bridge_stream_event(frame.data, response_id.as_deref().map(str::to_owned));
+        let event = normalize_bridge_stream_event(frame.data, response_id.as_deref());
         observe_bridge_event(
             &event,
             &mut response_id,
@@ -1294,10 +1290,10 @@ async fn forward_responses_response_to_ws(
         if terminal {
             return Ok(BridgeExecutionResult {
                 response_id: response_id
-                    .clone()
+                    .take()
                     .unwrap_or_else(|| format!("resp_ws_bridge_{}", uuid::Uuid::new_v4().simple())),
-                full_request: full_request.clone(),
-                output_item_done_items: output_item_done_items.clone(),
+                full_request,
+                output_item_done_items,
             });
         }
     }
@@ -1314,7 +1310,7 @@ async fn forward_responses_response_to_ws(
     })
 }
 
-fn normalize_bridge_stream_event(event: Value, response_id: Option<String>) -> Value {
+fn normalize_bridge_stream_event(event: Value, response_id: Option<&str>) -> Value {
     if event.get("type").and_then(Value::as_str) == Some("error") {
         if let Some(response_id) = response_id {
             let message = event

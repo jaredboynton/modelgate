@@ -391,12 +391,12 @@ impl AnthropicSseStreamTranslator {
         let mut output = String::new();
         while let Some((position, separator_len)) = find_sse_separator(&self.pending) {
             let end = position + separator_len;
-            let block = self.pending.drain(..end).collect::<Vec<_>>();
-            let block = String::from_utf8(block).map_err(|error| {
+            let block = std::str::from_utf8(&self.pending[..end]).map_err(|error| {
                 AppError::Upstream(format!("invalid Anthropic SSE UTF-8: {error}"))
             })?;
-            self.translator.process_block(&block)?;
+            self.translator.process_block(block)?;
             output.push_str(&std::mem::take(&mut self.translator.output));
+            let _ = self.pending.drain(..end);
         }
         Ok(Bytes::from(output))
     }
