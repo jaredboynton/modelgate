@@ -7,7 +7,7 @@
 //!
 //! Forbidden imports (enforced by `tests/architecture_boundaries.rs`):
 //! `crate::route`, `crate::upstream`, `crate::adapter`, `crate::auth`,
-//! `crate::router`, `crate::state`. Provider clients (`axum`, `reqwest`,
+//! `crate::router`, `crate::state`. Provider clients (`axum`, `specter`,
 //! `h2`, `rustls`, etc.) are also forbidden here. Adapters convert the
 //! public JSON wire to these DTOs; the upstream layer converts these DTOs
 //! to and from the Cursor protobuf wire.

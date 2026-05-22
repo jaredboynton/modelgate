@@ -238,7 +238,7 @@ fn merge_refreshed_auth(
 fn write_codex_auth(state: &AppState, auth: &CodexAuth) -> AppResult<()> {
     let path = auth_path(state);
     let lock_path = state.codex_home.join("auth.json.lock");
-    fs::create_dir_all(&state.codex_home)?;
+    fs::create_dir_all(state.codex_home.as_path())?;
     let lock = OpenOptions::new()
         .read(true)
         .write(true)

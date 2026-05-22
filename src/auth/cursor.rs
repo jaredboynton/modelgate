@@ -102,7 +102,7 @@ pub async fn cached_cursor_credentials(state: &AppState) -> AppResult<CursorCred
 
     let mut creds = resolve_cursor_credentials_uncached(state).await?;
     if should_refresh(&creds, SystemTime::now()) {
-        match refresh_cursor_credentials(&state.http, &creds).await {
+        match refresh_cursor_credentials(&state.specter, &creds).await {
             Ok(refreshed) => creds = refreshed,
             Err(err) => {
                 tracing::debug!(error = %err, "cursor credential refresh failed; using resolved credentials")
@@ -219,7 +219,7 @@ pub fn should_refresh(creds: &CursorCredentials, now: SystemTime) -> bool {
 /// Caller decides when to invoke; this helper does not loop. The refresh
 /// retry budget is one attempt per request.
 pub async fn refresh_cursor_credentials(
-    client: &reqwest::Client,
+    client: &specter::Client,
     creds: &CursorCredentials,
 ) -> AppResult<CursorCredentials> {
     let refresh_token = creds
@@ -252,7 +252,6 @@ pub async fn refresh_cursor_credentials(
 
     let body: serde_json::Value = response
         .json()
-        .await
         .map_err(|err| AppError::Upstream(format!("Cursor refresh body failed: {err}")))?;
 
     let access_token = body

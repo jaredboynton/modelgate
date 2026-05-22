@@ -162,21 +162,18 @@ impl CodexCatalogCache {
 
     pub async fn refresh_from_endpoint(
         &self,
-        http: &reqwest::Client,
+        client: &specter::Client,
         headers: &HeaderMap,
         base_url: &str,
     ) -> AppResult<Arc<CodexCatalog>> {
         self.get_or_refresh_with(|client_version| async move {
             let url = codex_models_endpoint(base_url, &client_version)?;
-            let mut request = http.get(url);
-            for (name, value) in headers.iter() {
-                request = request.header(name, value);
-            }
+            let request = client.get(url).headers(headers.clone());
             let response = request.send().await.map_err(|error| {
                 AppError::Upstream(format!("Codex models request failed: {error}"))
             })?;
             let status = response.status();
-            let text = response.text().await.map_err(|error| {
+            let text = response.text().map_err(|error| {
                 AppError::Upstream(format!("Codex models body failed: {error}"))
             })?;
             if !status.is_success() {
