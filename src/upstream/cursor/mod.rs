@@ -40,7 +40,7 @@ pub const DEFAULT_CURSOR_CLIENT_VERSION: &str = "cli-2026.01.09-231024f";
 /// into auth internals directly; the run engine still resolves credentials
 /// again when opening the real provider stream.
 pub async fn ensure_credentials(state: &crate::AppState) -> crate::AppResult<()> {
-    crate::auth::cursor::resolve_cursor_credentials(state)
+    crate::auth::cursor::cached_cursor_credentials(state)
         .await
         .map(|_| ())
 }
@@ -48,7 +48,7 @@ pub async fn ensure_credentials(state: &crate::AppState) -> crate::AppResult<()>
 pub async fn fetch_usable_models_for_state(
     state: &crate::AppState,
 ) -> crate::AppResult<std::sync::Arc<Vec<models::ModelDescriptor>>> {
-    let credentials = crate::auth::cursor::resolve_cursor_credentials(state).await?;
+    let credentials = crate::auth::cursor::cached_cursor_credentials(state).await?;
     Ok(models::fetch_usable_models(&credentials.access_token).await)
 }
 

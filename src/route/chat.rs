@@ -78,9 +78,9 @@ async fn execute_cursor_chat(
     request.upstream_model = plan.target.upstream_model.clone();
     let detection = crate::upstream::cursor::client_profile::detect_client_profile(headers);
     request.client_profile = detection.profile.into();
-    crate::upstream::cursor::workspace::attach_to_request(&mut request, headers).await;
-
+    // Check credentials first (fast path on cache hit, fails closed before expensive workspace work).
     upstream::cursor::ensure_credentials(state).await?;
+    crate::upstream::cursor::workspace::attach_to_request(&mut request, headers).await;
 
     if stream {
         let events = upstream::cursor::run::run(state, request).await;

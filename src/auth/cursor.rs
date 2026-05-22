@@ -85,6 +85,37 @@ pub struct CursorCredentials {
 ///
 /// Returns `AppError::MissingCredential("cursor")` if no source resolves.
 pub async fn resolve_cursor_credentials(state: &AppState) -> AppResult<CursorCredentials> {
+    resolve_cursor_credentials_uncached(state).await
+}
+
+pub async fn cached_cursor_credentials(state: &AppState) -> AppResult<CursorCredentials> {
+    let mut cached = state.cursor_auth.lock().await;
+    if let Some(creds) = cached
+        .as_ref()
+        .filter(|creds| !should_refresh(creds, SystemTime::now()))
+        .cloned()
+    {
+        return Ok(creds);
+    }
+
+    let mut creds = resolve_cursor_credentials_uncached(state).await?;
+    if should_refresh(&creds, SystemTime::now()) {
+        match refresh_cursor_credentials(&state.http, &creds).await {
+            Ok(refreshed) => creds = refreshed,
+            Err(err) => {
+                tracing::debug!(error = %err, "cursor credential refresh failed; using resolved credentials")
+            }
+        }
+    }
+    *cached = Some(creds.clone());
+    Ok(creds)
+}
+
+pub async fn invalidate_cached_cursor_credentials(state: &AppState) {
+    *state.cursor_auth.lock().await = None;
+}
+
+async fn resolve_cursor_credentials_uncached(state: &AppState) -> AppResult<CursorCredentials> {
     let home = state.auth_home.as_path();
     if let Some(token) = env_access_token() {
         return Ok(CursorCredentials {

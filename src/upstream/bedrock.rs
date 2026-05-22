@@ -197,8 +197,10 @@ pub async fn send_runtime_invoke_request(
     let started = Instant::now();
     let mut last_error = None;
 
+    let body_bytes = Bytes::from(serde_json::to_vec(&request.body)?);
+
     for attempt in 1..=attempts {
-        match send_runtime_once(client, &request).await {
+        match send_runtime_once(client, &request, &body_bytes).await {
             Ok(response) if should_retry_status(response.status()) && attempt < attempts => {
                 wait_before_retry(attempt).await;
                 continue;
@@ -243,15 +245,15 @@ pub fn bedrock_retry_delay(attempt: usize, jitter_seed: u64) -> Duration {
 async fn send_runtime_once(
     client: &reqwest::Client,
     request: &BedrockRuntimeInvokeRequest,
+    body: &Bytes,
 ) -> Result<reqwest::Response, BedrockSendError> {
-    let body = Bytes::from(serde_json::to_vec(&request.body)?);
     let mut headers = request.headers.clone();
     apply_runtime_auth_headers(request, &mut headers).await?;
 
     client
         .post(&request.url)
         .headers(headers)
-        .body(body)
+        .body(body.clone())
         .send()
         .await
         .map_err(BedrockSendError::Reqwest)

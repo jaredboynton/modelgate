@@ -174,9 +174,9 @@ async fn execute_cursor_responses(
             &request.tool_results,
         )?;
     }
-    crate::upstream::cursor::workspace::attach_to_request(&mut request, headers).await;
-
+    // Check credentials first (fast path on cache hit, fails closed before expensive workspace work).
     crate::upstream::cursor::ensure_credentials(state).await?;
+    crate::upstream::cursor::workspace::attach_to_request(&mut request, headers).await;
     validate_cursor_tool_results(
         state,
         request.continuation_key.as_ref(),

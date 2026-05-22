@@ -233,14 +233,14 @@ pub async fn forward_google(
 ) -> AppResult<UpstreamResponse> {
     let key = api_key(state)?;
     let request = build_google_request_with_headers(state, path, headers, key)?;
-    let original_body = body.clone();
 
-    let direct = send_google_direct(state, method, request, body, is_sse_request(path)).await?;
+    let direct =
+        send_google_direct(state, method, request, body.clone(), is_sse_request(path)).await?;
     if !direct.status.is_client_error() && !direct.status.is_server_error() {
         return Ok(direct);
     }
 
-    match fallback_to_bedrock(state, original_body).await {
+    match fallback_to_bedrock(state, body).await {
         Ok(fallback) => Ok(fallback),
         Err(_) => Ok(direct),
     }

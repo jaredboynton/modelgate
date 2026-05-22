@@ -186,10 +186,31 @@ impl GoogleResponsesSseTranslator {
         self.buffer.push_str(text);
 
         let mut output = String::new();
-        while let Some(frame_end) = find_sse_frame_end(&self.buffer) {
-            let frame: String = self.buffer.drain(..frame_end).collect();
-            drain_frame_separator(&mut self.buffer);
+        let mut consumed = 0usize;
+        loop {
+            let buf = &self.buffer[consumed..];
+            let Some(rel_end) = find_sse_frame_end(buf) else {
+                break;
+            };
+            let abs_end = consumed + rel_end;
+            let frame = self.buffer[consumed..abs_end].to_string();
+            consumed = abs_end;
+            // advance over the standard SSE frame separator
+            let bytes = self.buffer.as_bytes();
+            if bytes.get(consumed) == Some(&b'\n') {
+                consumed += 1;
+            }
+            if bytes.get(consumed) == Some(&b'\r') {
+                consumed += 1;
+            }
+            if bytes.get(consumed) == Some(&b'\n') {
+                consumed += 1;
+            }
             output.push_str(&self.process_frame(&frame)?);
+        }
+        if consumed > 0 {
+            // Single drain of the consumed prefix instead of repeated shifts inside the loop.
+            let _ = self.buffer.drain(..consumed);
         }
         Ok(Bytes::from(output))
     }
@@ -1397,12 +1418,4 @@ fn collect_sse_data(frame: &str) -> String {
 
 fn find_sse_frame_end(buffer: &str) -> Option<usize> {
     buffer.find("\n\n").or_else(|| buffer.find("\r\n\r\n"))
-}
-
-fn drain_frame_separator(buffer: &mut String) {
-    if buffer.starts_with("\r\n\r\n") {
-        buffer.drain(..4);
-    } else if buffer.starts_with("\n\n") {
-        buffer.drain(..2);
-    }
 }

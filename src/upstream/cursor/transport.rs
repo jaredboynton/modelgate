@@ -18,7 +18,7 @@
 //! The transport intentionally does not import `hyper`; the ADR pins the
 //! direct `h2::client::handshake` path.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -81,10 +81,19 @@ pub enum TransportError {
 
 pub type TransportResult<T> = Result<T, TransportError>;
 
+static TLS_CONNECTOR: OnceLock<TlsConnector> = OnceLock::new();
+
 /// Build the rustls `TlsConnector` used for every Cursor request. ALPN is
 /// pinned to `h2` so a server fallback to HTTP/1.1 fails the handshake
 /// instead of silently switching protocols.
+///
+/// The connector (and native root loading) is computed once per process and
+/// reused for all Cursor h2 connections.
 pub fn tls_connector() -> TransportResult<TlsConnector> {
+    if let Some(existing) = TLS_CONNECTOR.get() {
+        return Ok(existing.clone());
+    }
+
     // Idempotent install; safe under concurrent first calls.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -100,7 +109,11 @@ pub fn tls_connector() -> TransportResult<TlsConnector> {
         .with_root_certificates(roots)
         .with_no_client_auth();
     config.alpn_protocols = vec![b"h2".to_vec()];
-    Ok(TlsConnector::from(Arc::new(config)))
+    let connector = TlsConnector::from(Arc::new(config));
+
+    // Best-effort insert; if another thread won the race we still return the one we built.
+    let _ = TLS_CONNECTOR.set(connector.clone());
+    Ok(connector)
 }
 
 /// Active streaming Cursor Run session.

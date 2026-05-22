@@ -697,6 +697,7 @@ fn close_code_for_error(error: &AppError) -> u16 {
         | AppError::Io(_)
         | AppError::Json(_)
         | AppError::Compaction(_) => close_code::ERROR,
+        AppError::TooManyRequests { .. } => close_code::AGAIN,
     }
 }
 

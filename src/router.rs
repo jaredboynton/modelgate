@@ -491,15 +491,18 @@ fn should_read_json_body(headers: &HeaderMap) -> bool {
         .is_some_and(|length| length <= OBSERVABILITY_BODY_LIMIT)
 }
 
+#[derive(serde::Deserialize)]
+struct ModelProbe {
+    #[serde(default)]
+    model: Option<String>,
+}
+
 fn model_from_json_bytes(bytes: &[u8]) -> Option<String> {
-    serde_json::from_slice::<serde_json::Value>(bytes)
+    // Parse only the model field; avoids allocating the full request tree just for
+    // request-observation logging.
+    serde_json::from_slice::<ModelProbe>(bytes)
         .ok()
-        .and_then(|value| {
-            value
-                .get("model")
-                .and_then(|model| model.as_str())
-                .map(str::to_owned)
-        })
+        .and_then(|probe| probe.model)
 }
 
 fn provider_for_request_path_and_model(path: &str, model: Option<&str>) -> Option<&'static str> {

@@ -113,10 +113,6 @@ impl AuthFileCache {
             .expect("auth file cache poisoned")
             .remove(path);
     }
-
-    pub(crate) fn metadata(&self, path: &Path) -> AppResult<AuthFileMetadata> {
-        current_metadata(path)
-    }
 }
 
 pub(crate) fn current_metadata(path: &Path) -> AppResult<AuthFileMetadata> {
@@ -176,7 +172,7 @@ pub(crate) struct ResolvedAuthCache<T> {
 #[derive(Clone, Debug)]
 struct ResolvedAuthEntry<T> {
     key: AuthCacheKey,
-    value: AppResult<T>,
+    value: T,
 }
 
 impl<T> Default for ResolvedAuthCache<T> {
@@ -207,15 +203,15 @@ where
             .filter(|entry| entry.key == key)
             .cloned()
         {
-            return entry.value;
+            return Ok(entry.value);
         }
 
-        let value = resolve();
+        let value = resolve()?;
         *self.inner.lock().expect("resolved auth cache poisoned") = Some(ResolvedAuthEntry {
             key,
             value: value.clone(),
         });
-        value
+        Ok(value)
     }
 
     pub(crate) fn invalidate(&self) {

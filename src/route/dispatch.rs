@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use crate::{
     compaction::RemoteCompactionPolicy,
-    model_alias::{Provider, ResolvedModel, ResolvedTarget, TargetFormat},
+    model_alias::{resolve_target_required, Provider, ResolvedModel, ResolvedTarget, TargetFormat},
     AppError, AppResult, AppState,
 };
 
@@ -103,12 +103,18 @@ pub fn plan_with_state(
     value: &Value,
 ) -> AppResult<DispatchPlan> {
     let model = required_model(value)?;
-    let target = state.resolve_target_for_format(model, source_format.as_str())?;
-    let remote_compaction_policy = state.routing_config.remote_compaction_policy_for_format(
-        model,
-        Some(source_format.as_str()),
-        &target,
-    )?;
+    let (hot_target, hot_policy) = state
+        .routing_config
+        .resolve_target_and_compaction_policy(model, Some(source_format.as_str()))?;
+
+    let target = match hot_target {
+        Some(t) => t,
+        None => resolve_target_required(model)?,
+    };
+
+    let remote_compaction_policy =
+        hot_policy.unwrap_or_else(|| target.default_remote_compaction_policy());
+
     plan_for_target_with_remote_compaction_policy(
         source_format,
         model,

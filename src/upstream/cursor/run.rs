@@ -24,7 +24,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    auth::cursor::resolve_cursor_credentials,
+    auth::cursor::cached_cursor_credentials,
     cursor_agent::{
         CursorAgentEvent, CursorAgentRequest, CursorClientProfile, CursorContentBlock,
         CursorFinishReason, CursorMessage, CursorToolCall, CursorToolKind, CursorToolResult,
@@ -59,7 +59,7 @@ pub async fn run(
 ) -> impl Stream<Item = CursorAgentEvent> {
     let (tx, rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
 
-    let credentials = match resolve_cursor_credentials(state).await {
+    let credentials = match cached_cursor_credentials(state).await {
         Ok(creds) => creds,
         Err(err) => {
             let _ = tx

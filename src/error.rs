@@ -27,6 +27,11 @@ pub enum AppError {
     Json(#[from] serde_json::Error),
     #[error("{0}")]
     Compaction(#[from] CompactionHttpError),
+    #[error("rate limited: {message}")]
+    TooManyRequests {
+        message: String,
+        retry_after_secs: Option<u64>,
+    },
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -107,6 +112,7 @@ impl AppError {
             Self::Upstream(message) if is_upstream_forbidden(message) => StatusCode::FORBIDDEN,
             Self::Upstream(_) | Self::Io(_) | Self::Json(_) => StatusCode::BAD_GATEWAY,
             Self::Compaction(error) => error.status(),
+            Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
         }
     }
 
@@ -126,6 +132,7 @@ impl AppError {
             Self::Upstream(_) => "upstream_error",
             Self::Io(_) | Self::Json(_) => "proxy_error",
             Self::Compaction(error) => error.error_type(),
+            Self::TooManyRequests { .. } => "rate_limit_exceeded",
         }
     }
 

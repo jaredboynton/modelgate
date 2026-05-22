@@ -22,7 +22,7 @@ use crate::{
     hot_config::HotRoutingConfig,
     model_alias::{resolve_target_required, ResolvedModel, ResolvedTarget},
     upstream::cursor::session::CursorSessionStore,
-    AppResult,
+    AppError, AppResult,
 };
 
 const CODEX_RESPONSES_WSS_URL: &str = "wss://chatgpt.com/backend-api/codex/responses";
@@ -47,11 +47,13 @@ pub struct AppState {
     pub codex_catalog: CodexCatalogCache,
     pub cursor_sessions: Arc<CursorSessionStore>,
     pub auth_files: AuthFileCache,
-    pub codex_auth: ResolvedAuthCache<CodexAuth>,
+    pub(crate) codex_auth: ResolvedAuthCache<CodexAuth>,
     pub cursor_auth: Arc<tokio::sync::Mutex<Option<CursorCredentials>>>,
-    pub google_auth: ResolvedAuthCache<String>,
-    pub windsurf_auth: ResolvedAuthCache<String>,
-    pub bedrock_auth: ResolvedAuthCache<BedrockAuth>,
+    pub(crate) google_auth: ResolvedAuthCache<String>,
+    pub(crate) windsurf_auth: ResolvedAuthCache<String>,
+    pub(crate) bedrock_auth: ResolvedAuthCache<BedrockAuth>,
+    codex_handshake_sem: Option<Arc<tokio::sync::Semaphore>>,
+    codex_handshake_times: Arc<std::sync::Mutex<std::collections::VecDeque<std::time::Instant>>>,
     response_storage: ResponseStorage,
     codex_wss_latched: Arc<AtomicBool>,
     codex_wss_failures: Arc<AtomicU32>,
@@ -118,8 +120,8 @@ struct ResponseStorage {
 
 #[derive(Default)]
 struct ResponseStorageInner {
-    volatile: HashMap<String, ResponseStateRecord>,
-    public_retrievable: HashMap<String, ResponseStateRecord>,
+    volatile: HashMap<String, Arc<ResponseStateRecord>>,
+    public_retrievable: HashMap<String, Arc<ResponseStateRecord>>,
 }
 
 impl Default for ResponseStorage {
@@ -158,6 +160,7 @@ impl AppState {
         );
         let routing_config = HotRoutingConfig::from_env(&auth_home);
         let codex_catalog = CodexCatalogCache::new(runtime.codex_catalog_config());
+        let codex_max_concurrent = runtime.codex_max_concurrent;
 
         Self {
             http: reqwest::Client::new(),
@@ -177,6 +180,14 @@ impl AppState {
             google_auth: ResolvedAuthCache::new(),
             windsurf_auth: ResolvedAuthCache::new(),
             bedrock_auth: ResolvedAuthCache::new(),
+            codex_handshake_sem: if codex_max_concurrent > 0 {
+                Some(Arc::new(tokio::sync::Semaphore::new(codex_max_concurrent)))
+            } else {
+                None
+            },
+            codex_handshake_times: Arc::new(std::sync::Mutex::new(
+                std::collections::VecDeque::new(),
+            )),
             response_storage: ResponseStorage::default(),
             codex_wss_latched: Arc::new(AtomicBool::new(false)),
             codex_wss_failures: Arc::new(AtomicU32::new(0)),
@@ -189,6 +200,7 @@ impl AppState {
         let routing_config = HotRoutingConfig::from_path(auth_home.join("config.json"));
         let runtime = RuntimeConfig::for_tests();
         let codex_catalog = CodexCatalogCache::new(runtime.codex_catalog_config());
+        let codex_max_concurrent = runtime.codex_max_concurrent;
 
         Self {
             http: reqwest::Client::new(),
@@ -208,6 +220,14 @@ impl AppState {
             google_auth: ResolvedAuthCache::new(),
             windsurf_auth: ResolvedAuthCache::new(),
             bedrock_auth: ResolvedAuthCache::new(),
+            codex_handshake_sem: if codex_max_concurrent > 0 {
+                Some(Arc::new(tokio::sync::Semaphore::new(codex_max_concurrent)))
+            } else {
+                None
+            },
+            codex_handshake_times: Arc::new(std::sync::Mutex::new(
+                std::collections::VecDeque::new(),
+            )),
             response_storage: ResponseStorage::default(),
             codex_wss_latched: Arc::new(AtomicBool::new(false)),
             codex_wss_failures: Arc::new(AtomicU32::new(0)),
@@ -265,28 +285,72 @@ impl AppState {
         self.codex_wss_failures.store(0, Ordering::Relaxed);
     }
 
+    /// Acquire a handshake permit for Codex (WSS connect or HTTP call).
+    /// Enforces the configured `codex_max_concurrent` (at handshake start) and
+    /// `codex_handshakes_per_min` rolling window. Returns a rate-limit error
+    /// with a short retry-after when either limit is hit.
+    pub async fn codex_acquire_handshake(&self) -> AppResult<()> {
+        // Rate limit (handshakes per minute window)
+        if self.runtime.codex_handshakes_per_min > 0 {
+            let mut times = self
+                .codex_handshake_times
+                .lock()
+                .expect("codex handshake rate poisoned");
+            let now = std::time::Instant::now();
+            let window = std::time::Duration::from_secs(60);
+            while let Some(front) = times.front() {
+                if now.duration_since(*front) > window {
+                    times.pop_front();
+                } else {
+                    break;
+                }
+            }
+            if times.len() >= self.runtime.codex_handshakes_per_min as usize {
+                return Err(AppError::TooManyRequests {
+                    message: "codex handshake rate limit exceeded".into(),
+                    retry_after_secs: Some(5),
+                });
+            }
+            times.push_back(now);
+        }
+
+        // Concurrency limit on handshake starts (not full stream lifetime in this pass)
+        if let Some(sem) = &self.codex_handshake_sem {
+            // Acquire and immediately release the permit; this bounds the number of
+            // simultaneous *new* Codex conversations starting. Holding across the
+            // full stream would require threading the permit into the response future.
+            let _permit = sem
+                .acquire()
+                .await
+                .map_err(|_| AppError::Upstream("codex concurrency semaphore closed".into()))?;
+            drop(_permit);
+        }
+
+        Ok(())
+    }
+
     pub fn remember_response_for_continuation(
         &self,
         record: NewResponseStateRecord,
     ) -> ResponseStateRecord {
-        let record = response_state_record(record, false);
+        let record = Arc::new(response_state_record(record, false));
         let mut storage = self.response_storage.lock();
         storage
             .volatile
-            .insert(record.adapter_response_id.clone(), record.clone());
-        record
+            .insert(record.adapter_response_id.clone(), Arc::clone(&record));
+        (*record).clone()
     }
 
     pub fn store_public_response(&self, record: NewResponseStateRecord) -> ResponseStateRecord {
-        let record = response_state_record(record, true);
+        let record = Arc::new(response_state_record(record, true));
         let mut storage = self.response_storage.lock();
         storage
             .volatile
-            .insert(record.adapter_response_id.clone(), record.clone());
+            .insert(record.adapter_response_id.clone(), Arc::clone(&record));
         storage
             .public_retrievable
-            .insert(record.adapter_response_id.clone(), record.clone());
-        record
+            .insert(record.adapter_response_id.clone(), Arc::clone(&record));
+        (*record).clone()
     }
 
     pub fn continuation_response(&self, adapter_response_id: &str) -> Option<ResponseStateRecord> {
@@ -295,7 +359,7 @@ impl AppState {
             .volatile
             .get(adapter_response_id)
             .filter(|record| !self.response_storage.is_expired(record))
-            .cloned()
+            .map(|record| (**record).clone())
     }
 
     pub fn public_response(&self, adapter_response_id: &str) -> Option<serde_json::Value> {

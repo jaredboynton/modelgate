@@ -662,6 +662,9 @@ async fn connect_responses_wss_once(
     wss_url: &str,
     body: Option<&serde_json::Value>,
 ) -> AppResult<specter::WebSocket> {
+    // Enforce handshake limits before any network work for Codex WSS.
+    state.codex_acquire_handshake().await?;
+
     rate_limit::parse_codex_ws_protocol(Some("rfc6455")).map_err(AppError::BadRequest)?;
     let headers = match body {
         Some(body) => codex_headers_for_body(state, body)?,
@@ -717,6 +720,8 @@ async fn send_http(
     http_url: &str,
     body: &serde_json::Value,
 ) -> AppResult<CodexHttpResponse> {
+    // Enforce handshake limits before the Codex HTTP call.
+    state.codex_acquire_handshake().await?;
     let headers = codex_headers_for_body(state, body)?;
     let response = state
         .specter
@@ -736,6 +741,8 @@ async fn send_http_stream(
     http_url: &str,
     body: &serde_json::Value,
 ) -> AppResult<reqwest::Response> {
+    // Enforce handshake limits before the Codex HTTP call.
+    state.codex_acquire_handshake().await?;
     let headers = codex_headers_for_body(state, body)?;
     let mut request = state.http.post(http_url).json(body);
     for (name, value) in headers.iter() {

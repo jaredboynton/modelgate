@@ -17,8 +17,10 @@
 //! `std::fs::canonicalize` (realpath equivalent) to a descendant of one of
 //! the configured roots; symlink escapes are rejected.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use axum::http::HeaderMap;
 use tokio::process::Command;
@@ -43,6 +45,35 @@ pub const ENV_ALLOWLIST: &str = "UMP_CURSOR_WORKSPACE_ALLOWLIST";
 
 /// Hard timeout for shelling out to git plumbing.
 const GIT_TIMEOUT: Duration = Duration::from_millis(1_000);
+
+/// Short TTL for in-process caching of `discover_repo_metadata` results.
+/// Avoids repeated `git` subprocesses for the same workspace within a request burst.
+const WORKSPACE_META_TTL: Duration = Duration::from_secs(30);
+
+static WORKSPACE_META_CACHE: Mutex<Option<HashMap<PathBuf, (Instant, RepoMetadata)>>> =
+    Mutex::new(None);
+
+fn lookup_workspace_meta(workspace: &Path) -> Option<RepoMetadata> {
+    let mut guard = WORKSPACE_META_CACHE.lock().ok()?;
+    let map = guard.get_or_insert_with(HashMap::new);
+    if let Some((ts, meta)) = map.get(workspace) {
+        if ts.elapsed() < WORKSPACE_META_TTL {
+            return Some(meta.clone());
+        }
+        map.remove(workspace);
+    }
+    None
+}
+
+fn store_workspace_meta(workspace: PathBuf, meta: RepoMetadata) {
+    if let Ok(mut guard) = WORKSPACE_META_CACHE.lock() {
+        let map = guard.get_or_insert_with(HashMap::new);
+        map.insert(workspace, (Instant::now(), meta));
+        if map.len() > 64 {
+            map.clear();
+        }
+    }
+}
 
 /// Workspace input contract extracted at the route boundary.
 ///
@@ -232,12 +263,21 @@ pub fn is_within_directory(root: &Path, candidate: &Path) -> bool {
 /// `None` per field; the function does not propagate failures because
 /// indexing is best-effort.
 pub async fn discover_repo_metadata(workspace: &Path) -> RepoMetadata {
+    // Fast path: recent cached result for this workspace path.
+    if let Some(cached) = lookup_workspace_meta(workspace) {
+        return cached;
+    }
+
     let mut metadata = RepoMetadata {
         workspace: workspace.to_path_buf(),
         worktree: workspace.to_path_buf(),
         relative_workspace_path: ".".into(),
         ..RepoMetadata::default()
     };
+
+    let skip_status = std::env::var("UMP_CURSOR_SKIP_GIT_STATUS")
+        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE"))
+        .unwrap_or(false);
 
     let repo_root = git_capture(workspace, &["rev-parse", "--show-toplevel"]).await;
     if let Some(root) = repo_root.as_ref().filter(|value| !value.is_empty()) {
@@ -269,9 +309,11 @@ pub async fn discover_repo_metadata(workspace: &Path) -> RepoMetadata {
             }
         }
     }
-    metadata.status_summary = git_capture(workspace, &["status", "--short"])
-        .await
-        .filter(|value| !value.is_empty());
+    if !skip_status {
+        metadata.status_summary = git_capture(workspace, &["status", "--short"])
+            .await
+            .filter(|value| !value.is_empty());
+    }
 
     metadata.is_tracked = metadata.remote.is_some();
     metadata.is_local = !metadata.is_tracked;
@@ -281,6 +323,8 @@ pub async fn discover_repo_metadata(workspace: &Path) -> RepoMetadata {
             .and_then(|name| name.to_str())
             .map(str::to_owned);
     }
+
+    store_workspace_meta(workspace.to_path_buf(), metadata.clone());
     metadata
 }
 

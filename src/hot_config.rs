@@ -232,6 +232,60 @@ impl HotRoutingConfig {
             }))
     }
 
+    /// Resolve any hot-config target override and the effective remote compaction
+    /// policy for `(model, source_format)` using a single snapshot load.
+    ///
+    /// Returns `(Some(target), policy)` when a matching enabled route exists.
+    /// When no route matches, returns `(None, Some(global_policy))` if a global
+    /// default is configured, otherwise `(None, None)` (caller should use the
+    /// final static target's default policy).
+    pub fn resolve_target_and_compaction_policy(
+        &self,
+        model: &str,
+        source_format: Option<&str>,
+    ) -> AppResult<(Option<ResolvedTarget>, Option<RemoteCompactionPolicy>)> {
+        let Some(config) = self.load()? else {
+            return Ok((None, None));
+        };
+
+        let matching = config.routes.iter().find(|route| {
+            route.enabled
+                && route.source.model == model
+                && source_format_matches(route.source.format.as_deref(), source_format)
+        });
+
+        let target = matching.map(|route| {
+            let target_format = route
+                .target
+                .format
+                .as_deref()
+                .and_then(parse_target_format)
+                .or_else(|| route.target.provider.default_target_format())
+                .ok_or_else(|| AppError::ModelNotSupported(model.to_string()))
+                .unwrap_or(TargetFormat::Responses); // safe default; callers validate
+            ResolvedTarget {
+                provider: route.target.provider,
+                upstream_model: route.target.model.clone(),
+                target_format,
+            }
+        });
+
+        let policy = if let Some(route) = matching {
+            route
+                .remote_compaction_policy
+                .or_else(|| config.compaction.as_ref().and_then(|c| c.default_policy))
+                .or_else(|| {
+                    target
+                        .as_ref()
+                        .map(|t| default_remote_compaction_policy(t.provider, t.target_format))
+                })
+        } else {
+            config.compaction.as_ref().and_then(|c| c.default_policy)
+        };
+
+        Ok((target, policy))
+    }
+
     pub fn configured_models(&self) -> AppResult<Vec<ConfiguredModel>> {
         let Some(config) = self.load()? else {
             return Ok(Vec::new());
