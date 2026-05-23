@@ -20,24 +20,25 @@
 
 use std::{
     collections::HashMap,
+    net::SocketAddr,
     sync::{Arc, OnceLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use h2::client::SendRequest;
 use http::{Request, StatusCode};
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, RootCertStore};
 use rustls_native_certs::load_native_certs;
-use tokio::net::TcpStream;
+use tokio::net::{lookup_host, TcpStream};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_rustls::TlsConnector;
 
 use crate::upstream::cursor::connect::{
-    frame_connect_message, parse_connect_end_stream, take_connect_frame, ConnectError,
+    frame_connect_message, parse_connect_end_stream, take_connect_frame_bytes, ConnectError,
     CONNECT_END_STREAM_FLAG, GRPC_WEB_TRAILER_FLAG,
 };
 use crate::upstream::cursor::proto::encode_client_heartbeat;
@@ -51,6 +52,10 @@ pub const READ_DEADLINE: Duration = Duration::from_secs(90);
 
 /// Connect-phase deadline (TCP + TLS + h2 handshake).
 pub const CONNECT_DEADLINE: Duration = Duration::from_secs(30);
+
+/// Cursor hosts are stable service front doors; cache DNS briefly so bursts of
+/// new h2 connections do not serialize through repeated resolver work.
+const DNS_CACHE_TTL: Duration = Duration::from_secs(300);
 
 /// Heartbeat tick. Verified live in Phase 0 against the Cursor side; matches
 /// the Node bridge cadence.
@@ -91,28 +96,57 @@ struct PooledH2Connection {
     _connection_handle: ConnectionGuard,
 }
 
+type CursorDnsCache = HashMap<&'static str, (Instant, Vec<SocketAddr>)>;
+
 fn h2_pool() -> &'static Mutex<HashMap<&'static str, PooledH2Connection>> {
     static CELL: OnceLock<Mutex<HashMap<&'static str, PooledH2Connection>>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn dns_cache() -> &'static Mutex<CursorDnsCache> {
+    static CELL: OnceLock<Mutex<CursorDnsCache>> = OnceLock::new();
     CELL.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 pub async fn pooled_send_request_for_host(
     host: &'static str,
 ) -> TransportResult<SendRequest<Bytes>> {
-    let mut pool = h2_pool().lock().await;
-    if let Some(connection) = pool.get(host) {
-        return Ok(connection.sender.clone());
+    loop {
+        if let Some(sender) = {
+            let pool = h2_pool().lock().await;
+            pool.get(host).map(|connection| connection.sender.clone())
+        } {
+            match sender.ready().await {
+                Ok(ready_sender) => return Ok(ready_sender),
+                Err(err) => {
+                    tracing::debug!(host, ?err, "cursor h2 pooled sender is stale; evicting");
+                    evict_pooled_send_request_for_host(host).await;
+                    continue;
+                }
+            }
+        }
+
+        let (sender, connection_handle) = connect_h2_host(host).await?;
+        let pooled_sender = sender.clone();
+        let mut pool = h2_pool().lock().await;
+        if pool.contains_key(host) {
+            // Another task populated the pool while this task connected. Drop
+            // the duplicate and re-check readiness of the canonical entry.
+            continue;
+        }
+        pool.insert(
+            host,
+            PooledH2Connection {
+                sender,
+                _connection_handle: connection_handle,
+            },
+        );
+        return Ok(pooled_sender);
     }
-    let (sender, connection_handle) = connect_h2_host(host).await?;
-    let pooled_sender = sender.clone();
-    pool.insert(
-        host,
-        PooledH2Connection {
-            sender,
-            _connection_handle: connection_handle,
-        },
-    );
-    Ok(pooled_sender)
+}
+
+async fn evict_pooled_send_request_for_host(host: &'static str) {
+    h2_pool().lock().await.remove(host);
 }
 
 /// Build the rustls `TlsConnector` used for every Cursor request. ALPN is
@@ -225,7 +259,42 @@ pub async fn open_streaming_run(token: &str, request_body: Vec<u8>) -> Transport
     let request_id = uuid::Uuid::new_v4().to_string();
     let mut send_request = pooled_send_request_for_host(CURSOR_API_HOST).await?;
 
-    let request = Request::builder()
+    let request = cursor_run_request(token, &request_id)?;
+
+    let (response_fut, mut send_stream) = match send_request.send_request(request, false) {
+        Ok(parts) => parts,
+        Err(err) => {
+            tracing::debug!(?err, "cursor h2 pooled send failed; retrying once");
+            evict_pooled_send_request_for_host(CURSOR_API_HOST).await;
+            send_request = pooled_send_request_for_host(CURSOR_API_HOST).await?;
+            send_request
+                .send_request(cursor_run_request(token, &request_id)?, false)
+                .map_err(|err| {
+                    TransportError::H2(format!("failed to send cursor request: {err}"))
+                })?
+        }
+    };
+
+    // Initial body frame: the AgentClientMessage envelope wrapped in Connect.
+    let initial_frame = frame_connect_message(&request_body, 0);
+    if let Err(err) = send_stream.send_data(Bytes::from(initial_frame.clone()), false) {
+        tracing::debug!(?err, "cursor h2 pooled body send failed; retrying once");
+        evict_pooled_send_request_for_host(CURSOR_API_HOST).await;
+        send_request = pooled_send_request_for_host(CURSOR_API_HOST).await?;
+        let (retry_response_fut, mut retry_send_stream) = send_request
+            .send_request(cursor_run_request(token, &request_id)?, false)
+            .map_err(|err| TransportError::H2(format!("failed to send cursor request: {err}")))?;
+        retry_send_stream
+            .send_data(Bytes::from(initial_frame), false)
+            .map_err(|err| TransportError::H2(format!("failed to send cursor run frame: {err}")))?;
+        return finish_open_streaming_run(request_id, retry_response_fut, retry_send_stream).await;
+    }
+
+    finish_open_streaming_run(request_id, response_fut, send_stream).await
+}
+
+fn cursor_run_request(token: &str, request_id: &str) -> TransportResult<Request<()>> {
+    Request::builder()
         .method("POST")
         .uri(format!("https://{CURSOR_API_HOST}{CURSOR_RUN_PATH}"))
         .header("content-type", "application/connect+proto")
@@ -234,21 +303,17 @@ pub async fn open_streaming_run(token: &str, request_body: Vec<u8>) -> Transport
         .header("x-ghost-mode", "true")
         .header("x-cursor-client-version", cursor_client_version())
         .header("x-cursor-client-type", "cli")
-        .header("x-request-id", &request_id)
+        .header("x-request-id", request_id)
         .header("connect-protocol-version", "1")
         .body(())
-        .map_err(|err| TransportError::Request(err.to_string()))?;
+        .map_err(|err| TransportError::Request(err.to_string()))
+}
 
-    let (response_fut, mut send_stream) = send_request
-        .send_request(request, false)
-        .map_err(|err| TransportError::H2(format!("failed to send cursor request: {err}")))?;
-
-    // Initial body frame: the AgentClientMessage envelope wrapped in Connect.
-    let initial_frame = frame_connect_message(&request_body, 0);
-    send_stream
-        .send_data(Bytes::from(initial_frame), false)
-        .map_err(|err| TransportError::H2(format!("failed to send cursor run frame: {err}")))?;
-
+async fn finish_open_streaming_run(
+    request_id: String,
+    response_fut: h2::client::ResponseFuture,
+    send_stream: h2::SendStream<Bytes>,
+) -> TransportResult<RunStream> {
     let response = response_fut
         .await
         .map_err(|err| TransportError::H2(format!("cursor h2 response failed: {err}")))?;
@@ -325,7 +390,7 @@ async fn connect_h2_host(
     host: &'static str,
 ) -> TransportResult<(SendRequest<Bytes>, ConnectionGuard)> {
     timeout(CONNECT_DEADLINE, async {
-        let tcp = TcpStream::connect((host, 443)).await?;
+        let tcp = connect_tcp_host(host).await?;
         let connector = tls_connector()?;
         let server_name = ServerName::try_from(host)
             .map_err(|err| TransportError::Tls(format!("invalid cursor server name: {err}")))?;
@@ -347,13 +412,66 @@ async fn connect_h2_host(
     .map_err(|_| TransportError::ConnectTimeout)?
 }
 
+async fn connect_tcp_host(host: &'static str) -> std::io::Result<TcpStream> {
+    let mut last_error = None;
+    for force_refresh in [false, true] {
+        let addresses = resolve_cursor_host(host, force_refresh).await?;
+        for address in addresses {
+            match TcpStream::connect(address).await {
+                Ok(stream) => return Ok(stream),
+                Err(error) => last_error = Some(error),
+            }
+        }
+        evict_dns_host(host).await;
+    }
+    Err(last_error.unwrap_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("no socket addresses resolved for {host}"),
+        )
+    }))
+}
+
+async fn resolve_cursor_host(
+    host: &'static str,
+    force_refresh: bool,
+) -> std::io::Result<Vec<SocketAddr>> {
+    if !force_refresh {
+        if let Some(addresses) = {
+            let cache = dns_cache().lock().await;
+            cache.get(host).and_then(|(resolved_at, addresses)| {
+                (resolved_at.elapsed() < DNS_CACHE_TTL).then(|| addresses.clone())
+            })
+        } {
+            return Ok(addresses);
+        }
+    }
+
+    let addresses = lookup_host((host, 443)).await?.collect::<Vec<_>>();
+    if addresses.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("no socket addresses resolved for {host}"),
+        ));
+    }
+    dns_cache()
+        .lock()
+        .await
+        .insert(host, (Instant::now(), addresses.clone()));
+    Ok(addresses)
+}
+
+async fn evict_dns_host(host: &'static str) {
+    dns_cache().lock().await.remove(host);
+}
+
 async fn run_reader_loop(
     mut body: h2::RecvStream,
     tx: mpsc::Sender<Bytes>,
     terminal_error: Arc<Mutex<Option<ConnectError>>>,
     request_id: String,
 ) -> TransportResult<()> {
-    let mut pending: Vec<u8> = Vec::new();
+    let mut pending = BytesMut::new();
     let outcome = timeout(READ_DEADLINE, async {
         while let Some(chunk_result) = body.data().await {
             let chunk = chunk_result
@@ -363,7 +481,7 @@ async fn run_reader_loop(
             // Release h2 flow-control window for the bytes we just consumed.
             let _ = body.flow_control().release_capacity(chunk_len);
 
-            while let Some((flags, payload)) = take_connect_frame(&mut pending) {
+            while let Some((flags, payload)) = take_connect_frame_bytes(&mut pending) {
                 if flags & CONNECT_END_STREAM_FLAG != 0 {
                     if let Some(error) = parse_connect_end_stream(&payload) {
                         *terminal_error.lock().await = Some(error.clone());
@@ -390,7 +508,7 @@ async fn run_reader_loop(
                     }
                     return Ok(());
                 }
-                if tx.send(Bytes::from(payload)).await.is_err() {
+                if tx.send(payload).await.is_err() {
                     // Receiver dropped; bail out.
                     return Ok(());
                 }
@@ -441,7 +559,44 @@ pub async fn unary_get_usable_models(token: &str) -> TransportResult<Vec<u8>> {
     let request_id = uuid::Uuid::new_v4().to_string();
     let mut send_request = pooled_send_request_for_host(CURSOR_API_HOST).await?;
 
-    let request = Request::builder()
+    let request = cursor_usable_models_request(token, &request_id)?;
+
+    let (response_fut, mut send_stream) = match send_request.send_request(request, false) {
+        Ok(parts) => parts,
+        Err(err) => {
+            tracing::debug!(?err, "cursor unary pooled send failed; retrying once");
+            evict_pooled_send_request_for_host(CURSOR_API_HOST).await;
+            send_request = pooled_send_request_for_host(CURSOR_API_HOST).await?;
+            send_request
+                .send_request(cursor_usable_models_request(token, &request_id)?, false)
+                .map_err(|err| {
+                    TransportError::H2(format!("failed to send cursor unary request: {err}"))
+                })?
+        }
+    };
+    // Empty body for GetUsableModels.
+    if let Err(err) = send_stream.send_data(Bytes::new(), true) {
+        tracing::debug!(?err, "cursor unary pooled body send failed; retrying once");
+        evict_pooled_send_request_for_host(CURSOR_API_HOST).await;
+        send_request = pooled_send_request_for_host(CURSOR_API_HOST).await?;
+        let (retry_response_fut, mut retry_send_stream) = send_request
+            .send_request(cursor_usable_models_request(token, &request_id)?, false)
+            .map_err(|err| {
+                TransportError::H2(format!("failed to send cursor unary request: {err}"))
+            })?;
+        retry_send_stream
+            .send_data(Bytes::new(), true)
+            .map_err(|err| {
+                TransportError::H2(format!("failed to flush cursor unary request: {err}"))
+            })?;
+        return finish_unary_response(retry_response_fut).await;
+    }
+
+    finish_unary_response(response_fut).await
+}
+
+fn cursor_usable_models_request(token: &str, request_id: &str) -> TransportResult<Request<()>> {
+    Request::builder()
         .method("POST")
         .uri(format!(
             "https://{CURSOR_API_HOST}{CURSOR_GET_USABLE_MODELS_PATH}"
@@ -452,18 +607,14 @@ pub async fn unary_get_usable_models(token: &str) -> TransportResult<Vec<u8>> {
         .header("x-ghost-mode", "true")
         .header("x-cursor-client-version", cursor_client_version())
         .header("x-cursor-client-type", "cli")
-        .header("x-request-id", &request_id)
+        .header("x-request-id", request_id)
         .body(())
-        .map_err(|err| TransportError::Request(err.to_string()))?;
+        .map_err(|err| TransportError::Request(err.to_string()))
+}
 
-    let (response_fut, mut send_stream) = send_request
-        .send_request(request, false)
-        .map_err(|err| TransportError::H2(format!("failed to send cursor unary request: {err}")))?;
-    // Empty body for GetUsableModels.
-    send_stream.send_data(Bytes::new(), true).map_err(|err| {
-        TransportError::H2(format!("failed to flush cursor unary request: {err}"))
-    })?;
-
+async fn finish_unary_response(
+    response_fut: h2::client::ResponseFuture,
+) -> TransportResult<Vec<u8>> {
     let response = timeout(READ_DEADLINE, response_fut)
         .await
         .map_err(|_| TransportError::Timeout)?

@@ -8,6 +8,8 @@
 //! On the receive side the relevant flag bits the upstream module honors are
 //! `0x02` (Connect end-stream) and `0x80` (gRPC-web trailer block).
 
+use bytes::{Bytes, BytesMut};
+
 /// Connect end-stream flag. Frame body is a JSON trailer per the Connect
 /// streaming spec.
 pub const CONNECT_END_STREAM_FLAG: u8 = 0b0000_0010;
@@ -30,6 +32,18 @@ pub fn frame_connect_message(payload: &[u8], flags: u8) -> Vec<u8> {
 /// the buffer does not yet hold a complete header + payload, leaving the
 /// pending bytes intact for the next read.
 pub fn take_connect_frame(buf: &mut Vec<u8>) -> Option<(u8, Vec<u8>)> {
+    let mut bytes = BytesMut::from(&buf[..]);
+    let original_len = bytes.len();
+    let (flags, payload) = take_connect_frame_bytes(&mut bytes)?;
+    let consumed = original_len - bytes.len();
+    buf.drain(..consumed);
+    Some((flags, payload.to_vec()))
+}
+
+/// Pop a single Connect frame off the front of a `BytesMut` without shifting
+/// the remaining buffer. Hot streaming paths should prefer this over the
+/// `Vec<u8>` compatibility wrapper above.
+pub fn take_connect_frame_bytes(buf: &mut BytesMut) -> Option<(u8, Bytes)> {
     if buf.len() < 5 {
         return None;
     }
@@ -38,8 +52,8 @@ pub fn take_connect_frame(buf: &mut Vec<u8>) -> Option<(u8, Vec<u8>)> {
         return None;
     }
     let flags = buf[0];
-    let payload = buf[5..5 + len].to_vec();
-    buf.drain(..5 + len);
+    let _header = buf.split_to(5);
+    let payload = buf.split_to(len).freeze();
     Some((flags, payload))
 }
 
