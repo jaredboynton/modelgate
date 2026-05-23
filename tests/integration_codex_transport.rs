@@ -101,10 +101,11 @@ async fn codex_rest_responses_return_sse_stream_response() {
         codex_home.path().to_path_buf(),
         auth_home.path().to_path_buf(),
     );
-    state.runtime.codex_transport = CodexTransport::Http;
+    std::sync::Arc::make_mut(&mut state.runtime).codex_transport = CodexTransport::Http;
 
     let http = MockServer::start().await;
-    state.runtime.codex_responses_http_url = format!("{}/backend-api/codex/responses", http.uri());
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_http_url =
+        format!("{}/backend-api/codex/responses", http.uri());
     seed_codex_catalog(&state, &["gpt-5.5".to_string()]);
 
     Mock::given(method("POST"))

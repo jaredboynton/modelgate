@@ -355,8 +355,8 @@ async fn codex_catalog_background_refresher_populates_cache() {
     )
     .unwrap();
     let mut state = AppState::for_tests(codex_home, auth_home);
-    state.runtime.codex_models_url = server.uri();
-    state.runtime.codex_catalog_ttl = Duration::from_millis(10);
+    std::sync::Arc::make_mut(&mut state.runtime).codex_models_url = server.uri();
+    std::sync::Arc::make_mut(&mut state.runtime).codex_catalog_ttl = Duration::from_millis(10);
 
     let handle = spawn_codex_model_catalog_refresher(state.clone());
     tokio::time::timeout(Duration::from_secs(1), async {

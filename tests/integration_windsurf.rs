@@ -354,7 +354,7 @@ async fn windsurf_responses_tool_call_then_tool_result_continues_with_previous_r
     assert_eq!(first_body["output"][0]["type"], "function_call");
     assert!(state.continuation_response(response_id).is_some());
 
-    state.runtime.windsurf_cloud_base_url = second_server.uri();
+    std::sync::Arc::make_mut(&mut state.runtime).windsurf_cloud_base_url = second_server.uri();
     let second = execute_responses_request(
         &state,
         HeaderMap::new(),
@@ -478,7 +478,7 @@ fn windsurf_state(server: &MockServer) -> (tempfile::TempDir, unified_model_prox
     .unwrap();
     let mut state =
         unified_model_proxy_v2::AppState::for_tests(temp.path().join("codex"), auth_home);
-    state.runtime.windsurf_cloud_base_url = server.uri();
+    std::sync::Arc::make_mut(&mut state.runtime).windsurf_cloud_base_url = server.uri();
     (temp, state)
 }
 

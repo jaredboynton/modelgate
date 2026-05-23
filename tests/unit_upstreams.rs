@@ -20,6 +20,7 @@ use unified_model_proxy_v2::{
             GoogleRequest,
         },
     },
+    upstream_response::{collect_upstream_body, MAX_UPSTREAM_BODY_BYTES},
     AppError, AppState, UpstreamResponse,
 };
 
@@ -41,6 +42,19 @@ fn sse_headers_disable_intermediary_buffering() {
         stream::empty::<Result<Bytes, AppError>>(),
     );
     assert_eq!(response.headers["x-accel-buffering"], "no");
+}
+
+#[tokio::test]
+async fn upstream_body_collection_is_bounded() {
+    let oversized = vec![b'x'; MAX_UPSTREAM_BODY_BYTES + 1];
+
+    let error = collect_upstream_body(axum::body::Body::from(oversized))
+        .await
+        .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("upstream response body exceeded"));
 }
 
 fn state_with_google_key(key: Option<&str>) -> AppState {

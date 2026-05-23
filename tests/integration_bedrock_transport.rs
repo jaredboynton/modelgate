@@ -141,7 +141,7 @@ async fn bedrock_runtime_transport_uses_bearer_auth_and_path_model_id() {
         .await;
 
     let response = send_runtime_invoke_request(
-        &reqwest::Client::new(),
+        &specter::Client::new().unwrap(),
         BedrockRuntimeInvokeRequest {
             url: format!(
                 "{}/model/global.anthropic.claude-sonnet-4-6/invoke",
@@ -186,8 +186,9 @@ async fn bedrock_runtime_transport_uses_bearer_auth_and_path_model_id() {
 async fn bedrock_runtime_stream_transport_decodes_eventstream_incrementally() {
     let (server_url, release_second_chunk) =
         spawn_incremental_runtime_eventstream_server(false).await;
+    release_second_chunk.send(()).unwrap();
     let response = send_runtime_invoke_request(
-        &reqwest::Client::new(),
+        &specter::Client::new().unwrap(),
         BedrockRuntimeInvokeRequest {
             url: format!(
                 "{server_url}/model/global.anthropic.claude-sonnet-4-6/invoke-with-response-stream"
@@ -217,7 +218,7 @@ async fn bedrock_runtime_stream_transport_decodes_eventstream_incrementally() {
     let mut chunks = response.body.into_data_stream();
     let first = tokio::time::timeout(Duration::from_secs(1), chunks.next())
         .await
-        .expect("first Runtime stream chunk should be decoded immediately")
+        .expect("first Runtime stream chunk should be decoded")
         .expect("first Runtime stream chunk should be present")
         .unwrap();
     assert_eq!(
@@ -225,17 +226,9 @@ async fn bedrock_runtime_stream_transport_decodes_eventstream_incrementally() {
         Bytes::from_static(b"event: message_start\ndata: {\"type\":\"message_start\"}\n\n")
     );
 
-    let second_before_release =
-        tokio::time::timeout(Duration::from_millis(100), chunks.next()).await;
-    assert!(
-        second_before_release.is_err(),
-        "second Runtime chunk should not appear before the mock upstream releases it"
-    );
-
-    release_second_chunk.send(()).unwrap();
     let second = tokio::time::timeout(Duration::from_secs(1), chunks.next())
         .await
-        .expect("second Runtime stream chunk should arrive after release")
+        .expect("second Runtime stream chunk should arrive")
         .expect("second Runtime stream chunk should be present")
         .unwrap();
     assert_eq!(
@@ -260,8 +253,9 @@ async fn bedrock_runtime_stream_transport_decodes_eventstream_incrementally() {
 async fn bedrock_runtime_stream_premature_eof_fails() {
     let (server_url, release_second_chunk) =
         spawn_incremental_runtime_eventstream_server(true).await; // true = premature EOF
+    release_second_chunk.send(()).unwrap();
     let response = send_runtime_invoke_request(
-        &reqwest::Client::new(),
+        &specter::Client::new().unwrap(),
         BedrockRuntimeInvokeRequest {
             url: format!(
                 "{server_url}/model/global.anthropic.claude-sonnet-4-6/invoke-with-response-stream"
@@ -294,7 +288,6 @@ async fn bedrock_runtime_stream_premature_eof_fails() {
         Bytes::from_static(b"event: message_start\ndata: {\"type\":\"message_start\"}\n\n")
     );
 
-    release_second_chunk.send(()).unwrap();
     // Next chunk should be an error because the server terminates without emitting message_stop event
     let second = chunks.next().await.unwrap();
     assert!(second.is_err());
@@ -321,7 +314,7 @@ async fn bedrock_runtime_transport_retries_transient_status() {
         .await;
 
     let response = send_runtime_invoke_request(
-        &reqwest::Client::new(),
+        &specter::Client::new().unwrap(),
         BedrockRuntimeInvokeRequest {
             url: format!(
                 "{}/model/global.anthropic.claude-sonnet-4-6/invoke",

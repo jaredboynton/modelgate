@@ -1,12 +1,12 @@
 mod common;
 
-use reqwest::StatusCode;
+use http::StatusCode;
 use serde_json::Value;
 
 #[tokio::test]
 #[ignore = "requires a locally running unified-model-proxy-v2 server"]
 async fn live_health_route_reports_ok() {
-    let client = reqwest::Client::new();
+    let client = specter::Client::new().unwrap();
     let response = client
         .get(format!("{}/health", common::live_base_url()))
         .send()
@@ -14,7 +14,7 @@ async fn live_health_route_reports_ok() {
         .expect("send live health request");
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body: Value = response.json().await.expect("parse health response");
+    let body: Value = response.json().expect("parse health response");
     assert_eq!(body["status"], "ok");
     assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
     assert!(body["git_revision"]
@@ -28,7 +28,7 @@ async fn live_health_route_reports_ok() {
 #[tokio::test]
 #[ignore = "requires a locally running unified-model-proxy-v2 server"]
 async fn live_models_route_returns_at_least_one_model_without_leaking_known_env_secrets() {
-    let client = reqwest::Client::new();
+    let client = specter::Client::new().unwrap();
     let response = client
         .get(format!("{}/v1/models", common::live_base_url()))
         .send()
@@ -36,7 +36,7 @@ async fn live_models_route_returns_at_least_one_model_without_leaking_known_env_
         .expect("send live models request");
 
     assert_eq!(response.status(), StatusCode::OK);
-    let text = response.text().await.expect("read models response");
+    let text = response.text().expect("read models response");
     common::assert_no_unredacted_sensitive_values(&text);
     let body: Value = serde_json::from_str(&text).expect("parse models response");
     assert!(body["data"]
@@ -52,7 +52,7 @@ async fn live_chat_completion_returns_success_when_opted_in() {
         return;
     };
 
-    let client = reqwest::Client::new();
+    let client = specter::Client::new().unwrap();
     let response = client
         .post(format!("{}/v1/chat/completions", common::live_base_url()))
         .json(&serde_json::json!({
@@ -65,10 +65,7 @@ async fn live_chat_completion_returns_success_when_opted_in() {
         .expect("send live chat completion request");
 
     let status = response.status();
-    let text = response
-        .text()
-        .await
-        .expect("read chat completion response");
+    let text = response.text().expect("read chat completion response");
     common::assert_no_unredacted_sensitive_values(&text);
     assert!(
         status.is_success(),

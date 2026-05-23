@@ -5,7 +5,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use reqwest::{header, StatusCode};
+use http::StatusCode;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use specter::Message as SpecterMessage;
@@ -103,9 +103,10 @@ async fn live_codex_realtime_transcription_session_when_opted_in() {
         return;
     };
 
-    let response = reqwest::Client::new()
+    let response = specter::Client::new()
+        .expect("create specter client")
         .post(live_http_url("/v1/realtime/transcription_sessions"))
-        .header(header::CONTENT_TYPE, "application/json")
+        .header("content-type", "application/json")
         .json(&json!({
             "input_audio_format": "pcm16",
             "input_audio_transcription": {
@@ -123,7 +124,6 @@ async fn live_codex_realtime_transcription_session_when_opted_in() {
     let request_id_hash = response_request_id_hash(&response);
     let text = response
         .text()
-        .await
         .expect("read live realtime transcription session response");
     common::assert_no_unredacted_sensitive_values(&text);
 
@@ -152,9 +152,10 @@ async fn live_codex_realtime_calls_invalid_offer_auth_passes_when_opted_in() {
         return;
     };
 
-    let response = reqwest::Client::new()
+    let response = specter::Client::new()
+        .expect("create specter client")
         .post(live_http_url("/v1/realtime/calls"))
-        .header(header::CONTENT_TYPE, "application/sdp")
+        .header("content-type", "application/sdp")
         .body("v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=ump-v2-live-invalid-offer\r\n")
         .send()
         .await
@@ -164,7 +165,6 @@ async fn live_codex_realtime_calls_invalid_offer_auth_passes_when_opted_in() {
     let request_id_hash = response_request_id_hash(&response);
     let text = response
         .text()
-        .await
         .expect("read live realtime calls invalid-offer response");
     common::assert_no_unredacted_sensitive_values(&text);
     let body = parse_json_body(&text, "realtime_calls_invalid_offer");
@@ -245,9 +245,10 @@ async fn live_codex_audio_transcription_nonempty_spoken_fixture_when_opted_in() 
         ],
     );
 
-    let response = reqwest::Client::new()
+    let response = specter::Client::new()
+        .expect("create specter client")
         .post(live_http_url("/v1/audio/transcriptions"))
-        .header(header::CONTENT_TYPE, content_type)
+        .header("content-type", content_type)
         .body(body)
         .send()
         .await
@@ -257,7 +258,6 @@ async fn live_codex_audio_transcription_nonempty_spoken_fixture_when_opted_in() 
     let request_id_hash = response_request_id_hash(&response);
     let text = response
         .text()
-        .await
         .expect("read live audio transcription response");
     common::assert_no_unredacted_sensitive_values(&text);
     let body = parse_json_body(&text, "audio_transcription");
@@ -370,12 +370,8 @@ fn parse_json_body(text: &str, endpoint_class: &str) -> Value {
     })
 }
 
-fn response_request_id_hash(response: &reqwest::Response) -> Option<String> {
-    response
-        .headers()
-        .get("x-request-id")
-        .and_then(|value| value.to_str().ok())
-        .map(hash_for_log)
+fn response_request_id_hash(response: &specter::Response) -> Option<String> {
+    response.headers().get("x-request-id").map(hash_for_log)
 }
 
 fn hash_for_log(value: &str) -> String {

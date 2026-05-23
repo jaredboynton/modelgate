@@ -52,7 +52,7 @@ async fn responses_websocket_passthrough_uses_codex_auth_and_hot_routing() {
 
     let test_state = codex_test_state_with_route("gemini-3.1-flash-lite");
     let mut state = test_state.state.clone();
-    state.runtime.codex_responses_wss_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
     let proxy = spawn_proxy(state).await;
 
@@ -117,7 +117,7 @@ async fn responses_websocket_accepts_flat_codex_cli_response_create_frame() {
 
     let test_state = codex_test_state_with_route("codex-cli-flat-model");
     let mut state = test_state.state.clone();
-    state.runtime.codex_responses_wss_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
     let proxy = spawn_proxy(state).await;
 
@@ -169,7 +169,7 @@ async fn responses_websocket_accepts_same_provider_model_switch_after_terminal()
         ("second-frame-model", "gpt-5.4"),
     ]);
     let mut state = test_state.state.clone();
-    state.runtime.codex_responses_wss_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
     let proxy = spawn_proxy(state).await;
 
@@ -233,7 +233,7 @@ async fn responses_websocket_accepts_codex_then_google_and_bedrock_independent_t
         ),
     ]);
     let mut state = test_state.state.clone();
-    state.runtime.codex_responses_wss_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
     let proxy = spawn_proxy(state).await;
 
@@ -307,7 +307,7 @@ async fn responses_websocket_accepts_google_and_bedrock_prewarm_then_codex_indep
         ("codex-third-model", "codex", "gpt-5.5"),
     ]);
     let mut state = test_state.state.clone();
-    state.runtime.codex_responses_wss_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
     let proxy = spawn_proxy(state).await;
 
@@ -376,7 +376,7 @@ async fn responses_websocket_unsupported_parseable_event_errors_without_closing(
 
     let test_state = codex_test_state_with_route("codex-after-unsupported-model");
     let mut state = test_state.state.clone();
-    state.runtime.codex_responses_wss_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
     let proxy = spawn_proxy(state).await;
 
@@ -424,7 +424,7 @@ async fn responses_websocket_in_flight_response_create_errors_without_closing() 
         ("overlap-google-model", "google", "gemini-3-flash-preview"),
     ]);
     let mut state = test_state.state.clone();
-    state.runtime.codex_responses_wss_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
     let proxy = spawn_proxy(state).await;
 
@@ -488,7 +488,8 @@ async fn responses_websocket_http_backed_in_flight_response_create_errors_withou
     ]);
     let mut state = test_state.state.clone();
     state.google_api_key = Some(Arc::<str>::from("fixture-google-key"));
-    state.runtime.google_generate_base_url = format!("http://{}", google.addr);
+    std::sync::Arc::make_mut(&mut state.runtime).google_generate_base_url =
+        format!("http://{}", google.addr);
     let proxy = spawn_proxy(state).await;
 
     let mut ws = connect_proxy_ws(&proxy, "/v1/responses").await;
@@ -545,7 +546,7 @@ async fn responses_websocket_accepts_binary_raw_responses_body_for_compatibility
         ("binary-raw-second-model", "gpt-5.4"),
     ]);
     let mut state = test_state.state.clone();
-    state.runtime.codex_responses_wss_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
     let proxy = spawn_proxy(state).await;
 
@@ -605,7 +606,7 @@ async fn responses_websocket_fails_closed_for_non_codex_responses_route_without_
 
     let test_state = codex_test_state_without_route();
     let mut state = test_state.state.clone();
-    state.runtime.codex_responses_wss_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
     let proxy = spawn_proxy(state).await;
 
@@ -640,7 +641,7 @@ async fn responses_websocket_catalog_rejections_use_model_not_supported_code() {
     test_state.state.codex_catalog.clear();
     seed_codex_catalog(&test_state.state, &["gpt-5.4".to_string()]);
     let mut state = test_state.state.clone();
-    state.runtime.codex_responses_wss_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
     let proxy = spawn_proxy(state).await;
 
@@ -674,7 +675,7 @@ async fn responses_websocket_fails_closed_for_malformed_json_without_upstream() 
 
     let test_state = codex_test_state_with_route("malformed-model");
     let mut state = test_state.state.clone();
-    state.runtime.codex_responses_wss_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
     let proxy = spawn_proxy(state).await;
 
@@ -714,7 +715,7 @@ async fn responses_websocket_forwards_ping_pong_controls_after_first_frame() {
 
     let test_state = codex_test_state_with_route("ping-model");
     let mut state = test_state.state.clone();
-    state.runtime.codex_responses_wss_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
     let proxy = spawn_proxy(state).await;
 
@@ -759,7 +760,7 @@ async fn responses_websocket_reports_json_error_when_upstream_disconnects_abrupt
 
     let test_state = codex_test_state_with_route("disconnect-model");
     let mut state = test_state.state.clone();
-    state.runtime.codex_responses_wss_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
     let proxy = spawn_proxy(state).await;
 
@@ -804,7 +805,7 @@ async fn responses_websocket_reports_json_error_when_upstream_closes_before_term
 
     let test_state = codex_test_state_with_route("upstream-close-model");
     let mut state = test_state.state.clone();
-    state.runtime.codex_responses_wss_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
     let proxy = spawn_proxy(state).await;
 

@@ -111,7 +111,7 @@ async fn live_cursor_composer_models_endpoint_returns_three_composer_rows_via_re
         return;
     };
 
-    let client = reqwest::Client::new();
+    let client = specter::Client::new().unwrap();
     let response = client
         .get(format!("{}/v1/models", live_base_url()))
         .timeout(std::time::Duration::from_secs(30))
@@ -119,7 +119,7 @@ async fn live_cursor_composer_models_endpoint_returns_three_composer_rows_via_re
         .await
         .expect("live /v1/models request");
     let status = response.status();
-    let body = response.text().await.expect("read /v1/models body");
+    let body = response.text().expect("read /v1/models body");
     common::assert_no_unredacted_sensitive_values(&body);
 
     assert!(status.is_success(), "live /v1/models failed: {status}");
@@ -138,7 +138,7 @@ async fn live_cursor_responses_streaming_emits_assistant_text_delta_for_each_com
         return;
     };
 
-    let client = reqwest::Client::new();
+    let client = specter::Client::new().unwrap();
     for model in COMPOSER_MODELS {
         let response = client
             .post(format!("{}/v1/responses", live_base_url()))
@@ -156,7 +156,7 @@ async fn live_cursor_responses_streaming_emits_assistant_text_delta_for_each_com
             status.is_success(),
             "live /v1/responses failed for {model} with {status}",
         );
-        let text = response.text().await.expect("read live /v1/responses body");
+        let text = response.text().expect("read live /v1/responses body");
         common::assert_no_unredacted_sensitive_values(&text);
         // Required evidence: at least one assistant text delta event.
         assert!(
@@ -181,7 +181,7 @@ async fn live_cursor_responses_emits_reasoning_event_for_composer_2_family() {
         return;
     };
 
-    let client = reqwest::Client::new();
+    let client = specter::Client::new().unwrap();
     for model in &["composer-2", "composer-2-fast"] {
         let response = client
             .post(format!("{}/v1/responses", live_base_url()))
@@ -194,7 +194,7 @@ async fn live_cursor_responses_emits_reasoning_event_for_composer_2_family() {
             .send()
             .await
             .expect("live reasoning request");
-        let text = response.text().await.expect("read reasoning body");
+        let text = response.text().expect("read reasoning body");
         common::assert_no_unredacted_sensitive_values(&text);
         assert!(
             text.contains("reasoning") || text.contains("thinking"),
@@ -210,7 +210,7 @@ async fn live_cursor_chat_tool_call_round_trips_for_each_composer() {
         return;
     };
 
-    let client = reqwest::Client::new();
+    let client = specter::Client::new().unwrap();
     for model in COMPOSER_MODELS {
         let response = client
             .post(format!("{}/v1/chat/completions", live_base_url()))
@@ -235,7 +235,7 @@ async fn live_cursor_chat_tool_call_round_trips_for_each_composer() {
             .send()
             .await
             .expect("live chat tool request");
-        let text = response.text().await.expect("read chat tool body");
+        let text = response.text().expect("read chat tool body");
         common::assert_no_unredacted_sensitive_values(&text);
         // Required evidence: a tool_calls block on the first turn.
         assert!(
@@ -252,7 +252,7 @@ async fn live_cursor_responses_multi_turn_continuation_via_previous_response_id(
         return;
     };
 
-    let client = reqwest::Client::new();
+    let client = specter::Client::new().unwrap();
     let model = "composer-2-fast";
 
     // Turn 1.
@@ -268,7 +268,7 @@ async fn live_cursor_responses_multi_turn_continuation_via_previous_response_id(
         .send()
         .await
         .expect("live first turn");
-    let first_text = first.text().await.expect("read first turn");
+    let first_text = first.text().expect("read first turn");
     common::assert_no_unredacted_sensitive_values(&first_text);
     let first_json: serde_json::Value =
         serde_json::from_str(&first_text).expect("parse first turn json");
@@ -292,7 +292,7 @@ async fn live_cursor_responses_multi_turn_continuation_via_previous_response_id(
         .send()
         .await
         .expect("live second turn");
-    let second_text = second.text().await.expect("read second turn");
+    let second_text = second.text().expect("read second turn");
     common::assert_no_unredacted_sensitive_values(&second_text);
     let second_json: serde_json::Value =
         serde_json::from_str(&second_text).expect("parse second turn");
@@ -316,7 +316,7 @@ async fn live_cursor_cloud_indexing_emits_handshake_upload_ensure_sync_evidence(
         "live cloud bootstrap validation is mandatory when {LIVE_CURSOR_OPT_IN}=1; set UMP_CURSOR_INDEX_BOOTSTRAP=1"
     );
 
-    let client = reqwest::Client::new();
+    let client = specter::Client::new().unwrap();
     let response = client
         .post(format!("{}/v1/chat/completions", live_base_url()))
         .timeout(std::time::Duration::from_secs(180))
@@ -333,10 +333,7 @@ async fn live_cursor_cloud_indexing_emits_handshake_upload_ensure_sync_evidence(
         .await
         .expect("live cloud-indexing tool request");
     let status = response.status();
-    let text = response
-        .text()
-        .await
-        .expect("read live cloud-indexing tool body");
+    let text = response.text().expect("read live cloud-indexing tool body");
     common::assert_no_unredacted_sensitive_values(&text);
     assert!(
         status.is_success(),

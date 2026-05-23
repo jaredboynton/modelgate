@@ -76,8 +76,8 @@ fn codex_load_uses_test_home_override_and_fails_closed_when_missing() {
                 Some(auth_home.path().as_os_str()),
                 || {
                     let state = AppState::from_env();
-                    assert_eq!(state.codex_home, codex_home.path());
-                    assert_eq!(state.auth_home, auth_home.path());
+                    assert_eq!(state.codex_home.as_path(), codex_home.path());
+                    assert_eq!(state.auth_home.as_path(), auth_home.path());
 
                     let missing = load_codex_auth(&state).unwrap_err();
                     assert!(matches!(
@@ -119,8 +119,8 @@ fn home_and_codex_home_resolve_to_temp_roots_without_raw_dot_access() {
 
                     assert!(state.codex_home.starts_with(home.path()));
                     assert!(state.auth_home.starts_with(home.path()));
-                    assert_eq!(state.codex_home, home.path().join(".codex"));
-                    assert_eq!(state.auth_home, home.path().join(".ump"));
+                    assert_eq!(state.codex_home.as_path(), home.path().join(".codex"));
+                    assert_eq!(state.auth_home.as_path(), home.path().join(".ump"));
 
                     let missing = load_codex_auth(&state).unwrap_err();
                     assert!(matches!(
@@ -168,8 +168,8 @@ fn ump_v2_home_overrides_resolve_to_temp_roots_without_raw_dot_access() {
                             || {
                                 let state = AppState::from_env();
 
-                                assert_eq!(state.codex_home, codex_home.path());
-                                assert_eq!(state.auth_home, auth_home.path());
+                                assert_eq!(state.codex_home.as_path(), codex_home.path());
+                                assert_eq!(state.auth_home.as_path(), auth_home.path());
 
                                 let missing = load_codex_auth(&state).unwrap_err();
                                 assert!(matches!(

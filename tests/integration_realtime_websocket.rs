@@ -205,9 +205,9 @@ fn realtime_test_state(write_codex_auth: bool) -> TestState {
 }
 
 fn point_codex_responses_at_forbidden_upstream(state: &mut AppState, upstream: &SpawnedServer) {
-    state.runtime.codex_responses_wss_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url =
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
-    state.runtime.codex_responses_http_url =
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_http_url =
         format!("http://{}/backend-api/codex/responses", upstream.addr);
 }
 
