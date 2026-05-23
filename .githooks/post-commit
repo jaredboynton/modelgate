@@ -3,24 +3,26 @@ set -eu
 
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
+pending_refresh_marker="$repo_root/.git/launchd-refresh-pending"
 
 runtime_commit_changes=$(
   git diff-tree --no-commit-id --root --name-only -r HEAD |
     grep -E '^(src/|Cargo\.toml$|Cargo\.lock$|build\.rs$|launchd/)' || true
 )
-
-if [ -z "$runtime_commit_changes" ]; then
+if [ -z "$runtime_commit_changes" ] && [ ! -f "$pending_refresh_marker" ]; then
   echo "post-commit: no runtime-affecting committed changes; skipping launchd refresh"
   exit 0
 fi
-pending_runtime_changes=$(
-  git status --porcelain -- src/ Cargo.toml Cargo.lock build.rs launchd/ || true
+pending_worktree_changes=$(
+  git status --porcelain || true
 )
 
-if [ -n "$pending_runtime_changes" ]; then
-  echo "post-commit: runtime-affecting changes remain uncommitted; deferring launchd refresh"
+if [ -n "$pending_worktree_changes" ]; then
+  : >"$pending_refresh_marker"
+  echo "post-commit: uncommitted changes remain; deferring launchd refresh"
   exit 0
 fi
 
 echo "post-commit: runtime-affecting committed changes detected; rebuilding and reloading launchd"
 scripts/install-launchd-release.sh
+rm -f "$pending_refresh_marker"
