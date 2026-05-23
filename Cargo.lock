@@ -1850,9 +1850,9 @@ dependencies = [
 
 [[package]]
 name = "specters"
-version = "3.0.0"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1ecfb745e849af04615c0643e716831f2371e4061a3cd14e540711f8c6cfa51"
+checksum = "7234ad1013b6b228b89d57ad0d344a7dae80d544051ee17ccb14d6c7d746d0ec"
 dependencies = [
  "base64",
  "boring",
