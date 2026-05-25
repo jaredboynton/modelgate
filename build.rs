@@ -61,7 +61,7 @@ fn git_head_ref(git_dir: &Path) -> Option<PathBuf> {
 }
 
 fn git_revision() -> String {
-    run_command("git", &["describe", "--always", "--dirty"])
+    run_command("git", &["describe", "--tags", "--always", "--dirty"])
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "unknown".to_string())
 }
