@@ -17,7 +17,7 @@ The goal is complete only after 3 consecutive optimization waves produce no stat
 - **Total latency:** time from request send start to terminal response event or response EOF.
 - **Throughput:** response characters per second and event count per second after TTFT.
 - **Tool loop:** time to tool-call emission, tool arguments correctness, continuation request TTFT, continuation total latency, and terminal status.
-- **Significance rule:** compare same-provider wave samples against the prior best baseline using median and mean. A wave counts as improved when median TTFT or median total latency improves by at least 5%, or median throughput improves by at least 5%, with at least 3 successful samples on both sides. Tool-loop correctness regressions invalidate performance gains.
+- **Significance rule:** compare same-provider wave samples against the prior best baseline using median and mean. A wave counts as improved when median TTFT or median total latency improves by at least 5%, or median throughput improves by at least 5%, with at least 3 successful samples on both sides and pairwise distribution dominance of at least `0.8`. Tool-loop correctness regressions invalidate performance gains.
 - **Harness statistics:** every run records success/failure counts, HTTP status counts, terminal event counts, median/mean/min/max, p05/p25/p75/p90/p95, and sample standard deviation when at least 2 successful samples exist.
 - **Comparison sign:** positive `improvement_pct` means lower latency or higher throughput versus the compared baseline; negative values are regressions.
 
@@ -28,7 +28,7 @@ The goal is complete only after 3 consecutive optimization waves produce no stat
 - Harness: `scripts/benchmark/stream_bench.py`
 - Overrides: `UMP_BENCH_BASE_URL` changes the proxy URL, and `UMP_BENCH_ARTIFACT_ROOT` changes the artifact root for local/fake-server checks.
 - Baseline comparison: pass `--compare-to path/to/summary.json` to embed same-provider/scenario median deltas and significant-improvement flags in the artifact.
-- Current consecutive no-significant-improvement waves: `0`
+- Current consecutive no-significant-improvement waves: `3`
 
 ## Provider Matrix
 
@@ -495,3 +495,46 @@ The goal is complete only after 3 consecutive optimization waves produce no stat
 | codex_responses_ws | text | total_ms | 1234.4 | 1965.2 | -59.2 | false |
 | codex_responses_ws | tool_call | total_ms | 793.5 | 1457.5 | -83.7 | false |
 | codex_responses_ws | tool_continuation | total_ms | 560.8 | 819.9 | -46.2 | false |
+
+### Wave 11 — Integrated
+
+#### `wave-11-integrated`
+
+- Timestamp: `2026-05-25T13:02:30Z`
+- Samples per scenario: `5`
+- Artifact: `.live-harness/benchmarks/20260525T130230Z-wave-11-integrated/summary.json`
+- Baseline artifacts: Wave 0 corrected through Wave 10 integrated.
+- Baseline selection: best prior median per provider/scenario/metric with output and distribution gates.
+- Verdict: no statistically significant improvement; current no-improvement streak is `3`, satisfying the completion gate.
+
+| Provider | Scenario | Success | Median TTFT ms | P95 TTFT ms | Median total ms | Median chars/sec | Tool args valid | Notes |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| bedrock_messages | text | 5/5 | 1708.9 | 1804.8 | 1744.6 | 47.4 |  |  |
+| cursor_responses | text | 0/5 |  |  |  |  |  | response.failed |
+| cursor_responses | tool_call | 1/5 | 954.1 | 954.1 | 954.3 | 10000.0 | 1/1 | response.failed on 4/5 |
+| cursor_responses | tool_continuation | 1/5 | 2033.6 | 2033.6 | 2327.4 | 2287.7 |  | missing successful setup on 4/5 |
+| windsurf_responses | text | 5/5 | 518.0 | 2269.8 | 525.3 | 1183.8 |  |  |
+| windsurf_responses | tool_call | 5/5 | 932.8 | 1014.4 | 932.8 | 0.0 | 5/5 |  |
+| windsurf_responses | tool_continuation | 5/5 | 831.3 | 3819.1 | 831.4 | 0.0 |  |  |
+| codex_responses_ws | text | 5/5 | 1569.0 | 1860.7 | 1614.1 | 177.4 |  |  |
+| codex_responses_ws | tool_call | 5/5 | 1118.3 | 3027.3 | 1329.4 | 41.6 | 5/5 |  |
+| codex_responses_ws | tool_continuation | 5/5 | 256.9 | 314.0 | 977.5 | 0.0 |  |  |
+
+#### Wave 11 Best-Baseline Comparison
+
+- Any significant improvement: `false`
+- Notable: Wave 9, Wave 10, and Wave 11 are three consecutive integrated runs with no statistically significant improvement under the corrected distribution gate.
+- Cursor remained below the minimum success threshold; all successful Bedrock, Windsurf, and Codex scenarios missed best prior medians or failed distribution dominance.
+
+| Provider | Scenario | Metric | Best prior median | Current median | Improvement % | Significant |
+|---|---|---:|---:|---:|---:|---:|
+| bedrock_messages | text | total_ms | 1234.1 | 1744.6 | -41.4 | false |
+| cursor_responses | text | success | tool_call 3/3; continuation 3/3 | tool_call 1/5; continuation 1/5 |  | false |
+| cursor_responses | tool_call | total_ms | 889.4 | 954.3 | -7.3 | false |
+| cursor_responses | tool_continuation | total_ms | 1319.6 | 2327.4 | -76.4 | false |
+| windsurf_responses | text | total_ms | 473.9 | 525.3 | -10.8 | false |
+| windsurf_responses | tool_call | total_ms | 717.6 | 932.8 | -30.0 | false |
+| windsurf_responses | tool_continuation | total_ms | 732.7 | 831.4 | -13.5 | false |
+| codex_responses_ws | text | total_ms | 1234.4 | 1614.1 | -30.8 | false |
+| codex_responses_ws | tool_call | total_ms | 793.5 | 1329.4 | -67.5 | false |
+| codex_responses_ws | tool_continuation | total_ms | 560.8 | 977.5 | -74.3 | false |

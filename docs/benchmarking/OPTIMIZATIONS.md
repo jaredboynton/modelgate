@@ -6,10 +6,10 @@ Track every optimization attempted while pursuing the benchmark goal. Each entry
 
 ## Current State
 
-- Consecutive waves without statistically significant improvement: `2`
+- Consecutive waves without statistically significant improvement: `3`
 - Completion target: `3`
-- Latest benchmark artifact: `.live-harness/benchmarks/20260525T130048Z-wave-10-integrated/summary.json`
-- Latest benchmark status: final Wave 10 integrated run; `any_significant_improvement=false`
+- Latest benchmark artifact: `.live-harness/benchmarks/20260525T130230Z-wave-11-integrated/summary.json`
+- Latest benchmark status: final Wave 11 integrated run; `any_significant_improvement=false`; completion target achieved
 - Latest benchmark log: `docs/benchmarking/BENCHMARKS.md`
 
 ## Prior Fixes Already In Working Tree
@@ -383,3 +383,10 @@ Track every optimization attempted while pursuing the benchmark goal. Each entry
 - Baseline artifacts: Wave 0 corrected through Wave 9 integrated, using best prior medians per metric.
 - Result: `any_significant_improvement=false`; the consecutive no-significant-improvement counter is `2`.
 - Findings: Bedrock and Codex missed best prior, Cursor failed all scenarios, and Windsurf near-misses did not pass the distribution gate.
+
+## Wave 11 — Integrated Verdict
+
+- Benchmark artifact: `.live-harness/benchmarks/20260525T130230Z-wave-11-integrated/summary.json`
+- Baseline artifacts: Wave 0 corrected through Wave 10 integrated, using best prior medians per metric.
+- Result: `any_significant_improvement=false`; the consecutive no-significant-improvement counter is `3`, so the benchmark goal completion gate is satisfied.
+- Findings: Bedrock, Windsurf, and Codex missed best-prior latency medians or failed distribution dominance; Cursor stayed below the minimum success threshold with `1/5` tool-call and `1/5` continuation success.
