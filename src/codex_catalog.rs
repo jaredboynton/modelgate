@@ -166,22 +166,29 @@ impl CodexCatalogCache {
         headers: &HeaderMap,
         base_url: &str,
     ) -> AppResult<Arc<CodexCatalog>> {
-        self.get_or_refresh_with(|client_version| async move {
-            let url = codex_models_endpoint(base_url, &client_version)?;
-            let request = client.get(url).headers(headers.clone());
-            let response = request.send().await.map_err(|error| {
-                AppError::Upstream(format!("Codex models request failed: {error}"))
-            })?;
-            let status = response.status();
-            let text = response.text().map_err(|error| {
-                AppError::Upstream(format!("Codex models body failed: {error}"))
-            })?;
-            if !status.is_success() {
-                return Err(AppError::Upstream(format!(
-                    "Codex models returned {status}: {text}"
-                )));
+        self.get_or_refresh_with(|client_version| {
+            let client = client.clone();
+            let headers = headers.clone();
+            let base_url = base_url.to_string();
+            async move {
+                let url = codex_models_endpoint(&base_url, &client_version)?;
+                let response = client
+                    .get(url)
+                    .headers(headers)
+                    .send()
+                    .await
+                    .map_err(|error| {
+                        AppError::Upstream(format!("Codex models request failed: {error}"))
+                    })?;
+                let status = response.status();
+                let text = response.text()?;
+                if !status.is_success() {
+                    return Err(AppError::Upstream(format!(
+                        "Codex models returned {status}: {text}"
+                    )));
+                }
+                serde_json::from_str(&text).map_err(AppError::Json)
             }
-            serde_json::from_str(&text).map_err(AppError::Json)
         })
         .await
     }

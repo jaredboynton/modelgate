@@ -14,7 +14,7 @@ It describes the current blocker state; it does not change runtime behavior.
 
 ## Pre-remote blocker
 
-There are currently no active clone-affecting local paths. The pre-remote blocker for `specter` has been resolved by publishing and depending on the `specters` crate version `3.0.0` from crates.io.
+There are currently no active clone-affecting local paths. The pre-remote blocker for `specter` has been resolved by publishing and depending on the `specters` crate version `4.1.7` from crates.io.
 
 ## Manual checklist
 

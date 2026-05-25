@@ -3,10 +3,14 @@ use std::collections::VecDeque;
 use bytes::Bytes;
 use futures::{stream, StreamExt};
 use serde_json::Value;
-use specter::{transport::h2::H2Error, HttpVersion};
+use specter::HttpVersion;
 use uuid::Uuid;
 
-use crate::{auth, upstream_response::observe_specter_response, AppError, AppResult, AppState};
+use crate::{
+    auth,
+    upstream_response::{collect_specter_body, specter_body_stream},
+    AppError, AppResult, AppState,
+};
 
 pub const WINDSURF_PROVIDER: &str = "windsurf";
 const GET_CHAT_MESSAGE_PATH: &str = "/exa.api_server_pb.ApiServerService/GetChatMessage";
@@ -48,16 +52,17 @@ pub async fn stream_chat_text(
             let text = parse_complete_response(&body)?;
             Ok(stream::once(async move { Ok(text) }).boxed())
         }
-        WindsurfStreamResponse::Streaming(response, receiver) => {
-            if !response.status().is_success() {
-                let body = collect_h2_stream(receiver, "Windsurf stream failed").await?;
+        WindsurfStreamResponse::Streaming(response) => {
+            let status = response.status();
+            let body = response.into_body();
+            if !status.is_success() {
+                let body = collect_specter_body(body, "Windsurf stream failed").await?;
                 return Err(AppError::Upstream(format!(
-                    "Windsurf returned {}: {}",
-                    response.status(),
+                    "Windsurf returned {status}: {}",
                     String::from_utf8_lossy(&body)
                 )));
             }
-            let source = h2_receiver_stream(receiver);
+            let source = specter_body_stream(body, "Windsurf stream failed");
             let state = StreamState {
                 source,
                 buffer: Vec::new(),
@@ -139,8 +144,8 @@ async fn send_chat_request(
         state.runtime.windsurf_cloud_base_url.trim_end_matches('/'),
         GET_CHAT_MESSAGE_PATH
     );
-    let response = state
-        .specter
+    let client = state.specter.clone();
+    let response = client
         .post(url)
         .header("content-type", "application/connect+proto")
         .header("connect-protocol-version", "1")
@@ -149,7 +154,6 @@ async fn send_chat_request(
         .send()
         .await
         .map_err(|error| AppError::Upstream(format!("Windsurf request failed: {error}")))?;
-    observe_specter_response(WINDSURF_PROVIDER, &response);
 
     if !response.status().is_success() {
         let status = response.status();
@@ -182,19 +186,18 @@ async fn send_chat_request_streaming(
         state.runtime.windsurf_cloud_base_url.trim_end_matches('/'),
         GET_CHAT_MESSAGE_PATH
     );
-    let request_builder = state
-        .specter
+    let client = state.specter.clone();
+    match client
         .post(url)
         .header("content-type", "application/connect+proto")
         .header("connect-protocol-version", "1")
         .header("accept", "application/connect+proto")
         .body(body)
-        .version(HttpVersion::Http2);
-    match request_builder.send_streaming().await {
-        Ok((response, receiver)) => {
-            observe_specter_response(WINDSURF_PROVIDER, &response);
-            Ok(WindsurfStreamResponse::Streaming(response, receiver))
-        }
+        .version(HttpVersion::Http2)
+        .send_streaming()
+        .await
+    {
+        Ok(response) => Ok(WindsurfStreamResponse::Streaming(response)),
         Err(error) if is_non_h2_streaming_error(&error) => {
             let response = send_chat_request(state, request, upstream_model).await?;
             Ok(WindsurfStreamResponse::Buffered(response))
@@ -509,40 +512,15 @@ fn read_varint(buffer: &[u8], offset: usize) -> Option<(u64, usize)> {
 }
 
 struct StreamState {
-    source: futures::stream::BoxStream<'static, Result<Bytes, H2Error>>,
+    source: futures::stream::BoxStream<'static, AppResult<Bytes>>,
     buffer: Vec<u8>,
     pending: VecDeque<AppResult<String>>,
     finished: bool,
 }
 
-fn h2_receiver_stream(
-    receiver: tokio::sync::mpsc::Receiver<std::result::Result<Bytes, H2Error>>,
-) -> futures::stream::BoxStream<'static, Result<Bytes, H2Error>> {
-    Box::pin(stream::unfold(receiver, |mut receiver| async move {
-        receiver.recv().await.map(|item| (item, receiver))
-    }))
-}
-
-async fn collect_h2_stream(
-    mut receiver: tokio::sync::mpsc::Receiver<std::result::Result<Bytes, H2Error>>,
-    context: &str,
-) -> AppResult<Bytes> {
-    let mut collected = Vec::new();
-    while let Some(chunk) = receiver.recv().await {
-        match chunk {
-            Ok(bytes) => collected.extend_from_slice(&bytes),
-            Err(error) => return Err(AppError::Upstream(format!("{context}: {error}"))),
-        }
-    }
-    Ok(Bytes::from(collected))
-}
-
 enum WindsurfStreamResponse {
     Buffered(specter::Response),
-    Streaming(
-        specter::Response,
-        tokio::sync::mpsc::Receiver<std::result::Result<Bytes, H2Error>>,
-    ),
+    Streaming(specter::Response),
 }
 
 fn is_non_h2_streaming_error(error: &specter::Error) -> bool {

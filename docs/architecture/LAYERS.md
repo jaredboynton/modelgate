@@ -60,12 +60,11 @@ lowest neutral layer over adding a new abstraction.
 
 ## Distribution boundary
 
-The repository is not clone-portable while `Cargo.toml` contains:
+`Cargo.toml` resolves Specter through the portable crates.io package:
 
 ```toml
-specter = { package = "specters", path = "/Users/jaredboynton/__devlocal/specter" }
+specter = { package = "specters", version = "4.1.7" }
 ```
 
-That local `specter` path is a pre-remote blocker, not a fix made in this docs
-lane. Until it is portable, hosted CI is manual/pending or dependency-gated, and
-final reports must not claim clean remote-clone readiness.
+Do not reintroduce local `path = "/Users/.../specter"` dependencies in tracked
+configuration; hosted CI and fresh clones depend on the registry package.

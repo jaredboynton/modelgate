@@ -161,14 +161,17 @@ pub async fn refresh_codex_auth_with_endpoint(
         .refresh_token
         .as_deref()
         .filter(|token| !token.trim().is_empty())
-        .ok_or(AppError::MissingCredential("codex refresh token"))?;
+        .ok_or(AppError::MissingCredential("codex refresh token"))?
+        .to_string();
 
+    let client = client.clone();
+    let token_url = token_url.to_string();
     let response = client
         .post(token_url)
         .form(&[
             ("grant_type", "refresh_token"),
             ("client_id", CODEX_CLIENT_ID),
-            ("refresh_token", refresh_token),
+            ("refresh_token", refresh_token.as_str()),
         ])
         .send()
         .await
@@ -180,9 +183,7 @@ pub async fn refresh_codex_auth_with_endpoint(
         )));
     }
 
-    let token_body: serde_json::Value = response
-        .json()
-        .map_err(|err| AppError::Upstream(format!("Codex OAuth refresh body failed: {err}")))?;
+    let token_body: serde_json::Value = response.json()?;
     let refreshed = merge_refreshed_auth(auth, token_body)?;
     let current = read_auth_snapshot(&path)?;
     if current.hash != before.hash {

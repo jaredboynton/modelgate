@@ -220,6 +220,13 @@ Common environment variables:
 - `UMP_V2_CODEX_HANDSHAKES_PER_MIN`, default `55`
 - `UMP_V2_CODEX_CLIENT_VERSION`, default from `src/codex_catalog.rs`
 - `UMP_V2_CODEX_CATALOG_TTL_SECS`, default `3600`; refreshed at startup and in the background
+- `UMP_V2_SPECTER_H3_UPGRADE`, default `true`; set `false` to disable Alt-Svc HTTP/3 upgrades
+- `UMP_V2_SPECTER_HTTP_TLS_EARLY_DATA`, default `true`; Specter applies it only to eligible idempotent H1 requests
+- `UMP_V2_SPECTER_DNS_CACHE`, default `true`
+- `UMP_V2_SPECTER_DNS_CACHE_TTL_MS`, default `300000`
+- `UMP_V2_SPECTER_MAX_PENDING_PER_ORIGIN`, default `20`
+- `UMP_V2_SPECTER_STREAM_BODY_BUFFER_SLOTS`, default `32`
+- `UMP_V2_SPECTER_H3_TUNNEL_BYTE_BUDGET`, default `262144`
 - `AWS_REGION` / `AWS_DEFAULT_REGION`, default `us-west-2` for Bedrock Runtime
 - `UMP_V2_GOOGLE_GENERATE_BASE_URL`, default `https://generativelanguage.googleapis.com`
 - `UMP_V2_WINDSURF_CLOUD_BASE_URL`, default `https://server.codeium.com`
@@ -358,10 +365,9 @@ Harness cleanup/contract checks:
 scripts/gc/run-all.sh
 ```
 
-Current local-development caveat: `Cargo.toml` depends on the local
-`/Users/jaredboynton/__devlocal/specter` checkout. A fresh remote clone needs
-that dependency made portable or mirrored locally before hosted CI can be treated
-as authoritative.
+Current dependency state: `Cargo.toml` depends on the portable crates.io
+`specters` package at version `4.1.7`; no local `specter` path is required for
+fresh clones.
 
 ## Signals
 

@@ -6,7 +6,7 @@ use futures::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use specter::{transport::h2::H2Error, HttpVersion, Message};
+use specter::{HttpVersion, Message};
 use std::{borrow::Cow, pin::Pin, sync::Arc, time::Duration};
 
 use crate::{
@@ -16,7 +16,7 @@ use crate::{
     rate_limit,
     sse::splice::splice_completed_event_filtered,
     state::CodexTransport,
-    upstream_response::observe_specter_response,
+    upstream_response::{collect_specter_body, observe_specter_response, specter_body_stream},
     AppError, AppResult, AppState,
 };
 
@@ -61,8 +61,18 @@ pub async fn warm_codex_model_catalog_with_timeout(state: &AppState, timeout: Du
     }
 }
 
-pub fn spawn_codex_model_catalog_refresher(state: AppState) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
+pub struct CodexCatalogRefresher {
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl CodexCatalogRefresher {
+    pub fn abort(&self) {
+        self.handle.abort();
+    }
+}
+
+pub fn spawn_codex_model_catalog_refresher(state: AppState) -> CodexCatalogRefresher {
+    let handle = tokio::spawn(async move {
         let interval = state
             .runtime
             .codex_catalog_ttl
@@ -73,7 +83,8 @@ pub fn spawn_codex_model_catalog_refresher(state: AppState) -> tokio::task::Join
             }
             tokio::time::sleep(interval).await;
         }
-    })
+    });
+    CodexCatalogRefresher { handle }
 }
 
 pub fn codex_headers(state: &AppState) -> AppResult<HeaderMap> {
@@ -813,11 +824,13 @@ async fn send_http(
     // Hold the permit across the HTTP call start.
     let _permit = state.codex_acquire_handshake().await?;
     let headers = codex_headers_for_body(state, body)?;
-    let response = state
-        .specter
-        .post(http_url)
+    let client = state.specter.clone();
+    let request_url = http_url.to_string();
+    let request_body = body.clone();
+    let response = client
+        .post(request_url)
         .headers(headers)
-        .json(body)
+        .json(&request_body)
         .send()
         .await
         .map_err(|err| AppError::Upstream(format!("Codex HTTP request failed: {err}")))?;
@@ -837,28 +850,30 @@ async fn send_http_stream(
     // Hold the permit across the HTTP streaming request start.
     let _permit = state.codex_acquire_handshake().await?;
     let headers = codex_headers_for_body(state, body)?;
-    let request = state
-        .specter
-        .post(http_url)
+    let stream_client = state.specter.clone();
+    let stream_url = http_url.to_string();
+    let stream_body = body.clone();
+    let request = stream_client
+        .post(stream_url)
         .headers(headers)
-        .json(body)
+        .json(&stream_body)
         .version(HttpVersion::Http2);
-    match request.send_streaming().await {
-        Ok((response, receiver)) => {
-            observe_specter_response(CODEX_PROVIDER, &response);
-            Ok(CodexStreamResponse::Streaming(response, receiver))
-        }
+    match Box::pin(request.send_streaming()).await {
+        Ok(response) => Ok(CodexStreamResponse::Streaming(Box::new(response))),
         Err(error) if is_non_h2_streaming_error(&error) => {
-            let response = state
-                .specter
-                .post(http_url)
-                .headers(codex_headers_for_body(state, body)?)
-                .json(body)
-                .send()
+            let fallback_client = state.specter.clone();
+            let fallback_url = http_url.to_string();
+            let headers = codex_headers_for_body(state, body)?;
+            let fallback_body = body.clone();
+            let request = fallback_client
+                .post(fallback_url)
+                .headers(headers)
+                .json(&fallback_body);
+            let response = Box::pin(request.send())
                 .await
                 .map_err(|err| AppError::Upstream(format!("Codex HTTP request failed: {err}")))?;
             observe_specter_response(CODEX_PROVIDER, &response);
-            Ok(CodexStreamResponse::Buffered(response))
+            Ok(CodexStreamResponse::Buffered(Box::new(response)))
         }
         Err(error) => Err(AppError::Upstream(format!(
             "Codex HTTP request failed: {error}"
@@ -882,16 +897,20 @@ async fn response_to_stream(response: CodexStreamResponse) -> AppResult<CodexRes
             let normalized = normalize_sse(String::from_utf8_lossy(&body).into_owned());
             Ok(Box::pin(stream::once(async move { Ok(normalized) })))
         }
-        CodexStreamResponse::Streaming(response, receiver) => {
+        CodexStreamResponse::Streaming(response) => {
             let status = response.status();
+            let body = response.into_body();
             if !status.is_success() {
-                let body = collect_h2_stream(receiver, "Codex HTTP stream failed").await?;
+                let body = collect_specter_body(body, "Codex HTTP stream failed").await?;
                 return Err(AppError::Upstream(format!(
                     "Codex HTTP returned {status}: {}",
                     String::from_utf8_lossy(&body)
                 )));
             }
-            Ok(normalize_sse_stream(h2_receiver_stream(receiver)))
+            Ok(normalize_sse_stream(specter_body_stream(
+                body,
+                "Codex HTTP stream failed",
+            )))
         }
     }
 }
@@ -934,7 +953,7 @@ fn normalize_sse(input: String) -> Bytes {
     Bytes::from(splice_completed_event_filtered(&input))
 }
 
-fn normalize_sse_stream(input: BoxStream<'static, Result<Bytes, H2Error>>) -> CodexResponseStream {
+fn normalize_sse_stream(input: BoxStream<'static, AppResult<Bytes>>) -> CodexResponseStream {
     Box::pin(stream::unfold(
         (input, CodexSseNormalizer::default(), false),
         |(mut input, mut normalizer, done)| async move {
@@ -952,12 +971,7 @@ fn normalize_sse_stream(input: BoxStream<'static, Result<Bytes, H2Error>>) -> Co
                         return Some((Ok(bytes), (input, normalizer, false)));
                     }
                     Some(Err(err)) => {
-                        return Some((
-                            Err(AppError::Upstream(format!(
-                                "Codex HTTP stream failed: {err}"
-                            ))),
-                            (input, normalizer, true),
-                        ));
+                        return Some((Err(err), (input, normalizer, true)));
                     }
                     None => {
                         let bytes = normalizer.finish();
@@ -972,43 +986,15 @@ fn normalize_sse_stream(input: BoxStream<'static, Result<Bytes, H2Error>>) -> Co
     ))
 }
 
-fn h2_receiver_stream(
-    receiver: tokio::sync::mpsc::Receiver<std::result::Result<Bytes, H2Error>>,
-) -> BoxStream<'static, Result<Bytes, H2Error>> {
-    Box::pin(stream::unfold(receiver, |mut receiver| async move {
-        receiver.recv().await.map(|item| (item, receiver))
-    }))
-}
-
-async fn collect_h2_stream(
-    mut receiver: tokio::sync::mpsc::Receiver<std::result::Result<Bytes, H2Error>>,
-    context: &str,
-) -> AppResult<Bytes> {
-    let mut collected = Vec::new();
-    while let Some(chunk) = receiver.recv().await {
-        match chunk {
-            Ok(bytes) => collected.extend_from_slice(&bytes),
-            Err(error) => {
-                return Err(AppError::Upstream(format!("{context}: {error}")));
-            }
-        }
-    }
-    Ok(Bytes::from(collected))
-}
-
 enum CodexStreamResponse {
-    Buffered(specter::Response),
-    Streaming(
-        specter::Response,
-        tokio::sync::mpsc::Receiver<std::result::Result<Bytes, H2Error>>,
-    ),
+    Buffered(Box<specter::Response>),
+    Streaming(Box<specter::Response>),
 }
 
 impl CodexStreamResponse {
     fn status(&self) -> StatusCode {
         match self {
-            Self::Buffered(response) => response.status(),
-            Self::Streaming(response, _) => response.status(),
+            Self::Buffered(response) | Self::Streaming(response) => response.status(),
         }
     }
 }

@@ -35,6 +35,10 @@ const TEST_CODEX_RESPONSES_HTTP_URL: &str = "http://127.0.0.1:1/backend-api/code
 const DEFAULT_BEDROCK_REGION: &str = "us-west-2";
 const DEFAULT_CODEX_WSS_POOL_SIZE: usize = 4;
 const RESPONSE_STORAGE_MAX_ENTRIES: usize = 4096;
+const DEFAULT_SPECTER_DNS_CACHE_TTL_MS: u64 = 300_000;
+const DEFAULT_SPECTER_MAX_PENDING_PER_ORIGIN: usize = 20;
+const DEFAULT_SPECTER_STREAM_BODY_BUFFER_SLOTS: usize = 32;
+const DEFAULT_SPECTER_H3_TUNNEL_BYTE_BUDGET: usize = 262_144;
 pub type CodexHandshakePermit = Option<OwnedSemaphorePermit>;
 
 #[derive(Clone)]
@@ -81,6 +85,13 @@ pub struct RuntimeConfig {
     pub codex_wss_pool_size: usize,
     pub codex_catalog_client_version: String,
     pub codex_catalog_ttl: Duration,
+    pub specter_h3_upgrade: bool,
+    pub specter_http_tls_early_data: bool,
+    pub specter_dns_cache: bool,
+    pub specter_dns_cache_ttl: Duration,
+    pub specter_max_pending_per_origin: usize,
+    pub specter_stream_body_buffer_slots: usize,
+    pub specter_h3_tunnel_byte_budget: usize,
     pub google_generate_base_url: String,
     pub windsurf_cloud_base_url: String,
     pub bedrock_discovery_timeout: Duration,
@@ -175,7 +186,7 @@ impl AppState {
         let codex_max_concurrent = runtime.codex_max_concurrent;
 
         Self {
-            specter: build_specter_client(),
+            specter: build_specter_client(&runtime),
             amp_store: AmpStore::from_env(),
             codex_home: Arc::new(codex_home),
             auth_home: Arc::new(auth_home),
@@ -215,7 +226,7 @@ impl AppState {
         let codex_max_concurrent = runtime.codex_max_concurrent;
 
         Self {
-            specter: build_specter_client(),
+            specter: build_specter_client(&runtime),
             amp_store: AmpStore::new(auth_home.join("amp-threads")),
             codex_home: Arc::new(codex_home),
             auth_home: Arc::new(auth_home),
@@ -452,12 +463,20 @@ impl ResponseStorage {
     }
 }
 
-fn build_specter_client() -> specter::Client {
+fn build_specter_client(runtime: &RuntimeConfig) -> specter::Client {
+    let capacity_policy = specter::CapacityPolicy::bounded(runtime.specter_max_pending_per_origin)
+        .with_streaming_body_buffer_slots(runtime.specter_stream_body_buffer_slots)
+        .with_h3_tunnel_byte_budget(runtime.specter_h3_tunnel_byte_budget);
+
     specter::Client::builder()
         .streaming_timeouts()
         .pool_acquire_timeout(Duration::from_millis(250))
         .prefer_http2(true)
-        .h3_upgrade(false)
+        .capacity_policy(capacity_policy)
+        .h3_upgrade(runtime.specter_h3_upgrade)
+        .http_tls_early_data(runtime.specter_http_tls_early_data)
+        .hickory_dns(runtime.specter_dns_cache)
+        .dns_cache_ttl(runtime.specter_dns_cache_ttl)
         .build()
         .expect("failed to construct Specter client")
 }
@@ -544,6 +563,33 @@ impl RuntimeConfig {
             )?,
             codex_catalog_client_version: codex_catalog_config.client_version,
             codex_catalog_ttl: codex_catalog_config.ttl,
+            specter_h3_upgrade: bool_env(&mut var, "UMP_V2_SPECTER_H3_UPGRADE", true)?,
+            specter_http_tls_early_data: bool_env(
+                &mut var,
+                "UMP_V2_SPECTER_HTTP_TLS_EARLY_DATA",
+                true,
+            )?,
+            specter_dns_cache: bool_env(&mut var, "UMP_V2_SPECTER_DNS_CACHE", true)?,
+            specter_dns_cache_ttl: duration_ms_env(
+                &mut var,
+                "UMP_V2_SPECTER_DNS_CACHE_TTL_MS",
+                DEFAULT_SPECTER_DNS_CACHE_TTL_MS,
+            )?,
+            specter_max_pending_per_origin: usize_env(
+                &mut var,
+                "UMP_V2_SPECTER_MAX_PENDING_PER_ORIGIN",
+                DEFAULT_SPECTER_MAX_PENDING_PER_ORIGIN,
+            )?,
+            specter_stream_body_buffer_slots: usize_env(
+                &mut var,
+                "UMP_V2_SPECTER_STREAM_BODY_BUFFER_SLOTS",
+                DEFAULT_SPECTER_STREAM_BODY_BUFFER_SLOTS,
+            )?,
+            specter_h3_tunnel_byte_budget: usize_env(
+                &mut var,
+                "UMP_V2_SPECTER_H3_TUNNEL_BYTE_BUDGET",
+                DEFAULT_SPECTER_H3_TUNNEL_BYTE_BUDGET,
+            )?,
             google_generate_base_url: var("UMP_V2_GOOGLE_GENERATE_BASE_URL")
                 .unwrap_or_else(|_| GOOGLE_GENERATE_BASE_URL.to_string()),
             windsurf_cloud_base_url: var("UMP_V2_WINDSURF_CLOUD_BASE_URL")
@@ -586,6 +632,13 @@ impl Default for RuntimeConfig {
             codex_wss_pool_size: DEFAULT_CODEX_WSS_POOL_SIZE,
             codex_catalog_client_version: CodexCatalogConfig::default().client_version,
             codex_catalog_ttl: CodexCatalogConfig::default().ttl,
+            specter_h3_upgrade: true,
+            specter_http_tls_early_data: true,
+            specter_dns_cache: true,
+            specter_dns_cache_ttl: Duration::from_millis(DEFAULT_SPECTER_DNS_CACHE_TTL_MS),
+            specter_max_pending_per_origin: DEFAULT_SPECTER_MAX_PENDING_PER_ORIGIN,
+            specter_stream_body_buffer_slots: DEFAULT_SPECTER_STREAM_BODY_BUFFER_SLOTS,
+            specter_h3_tunnel_byte_budget: DEFAULT_SPECTER_H3_TUNNEL_BYTE_BUDGET,
             google_generate_base_url: GOOGLE_GENERATE_BASE_URL.to_string(),
             windsurf_cloud_base_url: WINDSURF_CLOUD_BASE_URL.to_string(),
             bedrock_discovery_timeout: Duration::from_millis(5000),
@@ -616,6 +669,20 @@ where
         .parse::<u64>()
         .map_err(|err| format!("invalid {name}: {err}"))?;
     Ok(Duration::from_millis(millis))
+}
+
+fn bool_env<F>(var: &mut F, name: &str, default_value: bool) -> Result<bool, String>
+where
+    F: FnMut(&str) -> Result<String, env::VarError>,
+{
+    match var(name) {
+        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(true),
+            "0" | "false" | "no" | "off" => Ok(false),
+            other => Err(format!("invalid {name}: {other}")),
+        },
+        Err(_) => Ok(default_value),
+    }
 }
 
 fn usize_env<F>(var: &mut F, name: &str, default_value: usize) -> Result<usize, String>
@@ -691,6 +758,13 @@ mod tests {
         assert_eq!(config.codex_max_concurrent, 20);
         assert_eq!(config.codex_handshakes_per_min, 55);
         assert_eq!(config.codex_wss_pool_size, 4);
+        assert!(config.specter_h3_upgrade);
+        assert!(config.specter_http_tls_early_data);
+        assert!(config.specter_dns_cache);
+        assert_eq!(config.specter_dns_cache_ttl, Duration::from_millis(300_000));
+        assert_eq!(config.specter_max_pending_per_origin, 20);
+        assert_eq!(config.specter_stream_body_buffer_slots, 32);
+        assert_eq!(config.specter_h3_tunnel_byte_budget, 262_144);
         assert_eq!(
             config.google_generate_base_url,
             "https://generativelanguage.googleapis.com"
@@ -714,6 +788,13 @@ mod tests {
             ("UMP_V2_CODEX_MAX_CONCURRENT", "7"),
             ("UMP_V2_CODEX_HANDSHAKES_PER_MIN", "9"),
             ("UMP_V2_CODEX_WSS_POOL_SIZE", "3"),
+            ("UMP_V2_SPECTER_H3_UPGRADE", "false"),
+            ("UMP_V2_SPECTER_HTTP_TLS_EARLY_DATA", "false"),
+            ("UMP_V2_SPECTER_DNS_CACHE", "false"),
+            ("UMP_V2_SPECTER_DNS_CACHE_TTL_MS", "1234"),
+            ("UMP_V2_SPECTER_MAX_PENDING_PER_ORIGIN", "11"),
+            ("UMP_V2_SPECTER_STREAM_BODY_BUFFER_SLOTS", "17"),
+            ("UMP_V2_SPECTER_H3_TUNNEL_BYTE_BUDGET", "65536"),
             ("UMP_V2_GOOGLE_GENERATE_BASE_URL", "http://127.0.0.1:9999"),
             ("UMP_V2_WINDSURF_CLOUD_BASE_URL", "http://127.0.0.1:19999"),
             ("UMP_V2_BEDROCK_DISCOVERY_TIMEOUT_MS", "125"),
@@ -729,6 +810,13 @@ mod tests {
         assert_eq!(config.codex_max_concurrent, 7);
         assert_eq!(config.codex_handshakes_per_min, 9);
         assert_eq!(config.codex_wss_pool_size, 3);
+        assert!(!config.specter_h3_upgrade);
+        assert!(!config.specter_http_tls_early_data);
+        assert!(!config.specter_dns_cache);
+        assert_eq!(config.specter_dns_cache_ttl, Duration::from_millis(1234));
+        assert_eq!(config.specter_max_pending_per_origin, 11);
+        assert_eq!(config.specter_stream_body_buffer_slots, 17);
+        assert_eq!(config.specter_h3_tunnel_byte_budget, 65536);
         assert_eq!(config.google_generate_base_url, "http://127.0.0.1:9999");
         assert_eq!(config.windsurf_cloud_base_url, "http://127.0.0.1:19999");
         assert_eq!(config.bedrock_discovery_timeout, Duration::from_millis(125));
@@ -739,6 +827,28 @@ mod tests {
         assert!(config_from(&[("UMP_V2_LISTEN_ADDR", "not an address")]).is_err());
         assert!(config_from(&[("UMP_V2_CODEX_TRANSPORT", "ftp")]).is_err());
         assert!(config_from(&[("UMP_V2_CODEX_MAX_CONCURRENT", "nope")]).is_err());
+        assert!(config_from(&[("UMP_V2_SPECTER_H3_UPGRADE", "maybe")]).is_err());
+        assert!(config_from(&[("UMP_V2_SPECTER_DNS_CACHE_TTL_MS", "nope")]).is_err());
+        assert!(config_from(&[("UMP_V2_SPECTER_MAX_PENDING_PER_ORIGIN", "nope")]).is_err());
+    }
+
+    #[test]
+    fn build_specter_client_applies_capacity_policy() {
+        let config = RuntimeConfig {
+            specter_max_pending_per_origin: 9,
+            specter_stream_body_buffer_slots: 33,
+            specter_h3_tunnel_byte_budget: 128 * 1024,
+            ..RuntimeConfig::default()
+        };
+
+        let client = build_specter_client(&config);
+
+        assert_eq!(client.h1_max_connections_per_origin(), 9);
+        assert_eq!(client.h2_max_concurrent_streams_per_connection(), Some(9));
+        assert_eq!(client.h2_streaming_body_buffer_slots(), 33);
+        assert_eq!(client.h3_streaming_body_buffer_slots(), 33);
+        assert_eq!(client.h3_tunnel_outbound_byte_budget(), 128 * 1024);
+        assert_eq!(client.h3_tunnel_inbound_byte_budget(), 128 * 1024);
     }
 
     #[test]

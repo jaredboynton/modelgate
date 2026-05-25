@@ -226,33 +226,26 @@ pub async fn refresh_cursor_credentials(
         .refresh_token
         .as_deref()
         .filter(|token| !token.trim().is_empty())
-        .ok_or(AppError::MissingCredential("cursor refresh token"))?;
+        .ok_or(AppError::MissingCredential("cursor refresh token"))?
+        .to_string();
 
     let url = env::var(CURSOR_REFRESH_URL_ENV)
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| CURSOR_REFRESH_URL.to_string());
 
+    let client = client.clone();
+    let request_refresh_token = refresh_token.clone();
     let response = client
-        .post(&url)
-        .bearer_auth(refresh_token)
+        .post(url)
+        .bearer_auth(request_refresh_token)
         .header("content-type", "application/json")
         .body("{}")
         .send()
         .await
         .map_err(|err| AppError::Upstream(format!("Cursor refresh request failed: {err}")))?;
 
-    let status = response.status();
-    if !status.is_success() {
-        return Err(AppError::Upstream(format!(
-            "Cursor refresh returned {}",
-            status
-        )));
-    }
-
-    let body: serde_json::Value = response
-        .json()
-        .map_err(|err| AppError::Upstream(format!("Cursor refresh body failed: {err}")))?;
+    let body: serde_json::Value = response.json()?;
 
     let access_token = body
         .get("accessToken")

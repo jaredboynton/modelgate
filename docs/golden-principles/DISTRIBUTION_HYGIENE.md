@@ -4,7 +4,7 @@ Golden rule: this repo must not have clone-affecting local paths. The previous `
 
 ## Current Gate
 
-- All dependencies are now portable, with `specter` resolved via crates.io (`specters` version `3.0.0`).
+- All dependencies are now portable, with `specter` resolved via crates.io (`specters` version `4.1.7`).
 - The repo is fully ready for clean remote CI, clone portability, packaging readiness, and release.
 
 ## Hard Fails

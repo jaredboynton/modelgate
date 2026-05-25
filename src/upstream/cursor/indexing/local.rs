@@ -9,6 +9,7 @@
 //! `"found no matching files"`. The context-injection layer greps for that
 //! exact substring to suppress empty injections (`context-injection.ts:198`).
 
+use std::cmp::Reverse;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -187,7 +188,7 @@ fn rank_and_render(records: &[FileRecord], tokens: &[String], max_hits: usize) -
             scored.push((score, record));
         }
     }
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|(score, _)| Reverse(*score));
     let mut hits = Vec::new();
     for (score, record) in scored.into_iter().take(max_hits) {
         let excerpt = build_excerpt(&record.text, tokens);

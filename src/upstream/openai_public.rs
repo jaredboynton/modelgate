@@ -163,9 +163,7 @@ pub async fn send_public_openai_http_with_refresh(
 
     let first_status = first.status();
     let first_headers = sanitize_specter_headers(first.headers());
-    let first_body = first
-        .bytes()
-        .map_err(|error| AppError::Upstream(format!("OpenAI public response: {error}")))?;
+    let first_body = first.bytes()?;
     if !is_refresh_eligible_401(first_status, &first_body, false) {
         return Ok(classify_or_passthrough_response(
             first_status,
@@ -184,9 +182,7 @@ pub async fn send_public_openai_http_with_refresh(
     let second = send_public_openai_http_once(state, method, &url, &inbound_headers, body).await?;
     let second_status = second.status();
     let second_headers = sanitize_specter_headers(second.headers());
-    let second_body = second
-        .bytes()
-        .map_err(|error| AppError::Upstream(format!("OpenAI public response: {error}")))?;
+    let second_body = second.bytes()?;
     Ok(classify_or_passthrough_response(
         second_status,
         second_headers,
@@ -241,8 +237,8 @@ async fn send_public_openai_http_once(
     body: Bytes,
 ) -> AppResult<specter::Response> {
     let request = build_public_openai_request(state, url, inbound_headers)?;
-    let response = state
-        .specter
+    let client = state.specter.clone();
+    let response = client
         .request(method, request.url)
         .headers(request.headers)
         .body(body)

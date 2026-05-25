@@ -10,12 +10,15 @@ use bytes::{Bytes, BytesMut};
 use futures::{future::Either, stream, StreamExt};
 use rand_core::{OsRng, RngCore};
 use serde_json::Value;
-use specter::{transport::h2::H2Error, HttpVersion};
+use specter::HttpVersion;
 
 use crate::{
     auth::bedrock::{resolve_bedrock_auth, BedrockAuth},
     model_alias::{self, Provider},
-    upstream_response::{observe_specter_response, sanitize_specter_headers, sse_headers},
+    upstream_response::{
+        collect_specter_body, observe_specter_response, sanitize_specter_headers,
+        specter_body_stream, sse_headers,
+    },
     AppError, AppResult, AppState, UpstreamResponse,
 };
 
@@ -207,25 +210,25 @@ pub async fn send_runtime_invoke_request(
                 let response = match response {
                     BedrockRuntimeResponse::Buffered(response) => {
                         if request.stream && response.status().is_success() {
-                            runtime_eventstream_response_from_buffered_specter(response)?
+                            runtime_eventstream_response_from_buffered_specter(response).await?
                         } else {
                             UpstreamResponse::from_specter(BEDROCK_PROVIDER, response)
                         }
                     }
-                    BedrockRuntimeResponse::Streaming(response, receiver)
+                    BedrockRuntimeResponse::Streaming(response)
                         if request.stream && response.status().is_success() =>
                     {
-                        runtime_eventstream_response_from_specter(response, receiver)
+                        runtime_eventstream_response_from_specter(response)
                     }
-                    BedrockRuntimeResponse::Streaming(response, receiver) => {
-                        let body =
-                            collect_h2_stream(receiver, "Bedrock Runtime stream failed").await?;
-                        UpstreamResponse::bytes(
-                            BEDROCK_PROVIDER,
-                            response.status(),
-                            sanitize_specter_headers(response.headers()),
-                            body,
+                    BedrockRuntimeResponse::Streaming(response) => {
+                        let status = response.status();
+                        let headers = sanitize_specter_headers(response.headers());
+                        let body = collect_specter_body(
+                            response.into_body(),
+                            "Bedrock Runtime stream failed",
                         )
+                        .await?;
+                        UpstreamResponse::bytes(BEDROCK_PROVIDER, status, headers, body)
                     }
                 };
                 return Ok(response.with_latency_ms(started.elapsed().as_millis()));
@@ -267,20 +270,28 @@ async fn send_runtime_once(
     let mut headers = request.headers.clone();
     apply_runtime_auth_headers(request, &mut headers).await?;
 
-    let request_builder = client
-        .post(&request.url)
-        .headers(headers)
-        .body(body.clone())
-        .version(HttpVersion::Http2);
-
     if request.stream {
-        match request_builder.send_streaming().await {
-            Ok((response, receiver)) => Ok(BedrockRuntimeResponse::Streaming(response, receiver)),
+        let stream_client = client.clone();
+        let url = request.url.clone();
+        let stream_body = body.clone();
+        match stream_client
+            .post(url)
+            .headers(headers)
+            .body(stream_body)
+            .version(HttpVersion::Http2)
+            .send_streaming()
+            .await
+        {
+            Ok(response) => Ok(BedrockRuntimeResponse::Streaming(response)),
             Err(error) if is_non_h2_streaming_error(&error) => {
-                let response = client
-                    .post(&request.url)
-                    .headers(request.headers.clone())
-                    .body(body.clone())
+                let fallback_client = client.clone();
+                let url = request.url.clone();
+                let headers = request.headers.clone();
+                let body = body.clone();
+                let response = fallback_client
+                    .post(url)
+                    .headers(headers)
+                    .body(body)
                     .send()
                     .await
                     .map_err(BedrockSendError::Specter)?;
@@ -289,7 +300,14 @@ async fn send_runtime_once(
             Err(error) => Err(BedrockSendError::Specter(error)),
         }
     } else {
-        let response = request_builder
+        let client = client.clone();
+        let url = request.url.clone();
+        let body = body.clone();
+        let response = client
+            .post(url)
+            .headers(headers)
+            .body(body)
+            .version(HttpVersion::Http2)
             .send()
             .await
             .map_err(BedrockSendError::Specter)?;
@@ -297,33 +315,31 @@ async fn send_runtime_once(
     }
 }
 
-fn runtime_eventstream_response_from_specter(
-    response: specter::Response,
-    receiver: tokio::sync::mpsc::Receiver<std::result::Result<Bytes, H2Error>>,
-) -> UpstreamResponse {
+fn runtime_eventstream_response_from_specter(response: specter::Response) -> UpstreamResponse {
     observe_specter_response(BEDROCK_PROVIDER, &response);
     let status = response.status();
     let decoder = AwsEventStreamDecoder::default();
     let stream = stream::unfold(
-        (receiver, decoder, false),
-        move |(mut receiver, mut decoder, stream_ended)| async move {
+        (
+            specter_body_stream(response.into_body(), "Bedrock Runtime stream failed"),
+            decoder,
+            false,
+        ),
+        move |(mut input, mut decoder, stream_ended)| async move {
             if stream_ended {
                 return None;
             }
-            match receiver.recv().await {
+            match input.next().await {
                 Some(Ok(bytes)) => match decoder.push(bytes) {
-                    Ok(chunks) => Some((Ok(chunks), (receiver, decoder, false))),
-                    Err(error) => Some((Err(error), (receiver, decoder, true))),
+                    Ok(chunks) => Some((Ok(chunks), (input, decoder, false))),
+                    Err(error) => Some((Err(error), (input, decoder, true))),
                 },
-                Some(Err(error)) => {
-                    let err = AppError::Upstream(format!("Bedrock Runtime stream failed: {error}"));
-                    Some((Err(err), (receiver, decoder, true)))
-                }
+                Some(Err(error)) => Some((Err(error), (input, decoder, true))),
                 None => {
                     if !decoder.has_seen_terminal_event {
                         let err =
                             AppError::Upstream("premature EOF before message_stop event".into());
-                        Some((Err(err), (receiver, decoder, true)))
+                        Some((Err(err), (input, decoder, true)))
                     } else {
                         None
                     }
@@ -339,14 +355,12 @@ fn runtime_eventstream_response_from_specter(
     UpstreamResponse::stream(BEDROCK_PROVIDER, status, sse_headers(), stream)
 }
 
-fn runtime_eventstream_response_from_buffered_specter(
+async fn runtime_eventstream_response_from_buffered_specter(
     response: specter::Response,
 ) -> AppResult<UpstreamResponse> {
     observe_specter_response(BEDROCK_PROVIDER, &response);
     let status = response.status();
-    let body = response
-        .bytes()
-        .map_err(|error| AppError::Upstream(format!("Bedrock Runtime stream failed: {error}")))?;
+    let body = collect_specter_body(response.into_body(), "Bedrock Runtime stream failed").await?;
     let mut decoder = AwsEventStreamDecoder::default();
     let chunks = decoder.push(body)?;
     let stream = stream::iter(chunks.into_iter().map(Ok::<Bytes, AppError>));
@@ -374,17 +388,13 @@ fn runtime_eventstream_response_from_buffered_specter(
 
 enum BedrockRuntimeResponse {
     Buffered(specter::Response),
-    Streaming(
-        specter::Response,
-        tokio::sync::mpsc::Receiver<std::result::Result<Bytes, H2Error>>,
-    ),
+    Streaming(specter::Response),
 }
 
 impl BedrockRuntimeResponse {
     fn status(&self) -> StatusCode {
         match self {
-            Self::Buffered(response) => response.status(),
-            Self::Streaming(response, _) => response.status(),
+            Self::Buffered(response) | Self::Streaming(response) => response.status(),
         }
     }
 }
@@ -773,16 +783,5 @@ fn is_non_h2_streaming_error(error: &specter::Error) -> bool {
     matches!(error, specter::Error::HttpProtocol(message) if message.contains("Expected h2 ALPN"))
 }
 
-async fn collect_h2_stream(
-    mut receiver: tokio::sync::mpsc::Receiver<std::result::Result<Bytes, H2Error>>,
-    context: &str,
-) -> AppResult<Bytes> {
-    let mut collected = Vec::new();
-    while let Some(chunk) = receiver.recv().await {
-        match chunk {
-            Ok(bytes) => collected.extend_from_slice(&bytes),
-            Err(error) => return Err(AppError::Upstream(format!("{context}: {error}"))),
-        }
-    }
-    Ok(Bytes::from(collected))
-}
+#[cfg(test)]
+mod tests {}

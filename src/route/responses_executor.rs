@@ -82,9 +82,9 @@ pub async fn execute_responses_request(
                 })
             })?;
             validate_codex_catalog_request(state, &prepared, &upstream_model).await?;
-            codex_response_stream(
-                upstream::codex::responses_prepared_stream(state, prepared).await?,
-            )
+            let stream =
+                Box::pin(upstream::codex::responses_prepared_stream(state, prepared)).await?;
+            codex_response_stream(stream)
         }
         DispatchAction::BedrockAnthropicMessages => {
             if options.force_stream {

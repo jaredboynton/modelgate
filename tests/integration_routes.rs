@@ -82,18 +82,29 @@ fn request_json_without_env_vars(
     body: Option<Value>,
     keys: &[&'static str],
 ) -> (StatusCode, Value) {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(async {
-            let _guard = UPSTREAM_ENV_LOCK.lock().await;
-            let _restores = keys
-                .iter()
-                .map(|key| EnvRestore::clear(key))
-                .collect::<Vec<_>>();
-            request_json(method, path, body).await
+    let method = method.to_string();
+    let path = path.to_string();
+    let keys = keys.to_vec();
+    std::thread::Builder::new()
+        .name("integration-routes-env-helper".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let _guard = UPSTREAM_ENV_LOCK.lock().await;
+                    let _restores = keys
+                        .iter()
+                        .map(|key| EnvRestore::clear(key))
+                        .collect::<Vec<_>>();
+                    request_json(&method, &path, body).await
+                })
         })
+        .unwrap()
+        .join()
+        .unwrap()
 }
 
 fn request_json_with_state_without_env_vars(
@@ -103,18 +114,29 @@ fn request_json_with_state_without_env_vars(
     body: Option<Value>,
     keys: &[&'static str],
 ) -> (StatusCode, Value) {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(async {
-            let _guard = UPSTREAM_ENV_LOCK.lock().await;
-            let _restores = keys
-                .iter()
-                .map(|key| EnvRestore::clear(key))
-                .collect::<Vec<_>>();
-            request_json_with_state(state, method, path, body).await
+    let method = method.to_string();
+    let path = path.to_string();
+    let keys = keys.to_vec();
+    std::thread::Builder::new()
+        .name("integration-routes-state-env-helper".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let _guard = UPSTREAM_ENV_LOCK.lock().await;
+                    let _restores = keys
+                        .iter()
+                        .map(|key| EnvRestore::clear(key))
+                        .collect::<Vec<_>>();
+                    request_json_with_state(state, &method, &path, body).await
+                })
         })
+        .unwrap()
+        .join()
+        .unwrap()
 }
 
 async fn request_json_with_state(

@@ -218,8 +218,8 @@ async fn compact_codex_responses(
     let mut upstream_headers = upstream::codex::codex_headers(state)?;
     copy_compaction_binding_header(&headers, &mut upstream_headers, "session-id");
     copy_compaction_binding_header(&headers, &mut upstream_headers, "thread-id");
-    let response = state
-        .specter
+    let client = state.specter.clone();
+    let response = client
         .post(compact_url)
         .headers(specter::Headers::from(upstream_headers))
         .json(&value)
@@ -227,7 +227,7 @@ async fn compact_codex_responses(
         .await
         .map_err(|error| AppError::Upstream(format!("Codex compact request failed: {error}")))?;
     let status = response.status();
-    let body = response.into_body();
+    let body = response.bytes()?;
 
     if matches!(
         status,

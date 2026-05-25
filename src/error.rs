@@ -34,6 +34,12 @@ pub enum AppError {
     },
 }
 
+impl From<specter::Error> for AppError {
+    fn from(error: specter::Error) -> Self {
+        Self::Upstream(error.to_string())
+    }
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("{message}")]
 pub struct CompactionHttpError {

@@ -167,21 +167,21 @@ async fn codex_catalog_for_client_version(
 
     let headers = codex_headers(state)?;
     let url = shared_codex_models_endpoint(&state.runtime.codex_models_url, client_version)?;
-    let request = state.specter.get(url).headers(headers.clone());
-    let response = request
+    let client = state.specter.clone();
+    let response = client
+        .get(url)
+        .headers(headers)
         .send()
         .await
         .map_err(|error| AppError::Upstream(format!("Codex models request failed: {error}")))?;
     let status = response.status();
-    let text = response
-        .text()
-        .map_err(|error| AppError::Upstream(format!("Codex models body failed: {error}")))?;
+    let text = response.text()?;
     if !status.is_success() {
         return Err(AppError::Upstream(format!(
             "Codex models returned {status}: {text}"
         )));
     }
-    let raw = serde_json::from_str(&text)?;
+    let raw: serde_json::Value = serde_json::from_str(&text)?;
     CodexCatalog::parse(client_version, &raw)
 }
 

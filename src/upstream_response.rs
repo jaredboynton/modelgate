@@ -6,8 +6,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
-use futures::{Stream, TryStreamExt};
-use specter::{Headers as SpecterHeaders, Response as SpecterResponse};
+use futures::{stream, Stream, TryStreamExt};
+use specter::{Body as SpecterBody, Headers as SpecterHeaders, Response as SpecterResponse};
 
 use crate::AppError;
 
@@ -113,7 +113,7 @@ impl UpstreamResponse {
         Self {
             status,
             headers: sanitize_specter_headers(response.headers()),
-            body: Body::from(response.into_body()),
+            body: specter_body_to_axum_body(response.into_body()),
             provider,
             upstream_status: Some(status),
             latency_ms: None,
@@ -163,6 +163,32 @@ pub async fn collect_upstream_error_body(body: Body) -> Result<Bytes, AppError> 
         "upstream error response",
     )
     .await
+}
+
+pub async fn collect_specter_body(
+    mut body: SpecterBody,
+    context: &'static str,
+) -> Result<Bytes, AppError> {
+    body.collect_to_bytes()
+        .await
+        .map_err(|error| AppError::Upstream(format!("{context}: {error}")))
+}
+
+pub fn specter_body_stream(
+    body: SpecterBody,
+    context: &'static str,
+) -> futures::stream::BoxStream<'static, Result<Bytes, AppError>> {
+    Box::pin(stream::unfold(body, move |mut body| async move {
+        body.chunk().await.map(|chunk| {
+            let item = chunk.map_err(|error| AppError::Upstream(format!("{context}: {error}")));
+            (item, body)
+        })
+    }))
+}
+
+fn specter_body_to_axum_body(body: SpecterBody) -> Body {
+    let stream = specter_body_stream(body, "upstream response").map_err(io::Error::other);
+    Body::from_stream(stream)
 }
 
 async fn collect_limited_body(body: Body, limit: usize, context: &str) -> Result<Bytes, AppError> {

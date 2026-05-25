@@ -252,9 +252,10 @@ pub async fn send_google_direct(
     body: Bytes,
     stream_response: bool,
 ) -> AppResult<UpstreamResponse> {
-    let response = state
-        .specter
-        .request(method, &request.url)
+    let client = state.specter.clone();
+    let url = request.url;
+    let response = client
+        .request(method, url)
         .headers(request.headers)
         .body(body)
         .send()
