@@ -799,12 +799,80 @@ fn decode_mcp_args_map(data: &[u8]) -> String {
         if key.is_empty() {
             continue;
         }
-        let decoded = serde_json::from_slice(&value).unwrap_or_else(|_| {
-            serde_json::Value::String(String::from_utf8_lossy(&value).into_owned())
+        let decoded = decode_protobuf_value(&value).unwrap_or_else(|| {
+            serde_json::from_slice(&value).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&value).into_owned())
+            })
         });
         object.insert(key, decoded);
     }
     serde_json::Value::Object(object).to_string()
+}
+
+fn decode_protobuf_value(data: &[u8]) -> Option<serde_json::Value> {
+    for field in parse_proto_fields(data) {
+        match field.number {
+            protobuf_value::NULL_VALUE if field.wire_type == 0 => {
+                return Some(serde_json::Value::Null);
+            }
+            protobuf_value::NUMBER_VALUE if field.wire_type == 1 => {
+                let bytes: [u8; 8] = field.value.as_slice().try_into().ok()?;
+                return serde_json::Number::from_f64(f64::from_le_bytes(bytes))
+                    .map(serde_json::Value::Number);
+            }
+            protobuf_value::STRING_VALUE if field.wire_type == 2 => {
+                return Some(serde_json::Value::String(
+                    String::from_utf8_lossy(&field.value).into_owned(),
+                ));
+            }
+            protobuf_value::BOOL_VALUE if field.wire_type == 0 => {
+                let value = decode_varint(&field.value, 0)
+                    .map(|(value, _)| value != 0)
+                    .unwrap_or(false);
+                return Some(serde_json::Value::Bool(value));
+            }
+            protobuf_value::STRUCT_VALUE if field.wire_type == 2 => {
+                return Some(decode_protobuf_struct(&field.value));
+            }
+            protobuf_value::LIST_VALUE if field.wire_type == 2 => {
+                return Some(decode_protobuf_list(&field.value));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn decode_protobuf_struct(data: &[u8]) -> serde_json::Value {
+    let mut object = serde_json::Map::new();
+    for field in parse_proto_fields(data) {
+        if field.number != protobuf_struct::FIELDS || field.wire_type != 2 {
+            continue;
+        }
+        let key =
+            decode_string_field(&field.value, protobuf_struct_field_entry::KEY).unwrap_or_default();
+        if key.is_empty() {
+            continue;
+        }
+        let value = parse_proto_fields(&field.value)
+            .into_iter()
+            .find(|inner| {
+                inner.number == protobuf_struct_field_entry::VALUE && inner.wire_type == 2
+            })
+            .and_then(|inner| decode_protobuf_value(&inner.value))
+            .unwrap_or(serde_json::Value::Null);
+        object.insert(key, value);
+    }
+    serde_json::Value::Object(object)
+}
+
+fn decode_protobuf_list(data: &[u8]) -> serde_json::Value {
+    let values = parse_proto_fields(data)
+        .into_iter()
+        .filter(|field| field.number == protobuf_list_value::VALUES && field.wire_type == 2)
+        .filter_map(|field| decode_protobuf_value(&field.value))
+        .collect();
+    serde_json::Value::Array(values)
 }
 
 fn encode_exec_result(exec: &ExecRequest, result_field: u32, result_body: Vec<u8>) -> Vec<u8> {
@@ -912,5 +980,29 @@ fn decode_model_details(bytes: &[u8]) -> ModelDescriptorRaw {
         display_model_id,
         aliases,
         supports_reasoning,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn decode_mcp_args_decodes_protobuf_value_string_arguments() {
+        let value = encode_protobuf_value(&json!("ok"));
+        let entry = concat_bytes(&[encode_string_field(1, "q"), encode_message_field(2, &value)]);
+        let args = concat_bytes(&[
+            encode_message_field(2, &entry),
+            encode_string_field(3, "tool_1"),
+            encode_string_field(5, "lookup"),
+        ]);
+
+        let (name, tool_call_id, arguments) = decode_mcp_args(&args);
+        let decoded: serde_json::Value = serde_json::from_str(&arguments).unwrap();
+
+        assert_eq!(name, "lookup");
+        assert_eq!(tool_call_id, "tool_1");
+        assert_eq!(decoded, json!({ "q": "ok" }));
     }
 }
