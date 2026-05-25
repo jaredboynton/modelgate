@@ -380,6 +380,9 @@ async fn windsurf_responses_tool_call_then_tool_result_continues_with_previous_r
 
     let requests = second_server.received_requests().await.unwrap();
     let second_request = String::from_utf8_lossy(&requests[0].body);
+    assert!(second_request.contains("Available tools:"));
+    assert!(second_request.contains("- lookup"));
+    assert!(!second_request.contains("Available tools:\n(none)"));
     assert!(second_request.contains("ASSISTANT TOOL_CALLS"));
     assert!(second_request.contains("TOOL RESULT"));
 }

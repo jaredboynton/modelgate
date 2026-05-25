@@ -808,17 +808,26 @@ fn validate_cursor_tool_results(
             message: "tool result requires previous_response_id".into(),
         });
     };
+    let mut seen = HashSet::new();
+    let mut call_ids = Vec::with_capacity(tool_results.len());
     for result in tool_results {
-        if state
-            .cursor_sessions
-            .consume_pending_tool_call(key, &result.call_id)
-            .is_none()
-        {
+        if !seen.insert(result.call_id.as_str()) {
             return Err(AppError::BadRequestCode {
                 code: "previous_response_field_mismatch",
-                message: format!("tool result references unknown call_id {}", result.call_id),
+                message: format!("duplicate tool result call_id {}", result.call_id),
             });
         }
+        call_ids.push(result.call_id.clone());
+    }
+    if state
+        .cursor_sessions
+        .consume_pending_tool_calls(key, &call_ids)
+        .is_none()
+    {
+        return Err(AppError::BadRequestCode {
+            code: "previous_response_field_mismatch",
+            message: "one or more tool results reference unknown call_id".into(),
+        });
     }
     Ok(())
 }
@@ -1080,23 +1089,36 @@ async fn anthropic_messages_response_to_responses(
         .is_some_and(|value| value.starts_with("text/event-stream"));
     let provider = response.provider;
     if is_stream {
-        let mut translator =
+        let translator =
             AnthropicSseStreamTranslator::with_model_and_context(requested_model, tool_context);
-        let stream = response
-            .body
-            .into_data_stream()
-            .map(move |chunk| match chunk {
-                Ok(bytes) => translator.push_bytes(bytes),
-                Err(error) => Err(AppError::Upstream(format!(
-                    "Anthropic SSE stream failed: {error}"
-                ))),
-            })
-            .filter_map(|chunk| async move {
-                match chunk {
-                    Ok(bytes) if bytes.is_empty() => None,
-                    other => Some(other),
+        let stream = stream::unfold(
+            (response.body.into_data_stream(), translator, false),
+            |(mut source, mut translator, finished)| async move {
+                if finished {
+                    return None;
                 }
-            });
+                loop {
+                    match source.next().await {
+                        Some(Ok(bytes)) => match translator.push_bytes(bytes) {
+                            Ok(bytes) if bytes.is_empty() => continue,
+                            other => return Some((other, (source, translator, false))),
+                        },
+                        Some(Err(error)) => {
+                            return Some((
+                                Err(AppError::Upstream(format!(
+                                    "Anthropic SSE stream failed: {error}"
+                                ))),
+                                (source, translator, true),
+                            ));
+                        }
+                        None => match translator.finish() {
+                            Ok(bytes) if bytes.is_empty() => return None,
+                            other => return Some((other, (source, translator, true))),
+                        },
+                    }
+                }
+            },
+        );
         return Ok(UpstreamResponse::stream(
             provider,
             response.status,
@@ -1134,23 +1156,36 @@ async fn google_generate_content_response_to_responses(
         .is_some_and(|value| value.starts_with("text/event-stream"));
     let provider = response.provider;
     if is_stream {
-        let mut translator =
+        let translator =
             GoogleResponsesSseTranslator::with_tool_context(requested_model, tool_context);
-        let stream = response
-            .body
-            .into_data_stream()
-            .map(move |chunk| match chunk {
-                Ok(bytes) => translator.push_bytes(bytes),
-                Err(error) => Err(AppError::Upstream(format!(
-                    "Google Responses SSE stream failed: {error}"
-                ))),
-            })
-            .filter_map(|chunk| async move {
-                match chunk {
-                    Ok(bytes) if bytes.is_empty() => None,
-                    other => Some(other),
+        let stream = stream::unfold(
+            (response.body.into_data_stream(), translator, false),
+            |(mut source, mut translator, finished)| async move {
+                if finished {
+                    return None;
                 }
-            });
+                loop {
+                    match source.next().await {
+                        Some(Ok(bytes)) => match translator.push_bytes(bytes) {
+                            Ok(bytes) if bytes.is_empty() => continue,
+                            other => return Some((other, (source, translator, false))),
+                        },
+                        Some(Err(error)) => {
+                            return Some((
+                                Err(AppError::Upstream(format!(
+                                    "Google Responses SSE stream failed: {error}"
+                                ))),
+                                (source, translator, true),
+                            ));
+                        }
+                        None => match translator.finish() {
+                            Ok(bytes) if bytes.is_empty() => return None,
+                            other => return Some((other, (source, translator, true))),
+                        },
+                    }
+                }
+            },
+        );
         return Ok(UpstreamResponse::stream(
             provider,
             response.status,
@@ -1201,6 +1236,78 @@ mod tests {
             body,
             Bytes::from_static(br#"{"error":{"type":"upstream","message":"bad"}}"#)
         );
+    }
+
+    #[tokio::test]
+    async fn anthropic_stream_conversion_flushes_partial_final_frame_on_eof() {
+        let upstream = UpstreamResponse::stream(
+            "bedrock",
+            StatusCode::OK,
+            sse_headers(),
+            stream::once(async {
+                Ok::<Bytes, AppError>(Bytes::from_static(
+                    br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-4-7","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"pong"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}"#,
+                ))
+            }),
+        );
+
+        let response = anthropic_messages_response_to_responses(
+            upstream,
+            "anthropic/claude-opus-4-7",
+            ToolContext::default(),
+        )
+        .await
+        .unwrap();
+        let body = to_bytes(response.body, usize::MAX).await.unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+
+        assert!(text.contains("event: response.output_text.delta"));
+        assert!(text.contains("\"delta\":\"pong\""));
+        assert!(text.contains("event: response.completed"));
+    }
+
+    #[tokio::test]
+    async fn google_stream_conversion_flushes_partial_final_frame_on_eof() {
+        let upstream = UpstreamResponse::stream(
+            "google",
+            StatusCode::OK,
+            sse_headers(),
+            stream::once(async {
+                Ok::<Bytes, AppError>(Bytes::from_static(
+                    br#"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"pong"}]},"finishReason":"STOP"}]}"#,
+                ))
+            }),
+        );
+
+        let response = google_generate_content_response_to_responses(
+            upstream,
+            "gemini-3.1-flash-lite",
+            crate::adapter::google_responses::GoogleToolContext::default(),
+        )
+        .await
+        .unwrap();
+        let body = to_bytes(response.body, usize::MAX).await.unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+
+        assert!(text.contains("event: response.output_text.delta"));
+        assert!(text.contains("\"delta\":\"pong\""));
+        assert!(text.contains("event: response.completed"));
     }
 
     #[test]

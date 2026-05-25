@@ -1,11 +1,13 @@
 use axum::{
-    body::{to_bytes, Body},
+    body::{to_bytes, Body, BodyDataStream},
     http::{header, header::HeaderName, HeaderMap, HeaderValue, Method, Request, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{any, get, post},
     Json, Router,
 };
+use bytes::Bytes;
+use futures::{stream, StreamExt};
 use serde_json::json;
 use tower_http::trace::TraceLayer;
 
@@ -30,6 +32,36 @@ struct RequestObservation {
     path: String,
     provider: Option<&'static str>,
     model: Option<String>,
+}
+
+#[derive(Debug)]
+struct ResponseLogContext {
+    request_id: String,
+    method: Method,
+    path: String,
+    provider: &'static str,
+    model: String,
+    status: StatusCode,
+    upstream_status: StatusCode,
+    latency_ms: u128,
+}
+
+struct BodyCompletionState {
+    stream: BodyDataStream,
+    context: ResponseLogContext,
+    started: Instant,
+    body_bytes: u64,
+    body_chunks: u64,
+    completed: bool,
+}
+
+impl Drop for BodyCompletionState {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.completed = true;
+            log_response_body_completion(self, Some("body stream dropped before EOF"));
+        }
+    }
 }
 
 const OBSERVABILITY_BODY_LIMIT: usize = 64 * 1024;
@@ -426,15 +458,15 @@ async fn request_id_middleware(mut request: Request<Body>, next: Next) -> Respon
 
     let observation = request_observation(&mut request).await;
     let mut response = next.run(request).await;
-    log_request_completion(
-        &request_id,
-        &observation,
-        &response,
-        started.elapsed().as_millis(),
-    );
+    let elapsed_ms = started.elapsed().as_millis();
+    log_request_completion(&request_id, &observation, &response, elapsed_ms);
     let header_name = HeaderName::from_static(REQUEST_ID_HEADER);
     if let Ok(value) = HeaderValue::from_str(&request_id) {
         response.headers_mut().insert(header_name, value);
+    }
+    if should_log_body_completion(&response) {
+        response =
+            instrument_body_completion(response, request_id, &observation, started, elapsed_ms);
     }
     response
 }
@@ -546,6 +578,16 @@ fn log_request_completion(
     response: &Response,
     elapsed_ms: u128,
 ) {
+    let context = response_log_context(request_id, observation, response, elapsed_ms);
+    log_request_completion_context(&context);
+}
+
+fn response_log_context(
+    request_id: &str,
+    observation: &RequestObservation,
+    response: &Response,
+    elapsed_ms: u128,
+) -> ResponseLogContext {
     let status = response.status();
     let upstream = response.extensions().get::<UpstreamResponseMetadata>();
     let provider = upstream
@@ -558,18 +600,103 @@ fn log_request_completion(
     let latency_ms = upstream
         .and_then(|metadata| metadata.latency_ms)
         .unwrap_or(elapsed_ms);
-    let model = observation.model.as_deref().unwrap_or("unknown");
 
+    ResponseLogContext {
+        request_id: request_id.to_string(),
+        method: observation.method.clone(),
+        path: observation.path.clone(),
+        provider,
+        model: observation
+            .model
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string()),
+        status,
+        upstream_status,
+        latency_ms,
+    }
+}
+
+fn log_request_completion_context(context: &ResponseLogContext) {
     tracing::info!(
-        request_id = %request_id,
-        method = %observation.method,
-        path = %observation.path,
-        provider = %provider,
-        model = %model,
-        status = status.as_u16(),
-        upstream_status = upstream_status.as_u16(),
-        latency_ms = latency_ms,
+        request_id = %context.request_id,
+        method = %context.method,
+        path = %context.path,
+        provider = %context.provider,
+        model = %context.model,
+        status = context.status.as_u16(),
+        upstream_status = context.upstream_status.as_u16(),
+        latency_ms = context.latency_ms,
         "request completed"
+    );
+}
+
+fn should_log_body_completion(response: &Response) -> bool {
+    response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/event-stream"))
+}
+
+fn instrument_body_completion(
+    response: Response,
+    request_id: String,
+    observation: &RequestObservation,
+    started: Instant,
+    elapsed_ms: u128,
+) -> Response {
+    let context = response_log_context(&request_id, observation, &response, elapsed_ms);
+    let (parts, body) = response.into_parts();
+    let state = BodyCompletionState {
+        stream: body.into_data_stream(),
+        context,
+        started,
+        body_bytes: 0,
+        body_chunks: 0,
+        completed: false,
+    };
+    let stream = stream::unfold(state, |mut state| async move {
+        if state.completed {
+            return None;
+        }
+
+        match state.stream.next().await {
+            Some(Ok(bytes)) => {
+                state.body_bytes += bytes.len() as u64;
+                state.body_chunks += 1;
+                Some((Ok::<Bytes, axum::Error>(bytes), state))
+            }
+            Some(Err(error)) => {
+                let error_message = error.to_string();
+                state.completed = true;
+                log_response_body_completion(&state, Some(&error_message));
+                Some((Err(error), state))
+            }
+            None => {
+                state.completed = true;
+                log_response_body_completion(&state, None);
+                None
+            }
+        }
+    });
+    Response::from_parts(parts, Body::from_stream(stream))
+}
+
+fn log_response_body_completion(state: &BodyCompletionState, body_error: Option<&str>) {
+    tracing::info!(
+        request_id = %state.context.request_id,
+        method = %state.context.method,
+        path = %state.context.path,
+        provider = %state.context.provider,
+        model = %state.context.model,
+        status = state.context.status.as_u16(),
+        upstream_status = state.context.upstream_status.as_u16(),
+        latency_ms = state.context.latency_ms,
+        body_complete_ms = state.started.elapsed().as_millis(),
+        body_bytes = state.body_bytes,
+        body_chunks = state.body_chunks,
+        body_error = body_error.unwrap_or(""),
+        "response body completed"
     );
 }
 
@@ -707,5 +834,103 @@ mod tests {
         assert!(logs.contains("model=anthropic/claude-sonnet-4-6"));
         assert!(logs.contains("upstream_status=502"));
         assert!(logs.contains("latency_ms=42"));
+    }
+
+    #[test]
+    fn stream_body_completion_log_includes_benchmark_fields() {
+        let context = ResponseLogContext {
+            request_id: "req".to_string(),
+            method: Method::POST,
+            path: "/v1/responses".to_string(),
+            provider: "codex",
+            model: "openai:gpt-5.5".to_string(),
+            status: StatusCode::OK,
+            upstream_status: StatusCode::OK,
+            latency_ms: 42,
+        };
+        let state = BodyCompletionState {
+            stream: Body::empty().into_data_stream(),
+            context,
+            started: Instant::now(),
+            body_bytes: 128,
+            body_chunks: 3,
+            completed: true,
+        };
+
+        let logs = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_writer(CapturedLogs(logs.clone()))
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || {
+            log_response_body_completion(&state, None);
+        });
+
+        let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
+        assert!(logs.contains("request_id=req"));
+        assert!(logs.contains("provider=codex"));
+        assert!(logs.contains("model=openai:gpt-5.5"));
+        assert!(logs.contains("body_complete_ms="));
+        assert!(logs.contains("body_bytes=128"));
+        assert!(logs.contains("body_chunks=3"));
+        assert!(logs.contains("response body completed"));
+    }
+
+    #[test]
+    fn dropped_stream_body_logs_partial_completion() {
+        let context = ResponseLogContext {
+            request_id: "req-drop".to_string(),
+            method: Method::POST,
+            path: "/v1/responses".to_string(),
+            provider: "cursor",
+            model: "composer-2-fast".to_string(),
+            status: StatusCode::OK,
+            upstream_status: StatusCode::OK,
+            latency_ms: 7,
+        };
+
+        let logs = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_writer(CapturedLogs(logs.clone()))
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || {
+            drop(BodyCompletionState {
+                stream: Body::empty().into_data_stream(),
+                context,
+                started: Instant::now(),
+                body_bytes: 256,
+                body_chunks: 2,
+                completed: false,
+            });
+        });
+
+        let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
+        assert!(logs.contains("request_id=req-drop"));
+        assert!(logs.contains("provider=cursor"));
+        assert!(logs.contains("body_bytes=256"));
+        assert!(logs.contains("body_chunks=2"));
+        assert!(logs.contains("body_error=\"body stream dropped before EOF\""));
+        assert!(logs.contains("response body completed"));
+    }
+
+    #[test]
+    fn body_completion_logging_only_wraps_sse_responses() {
+        let mut response = Response::new(Body::empty());
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/event-stream; charset=utf-8"),
+        );
+        assert!(should_log_body_completion(&response));
+
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        assert!(!should_log_body_completion(&response));
     }
 }
