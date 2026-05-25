@@ -130,10 +130,35 @@ fn unit_codex_response_create_event_payload_uses_flat_ws_shape() {
     assert_eq!(payload["stream"], true);
     assert_eq!(payload["store"], false);
     assert!(payload.get("response").is_none());
-    assert!(payload.get("previous_response_id").is_none());
+    assert_eq!(payload["previous_response_id"], "resp_previous");
     assert!(payload.get("safety_identifier").is_none());
     assert!(payload.get("temperature").is_none());
     assert_eq!(payload["input"][0]["content"][0]["text"], "hello");
+}
+
+#[test]
+fn unit_codex_preserves_previous_response_id_for_tool_continuation() {
+    let body = serde_json::json!({
+        "model": "openai:gpt-5.5",
+        "previous_response_id": "resp_previous",
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_lookup",
+            "output": "lookup result: ok"
+        }]
+    });
+
+    let payload = codex::prepare_response_create_event_payload_with_resolver(
+        body,
+        unified_model_proxy_v2::model_alias::resolve_model_required,
+    )
+    .unwrap();
+
+    assert_eq!(payload["type"], "response.create");
+    assert_eq!(payload["model"], "gpt-5.5");
+    assert_eq!(payload["previous_response_id"], "resp_previous");
+    assert_eq!(payload["input"][0]["type"], "function_call_output");
+    assert_eq!(payload["input"][0]["call_id"], "call_lookup");
 }
 
 #[test]
@@ -167,7 +192,6 @@ fn unit_codex_strips_fields_outside_backend_allowlist() {
         ("max_tool_calls", serde_json::json!(2)),
         ("max_output_tokens", serde_json::json!(100)),
         ("max_tokens", serde_json::json!(100)),
-        ("previous_response_id", serde_json::json!("resp_previous")),
         ("prompt", serde_json::json!({ "id": "pmpt_123" })),
         ("safety_identifier", serde_json::json!("safe-user")),
         (

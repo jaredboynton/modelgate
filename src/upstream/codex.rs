@@ -32,6 +32,7 @@ const CODEX_RESPONSES_ALLOWED_FIELDS: &[&str] = &[
     "tools",
     "tool_choice",
     "parallel_tool_calls",
+    "previous_response_id",
     "reasoning",
     "store",
     "stream",
@@ -546,6 +547,7 @@ async fn send_wss(state: &AppState, wss_url: &str, body: &serde_json::Value) -> 
     let CodexWsCheckout {
         mut websocket,
         pool_key,
+        reused: _,
     } = checkout_responses_wss_for_body(state, wss_url, body).await?;
     websocket
         .send_text(serialize_flat_response_create_event(body))
@@ -593,78 +595,129 @@ async fn send_wss_stream(
 ) -> AppResult<CodexResponseStream> {
     let CodexWsCheckout {
         mut websocket,
-        pool_key,
+        mut pool_key,
+        mut reused,
     } = checkout_responses_wss_for_body(state, wss_url, body).await?;
-    websocket
-        .send_text(serialize_flat_response_create_event(body))
-        .await
-        .map_err(|err| AppError::Upstream(format!("Codex WSS send failed: {err}")))?;
-    let pool_state = state.clone();
+    let request_payload = serialize_flat_response_create_event(body);
+    if let Err(err) = websocket.send_text(request_payload.clone()).await {
+        if !reused {
+            return Err(AppError::Upstream(format!("Codex WSS send failed: {err}")));
+        }
+        let checkout = checkout_responses_wss_for_body(state, wss_url, body).await?;
+        websocket = checkout.websocket;
+        pool_key = checkout.pool_key;
+        reused = false;
+        websocket
+            .send_text(request_payload.clone())
+            .await
+            .map_err(|err| AppError::Upstream(format!("Codex WSS send failed: {err}")))?;
+    }
 
     Ok(Box::pin(stream::unfold(
-        (
-            Some(websocket),
-            CodexSseNormalizer::default(),
-            false,
-            pool_state,
+        CodexWssStreamState {
+            websocket: Some(websocket),
+            normalizer: CodexSseNormalizer::default(),
+            done: false,
+            state: state.clone(),
             pool_key,
-        ),
-        |(websocket, mut normalizer, done, state, pool_key)| async move {
-            if done {
+            wss_url: wss_url.to_string(),
+            body: body.clone(),
+            request_payload,
+            retry_stale_pool: reused,
+            emitted: false,
+        },
+        |mut stream_state| async move {
+            if stream_state.done {
                 return None;
             }
-            let mut websocket = websocket?;
+            let mut websocket = stream_state.websocket.take()?;
             loop {
                 let message = match websocket.next().await {
                     Ok(Some(message)) => message,
                     Ok(None) => {
-                        let bytes = normalizer.finish();
+                        let bytes = stream_state.normalizer.finish();
+                        if bytes.is_empty()
+                            && stream_state.retry_stale_pool
+                            && !stream_state.emitted
+                        {
+                            match reconnect_stale_codex_wss(&mut stream_state).await {
+                                Ok(reconnected) => {
+                                    websocket = reconnected;
+                                    continue;
+                                }
+                                Err(err) => {
+                                    stream_state.done = true;
+                                    return Some((Err(err), stream_state));
+                                }
+                            }
+                        }
+                        stream_state.done = true;
                         if bytes.is_empty() {
                             return None;
                         }
-                        return Some((Ok(bytes), (None, normalizer, true, state, pool_key)));
+                        stream_state.emitted = true;
+                        return Some((Ok(bytes), stream_state));
                     }
                     Err(err) => {
+                        if stream_state.retry_stale_pool && !stream_state.emitted {
+                            match reconnect_stale_codex_wss(&mut stream_state).await {
+                                Ok(reconnected) => {
+                                    websocket = reconnected;
+                                    continue;
+                                }
+                                Err(retry_err) => {
+                                    stream_state.done = true;
+                                    return Some((Err(retry_err), stream_state));
+                                }
+                            }
+                        }
+                        stream_state.done = true;
                         return Some((
                             Err(AppError::Upstream(format!("Codex WSS read failed: {err}"))),
-                            (None, normalizer, true, state, pool_key),
+                            stream_state,
                         ));
                     }
                 };
                 match message {
                     Message::Text(text) => {
                         let terminal = contains_terminal_response_event(&text);
-                        let bytes = normalizer.push_response_text(&text);
+                        let bytes = stream_state.normalizer.push_response_text(&text);
                         if terminal {
-                            state.store_codex_ws(pool_key.clone(), websocket).await;
+                            stream_state
+                                .state
+                                .store_codex_ws(stream_state.pool_key.clone(), websocket)
+                                .await;
+                            stream_state.done = true;
                             return Some((
-                                Ok(join_chunks(bytes, normalizer.finish())),
-                                (None, normalizer, true, state, pool_key),
+                                Ok(join_chunks(bytes, stream_state.normalizer.finish())),
+                                stream_state,
                             ));
                         }
                         if !bytes.is_empty() {
-                            return Some((
-                                Ok(bytes),
-                                (Some(websocket), normalizer, false, state, pool_key),
-                            ));
+                            stream_state.websocket = Some(websocket);
+                            stream_state.emitted = true;
+                            return Some((Ok(bytes), stream_state));
                         }
                     }
                     Message::Binary(bytes) => {
                         let text = String::from_utf8_lossy(&bytes);
                         let terminal = contains_terminal_response_event(&text);
-                        let bytes = normalizer.push_response_text(&text);
+                        let bytes = stream_state.normalizer.push_response_text(&text);
                         if terminal {
-                            state.store_codex_ws(pool_key.clone(), websocket).await;
+                            stream_state
+                                .state
+                                .store_codex_ws(stream_state.pool_key.clone(), websocket)
+                                .await;
+                            stream_state.done = true;
                             return Some((
-                                Ok(join_chunks(bytes, normalizer.finish())),
-                                (None, normalizer, true, state, pool_key),
+                                Ok(join_chunks(bytes, stream_state.normalizer.finish())),
+                                stream_state,
                             ));
                         }
                         if !bytes.is_empty() {
-                            return Some((
-                                Ok(bytes),
-                                (Some(websocket), normalizer, false, state, pool_key),
-                            ));
+                            stream_state.websocket = Some(websocket);
+                            stream_state.emitted = true;
+                            return Some((Ok(bytes), stream_state));
                         }
                     }
                     Message::Ping(_) | Message::Pong(_) | Message::Close(_) => {}
@@ -690,6 +743,7 @@ pub async fn connect_responses_wss(
 struct CodexWsCheckout {
     websocket: specter::WebSocket,
     pool_key: String,
+    reused: bool,
 }
 
 async fn checkout_responses_wss_for_body(
@@ -703,6 +757,7 @@ async fn checkout_responses_wss_for_body(
         return Ok(CodexWsCheckout {
             websocket,
             pool_key,
+            reused: true,
         });
     }
 
@@ -716,14 +771,48 @@ async fn checkout_responses_wss_for_body(
             Ok(CodexWsCheckout {
                 websocket,
                 pool_key,
+                reused: false,
             })
         }
         Ok(websocket) => Ok(CodexWsCheckout {
             websocket,
             pool_key,
+            reused: false,
         }),
         Err(err) => Err(err),
     }
+}
+
+struct CodexWssStreamState {
+    websocket: Option<specter::WebSocket>,
+    normalizer: CodexSseNormalizer,
+    done: bool,
+    state: AppState,
+    pool_key: String,
+    wss_url: String,
+    body: serde_json::Value,
+    request_payload: String,
+    retry_stale_pool: bool,
+    emitted: bool,
+}
+
+async fn reconnect_stale_codex_wss(
+    stream_state: &mut CodexWssStreamState,
+) -> AppResult<specter::WebSocket> {
+    stream_state.retry_stale_pool = false;
+    let checkout = checkout_responses_wss_for_body(
+        &stream_state.state,
+        &stream_state.wss_url,
+        &stream_state.body,
+    )
+    .await?;
+    let mut websocket = checkout.websocket;
+    stream_state.pool_key = checkout.pool_key;
+    websocket
+        .send_text(stream_state.request_payload.clone())
+        .await
+        .map_err(|err| AppError::Upstream(format!("Codex WSS send failed: {err}")))?;
+    Ok(websocket)
 }
 
 async fn connect_responses_wss_once(

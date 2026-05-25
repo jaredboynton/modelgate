@@ -4,11 +4,19 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
+    time::Duration,
 };
 
 use axum::{
     body::to_bytes,
+    extract::{
+        ws::{Message as AxumMessage, WebSocketUpgrade},
+        State,
+    },
     http::{header, HeaderMap},
+    response::IntoResponse,
+    routing::get,
+    Router,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -147,6 +155,65 @@ async fn codex_rest_responses_return_sse_stream_response() {
     assert!(text.contains("event: response.completed"));
 }
 
+#[tokio::test]
+async fn codex_stream_retries_stale_pooled_wss_once() {
+    let codex_home = tempfile::tempdir().unwrap();
+    let auth_home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        codex_home.path().join("auth.json"),
+        serde_json::json!({
+            "access_token": "access-token",
+            "account_id": "account-123"
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut state = AppState::for_tests(
+        codex_home.path().to_path_buf(),
+        auth_home.path().to_path_buf(),
+    );
+    std::sync::Arc::make_mut(&mut state.runtime).codex_transport = CodexTransport::Wss;
+    std::sync::Arc::make_mut(&mut state.runtime).codex_wss_pool_size = 1;
+    let (wss_url, handshakes) = closing_after_completed_ws_server().await;
+    std::sync::Arc::make_mut(&mut state.runtime).codex_responses_wss_url = wss_url;
+    seed_codex_catalog(&state, &["gpt-5.5".to_string()]);
+
+    let first = execute_responses_request(
+        &state,
+        HeaderMap::new(),
+        serde_json::json!({
+            "model": "openai:gpt-5.5",
+            "input": "first"
+        }),
+        ExecuteResponsesOptions::default(),
+    )
+    .await
+    .unwrap();
+    let first_body = to_bytes(first.body, usize::MAX).await.unwrap();
+    assert!(String::from_utf8(first_body.to_vec())
+        .unwrap()
+        .contains("event: response.completed"));
+
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let second = execute_responses_request(
+        &state,
+        HeaderMap::new(),
+        serde_json::json!({
+            "model": "openai:gpt-5.5",
+            "input": "second"
+        }),
+        ExecuteResponsesOptions::default(),
+    )
+    .await
+    .unwrap();
+    let second_body = to_bytes(second.body, usize::MAX).await.unwrap();
+    assert!(String::from_utf8(second_body.to_vec())
+        .unwrap()
+        .contains("event: response.completed"));
+    assert_eq!(handshakes.load(Ordering::SeqCst), 2);
+}
+
 #[test]
 fn codex_headers_advertise_remote_compaction_beta_without_dropping_websocket_beta() {
     let codex_home = tempfile::tempdir().unwrap();
@@ -194,6 +261,42 @@ async fn rejecting_ws_server() -> (String, Arc<AtomicUsize>) {
         format!("ws://{addr}/backend-api/codex/responses"),
         handshakes,
     )
+}
+
+async fn closing_after_completed_ws_server() -> (String, Arc<AtomicUsize>) {
+    let handshakes = Arc::new(AtomicUsize::new(0));
+    let app = Router::new()
+        .route(
+            "/backend-api/codex/responses",
+            get(closing_after_completed_ws),
+        )
+        .with_state(handshakes.clone());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr: SocketAddr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (
+        format!("ws://{addr}/backend-api/codex/responses"),
+        handshakes,
+    )
+}
+
+async fn closing_after_completed_ws(
+    State(handshakes): State<Arc<AtomicUsize>>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |mut socket| async move {
+        handshakes.fetch_add(1, Ordering::SeqCst);
+        let _ = socket.recv().await;
+        socket
+            .send(AxumMessage::Text(
+                r#"{"type":"response.completed","response":{"id":"resp_ws","status":"completed"}}"#
+                    .into(),
+            ))
+            .await
+            .unwrap();
+    })
 }
 
 fn seed_codex_catalog(state: &AppState, models: &[String]) {
