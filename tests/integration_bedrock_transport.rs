@@ -250,6 +250,66 @@ async fn bedrock_runtime_stream_transport_decodes_eventstream_incrementally() {
 }
 
 #[tokio::test]
+async fn bedrock_runtime_stream_fallback_preserves_bearer_auth() {
+    let app = Router::new().route(
+        "/model/:model/invoke-with-response-stream",
+        post(|headers: HeaderMap| async move {
+            if headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                != Some("Bearer fixture-token")
+            {
+                return Response::builder()
+                    .status(StatusCode::UNAUTHORIZED)
+                    .body(Body::from("missing bearer auth"))
+                    .unwrap();
+            }
+
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/vnd.amazon.eventstream")
+                .body(Body::from(aws_event_stream_chunk(
+                    br#"{"type":"message_stop"}"#,
+                )))
+                .unwrap()
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let response = send_runtime_invoke_request(
+        &specter::Client::new().unwrap(),
+        BedrockRuntimeInvokeRequest {
+            url: format!(
+                "http://{addr}/model/global.anthropic.claude-sonnet-4-6/invoke-with-response-stream"
+            ),
+            body: serde_json::json!({
+                "anthropic_version": "bedrock-2023-05-31",
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 64
+            }),
+            auth: select_bedrock_runtime_auth(
+                BedrockAuth::Bearer {
+                    token: "fixture-token".into(),
+                    source: "test",
+                },
+                "us-west-2",
+            ),
+            headers: runtime_forward_headers(&HeaderMap::new(), true),
+            stream: true,
+        },
+        BedrockRetryPolicy { max_attempts: 1 },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(response.status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn bedrock_runtime_stream_premature_eof_fails() {
     let (server_url, release_second_chunk) =
         spawn_incremental_runtime_eventstream_server(true).await; // true = premature EOF

@@ -1,6 +1,5 @@
 use std::{
     borrow::Cow,
-    collections::HashMap,
     time::{Duration, Instant},
 };
 
@@ -286,11 +285,12 @@ async fn send_runtime_once(
             Err(error) if is_non_h2_streaming_error(&error) => {
                 let fallback_client = client.clone();
                 let url = request.url.clone();
-                let headers = request.headers.clone();
+                let mut fallback_headers = request.headers.clone();
+                apply_runtime_auth_headers(request, &mut fallback_headers).await?;
                 let body = body.clone();
                 let response = fallback_client
                     .post(url)
-                    .headers(headers)
+                    .headers(fallback_headers)
                     .body(body)
                     .send()
                     .await
@@ -458,21 +458,27 @@ impl AwsEventStreamDecoder {
     }
 }
 
+#[derive(Default)]
+struct EventStreamHeaders<'a> {
+    event_type: Option<&'a str>,
+    message_type: Option<&'a str>,
+    exception_type: Option<&'a str>,
+}
+
 fn runtime_event_stream_message_to_sse(
-    headers: &HashMap<String, String>,
+    headers: &EventStreamHeaders<'_>,
     payload: &[u8],
 ) -> AppResult<Option<(Bytes, bool)>> {
-    let event_type = headers.get(":event-type").map(String::as_str);
+    let event_type = headers.event_type;
     match event_type {
         Some("chunk") => runtime_chunk_payload_to_sse(payload),
         Some(event) if event.ends_with("Exception") || event.ends_with("Error") => {
             Err(runtime_event_stream_error(event, payload))
         }
-        _ if headers.get(":message-type").map(String::as_str) == Some("exception") => {
+        _ if headers.message_type == Some("exception") => {
             let event = headers
-                .get(":exception-type")
-                .or_else(|| headers.get(":event-type"))
-                .map(String::as_str)
+                .exception_type
+                .or(headers.event_type)
                 .unwrap_or("exception");
             Err(runtime_event_stream_error(event, payload))
         }
@@ -560,9 +566,9 @@ fn runtime_event_stream_error(event: &str, payload: &[u8]) -> AppError {
     AppError::Upstream(format!("Bedrock Runtime stream {event}: {message}"))
 }
 
-fn parse_event_stream_headers(bytes: &[u8]) -> AppResult<HashMap<String, String>> {
+fn parse_event_stream_headers(bytes: &[u8]) -> AppResult<EventStreamHeaders<'_>> {
     let mut index = 0;
-    let mut headers = HashMap::new();
+    let mut headers = EventStreamHeaders::default();
     while index < bytes.len() {
         let name_len = *bytes.get(index).ok_or_else(|| {
             AppError::Upstream("truncated Bedrock Runtime event stream header".into())
@@ -576,62 +582,61 @@ fn parse_event_stream_headers(bytes: &[u8]) -> AppResult<HashMap<String, String>
             AppError::Upstream(format!(
                 "invalid Bedrock Runtime event stream header name: {error}"
             ))
-        })?
-        .to_string();
+        })?;
         index = name_end;
         let value_type = *bytes.get(index).ok_or_else(|| {
             AppError::Upstream("missing Bedrock Runtime event stream header value type".into())
         })?;
         index += 1;
-        if let Some(value) = parse_event_stream_header_value(bytes, &mut index, value_type)? {
-            headers.insert(name, value);
+        let value = parse_event_stream_header_value(bytes, &mut index, value_type)?;
+        match name {
+            ":event-type" => headers.event_type = value,
+            ":message-type" => headers.message_type = value,
+            ":exception-type" => headers.exception_type = value,
+            _ => {}
         }
     }
     Ok(headers)
 }
 
-fn parse_event_stream_header_value(
-    bytes: &[u8],
+fn parse_event_stream_header_value<'a>(
+    bytes: &'a [u8],
     index: &mut usize,
     value_type: u8,
-) -> AppResult<Option<String>> {
+) -> AppResult<Option<&'a str>> {
     match value_type {
-        0 => Ok(Some("true".into())),
-        1 => Ok(Some("false".into())),
+        0 | 1 => Ok(None),
         2 => {
-            *index += 1;
+            skip_event_stream_header_value(bytes, index, 1)?;
             Ok(None)
         }
         3 => {
-            *index += 2;
+            skip_event_stream_header_value(bytes, index, 2)?;
             Ok(None)
         }
         4 => {
-            *index += 4;
+            skip_event_stream_header_value(bytes, index, 4)?;
             Ok(None)
         }
         5 | 8 => {
-            *index += 8;
+            skip_event_stream_header_value(bytes, index, 8)?;
             Ok(None)
         }
         6 | 7 => {
             let len = event_stream_u16(bytes, *index)? as usize;
             *index += 2;
-            let value_end = *index + len;
+            let value_end = index.checked_add(len).ok_or_else(|| {
+                AppError::Upstream("invalid Bedrock Runtime event stream header length".into())
+            })?;
+            let value_bytes = bytes.get(*index..value_end).ok_or_else(|| {
+                AppError::Upstream("truncated Bedrock Runtime event stream header value".into())
+            })?;
             let value = if value_type == 7 {
-                Some(
-                    std::str::from_utf8(bytes.get(*index..value_end).ok_or_else(|| {
-                        AppError::Upstream(
-                            "truncated Bedrock Runtime event stream string header".into(),
-                        )
-                    })?)
-                    .map_err(|error| {
-                        AppError::Upstream(format!(
-                            "invalid Bedrock Runtime event stream string header: {error}"
-                        ))
-                    })?
-                    .to_string(),
-                )
+                Some(std::str::from_utf8(value_bytes).map_err(|error| {
+                    AppError::Upstream(format!(
+                        "invalid Bedrock Runtime event stream string header: {error}"
+                    ))
+                })?)
             } else {
                 None
             };
@@ -639,13 +644,28 @@ fn parse_event_stream_header_value(
             Ok(value)
         }
         9 => {
-            *index += 16;
+            skip_event_stream_header_value(bytes, index, 16)?;
             Ok(None)
         }
         other => Err(AppError::Upstream(format!(
             "unsupported Bedrock Runtime event stream header value type: {other}"
         ))),
     }
+}
+
+fn skip_event_stream_header_value(
+    bytes: &[u8],
+    index: &mut usize,
+    value_len: usize,
+) -> AppResult<()> {
+    let value_end = index.checked_add(value_len).ok_or_else(|| {
+        AppError::Upstream("invalid Bedrock Runtime event stream header length".into())
+    })?;
+    bytes.get(*index..value_end).ok_or_else(|| {
+        AppError::Upstream("truncated Bedrock Runtime event stream header value".into())
+    })?;
+    *index = value_end;
+    Ok(())
 }
 
 fn event_stream_u16(bytes: &[u8], index: usize) -> AppResult<u16> {
