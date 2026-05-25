@@ -145,6 +145,9 @@ pub fn emit_event(event: &CursorAgentEvent, ctx: &mut ResponseContext) -> Vec<Re
             response_id,
             conversation_id,
         } => {
+            if ctx.failed || ctx.completed {
+                return out;
+            }
             close_open_text(ctx, &mut out);
             close_open_reasoning(ctx, &mut out);
             ctx.record_done(*finish_reason, conversation_id);

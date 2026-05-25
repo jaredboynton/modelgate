@@ -461,6 +461,7 @@ fn build_tool_prompt(value: &Value, profile: WindsurfClientProfile) -> AppResult
         "Return exactly one JSON object and no prose.",
         "To call tools: {\"action\":\"tool_call\",\"tool_calls\":[{\"name\":\"tool_name\",\"arguments\":{}}]}",
         "To answer: {\"action\":\"final\",\"content\":\"...\"}",
+        "After a TOOL RESULT, return action final unless more tool data is required.",
         "",
         "Available tools:",
         &tools,
@@ -1251,6 +1252,7 @@ ASSISTANT TOOL_CALLS: [{"id":"call_1","type":"function","function":{"name":"Exec
         assert!(prompt.contains("- lookup: search"));
         assert!(prompt.contains("ASSISTANT TOOL_CALLS"));
         assert!(prompt.contains("TOOL RESULT call_1: result"));
+        assert!(prompt.contains("After a TOOL RESULT"));
     }
 
     #[test]

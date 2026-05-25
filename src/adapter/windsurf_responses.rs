@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
@@ -47,6 +48,10 @@ pub fn build_chat_request(
     }
     if let Some(tools) = object.get("tools") {
         out.insert("tools".into(), convert_tools(tools)?);
+    } else if let Some(prior_tools) =
+        prior.and_then(|prior| tools_from_prior_response(&prior.raw_response))
+    {
+        out.insert("tools".into(), prior_tools);
     }
     if let Some(tool_choice) = object.get("tool_choice") {
         out.insert("tool_choice".into(), tool_choice.clone());
@@ -440,6 +445,38 @@ fn convert_tools(value: &Value) -> AppResult<Value> {
     ))
 }
 
+fn tools_from_prior_response(response: &Value) -> Option<Value> {
+    let mut seen = BTreeSet::new();
+    let mut tools = Vec::new();
+    for item in response.get("output").and_then(Value::as_array)? {
+        if item.get("type").and_then(Value::as_str) != Some("function_call") {
+            continue;
+        }
+        let Some(name) = item.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        if !seen.insert(name.to_string()) {
+            continue;
+        }
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": "Tool used earlier in this response.",
+                "parameters": replayed_tool_parameters()
+            }
+        }));
+    }
+    (!tools.is_empty()).then_some(Value::Array(tools))
+}
+
+fn replayed_tool_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {}
+    })
+}
+
 fn response_text_content(value: Option<&Value>) -> AppResult<String> {
     match value {
         Some(Value::String(text)) => Ok(text.clone()),
@@ -561,6 +598,12 @@ mod tests {
         assert_eq!(messages[0]["role"], "user");
         assert_eq!(messages[1]["tool_calls"][0]["id"], "call_lookup");
         assert_eq!(messages[2]["role"], "tool");
+        let tools = chat["tools"].as_array().unwrap();
+        assert_eq!(tools[0]["function"]["name"], "lookup");
+        assert_eq!(
+            tools[0]["function"]["parameters"],
+            json!({ "type": "object", "properties": {} })
+        );
     }
 
     #[test]

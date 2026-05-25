@@ -387,6 +387,25 @@ impl AnthropicSseStreamTranslator {
         self.process_complete_blocks()
     }
 
+    pub fn finish(&mut self) -> AppResult<Bytes> {
+        let mut output = self.process_complete_blocks()?;
+        if !self.pending.is_empty() {
+            let block = std::str::from_utf8(&self.pending).map_err(|error| {
+                AppError::Upstream(format!("invalid Anthropic SSE UTF-8: {error}"))
+            })?;
+            self.translator.process_block(block)?;
+            let final_output = std::mem::take(&mut self.translator.output);
+            let _ = self.pending.drain(..);
+            if !final_output.is_empty() {
+                let mut combined = Vec::with_capacity(output.len() + final_output.len());
+                combined.extend_from_slice(&output);
+                combined.extend_from_slice(final_output.as_bytes());
+                output = Bytes::from(combined);
+            }
+        }
+        Ok(output)
+    }
+
     fn process_complete_blocks(&mut self) -> AppResult<Bytes> {
         let mut output = String::new();
         while let Some((position, separator_len)) = find_sse_separator(&self.pending) {
