@@ -459,13 +459,17 @@ fn build_tool_prompt(value: &Value, profile: WindsurfClientProfile) -> AppResult
         .collect::<Vec<_>>()
         .join("\n\n");
 
+    let final_tool_result_without_tools = has_tool_result && tools == "(none)";
     let mut lines = vec![
         "You are running inside an OpenAI-compatible tool-calling client and can either call tools or answer directly.",
         "Return exactly one JSON object and no prose.",
     ];
-    if has_tool_result && tools == "(none)" {
+    if final_tool_result_without_tools {
         lines.push("To answer: {\"action\":\"final\",\"content\":\"...\"}");
-        lines.push("No tools are available on this turn. Do not call tools again for that result.");
+        lines.push(
+            "The tool has already run. Use the TOOL RESULT in the conversation to answer final.",
+        );
+        lines.push("Do not call tools again, and do not say tools are unavailable.");
     } else {
         lines.push("To call tools: {\"action\":\"tool_call\",\"tool_calls\":[{\"name\":\"tool_name\",\"arguments\":{}}]}");
         lines.push("To answer: {\"action\":\"final\",\"content\":\"...\"}");
@@ -473,14 +477,18 @@ fn build_tool_prompt(value: &Value, profile: WindsurfClientProfile) -> AppResult
             "After a TOOL RESULT, return action final. Do not call tools again for that result.",
         );
     }
-    lines.extend([
-        "",
-        "Available tools:",
-        &tools,
-        "",
-        "Conversation:",
-        &conversation,
-    ]);
+    if final_tool_result_without_tools {
+        lines.extend(["", "Conversation:", &conversation]);
+    } else {
+        lines.extend([
+            "",
+            "Available tools:",
+            &tools,
+            "",
+            "Conversation:",
+            &conversation,
+        ]);
+    }
 
     Ok(lines.join("\n"))
 }
@@ -1282,7 +1290,10 @@ ASSISTANT TOOL_CALLS: [{"id":"call_1","type":"function","function":{"name":"Exec
         }), WindsurfClientProfile::Other)
         .unwrap();
 
-        assert!(prompt.contains("No tools are available on this turn"));
+        assert!(prompt.contains("The tool has already run"));
+        assert!(prompt.contains("Use the TOOL RESULT in the conversation to answer final"));
+        assert!(prompt.contains("do not say tools are unavailable"));
+        assert!(!prompt.contains("Available tools:"));
         assert!(!prompt.contains("To call tools:"));
     }
 
