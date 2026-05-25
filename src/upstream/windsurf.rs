@@ -416,9 +416,10 @@ fn drain_text_chunks(buffer: &mut Vec<u8>) -> AppResult<Vec<String>> {
         offset = frame_end;
     }
 
-    if offset > 0 {
-        let remaining = buffer.split_off(offset);
-        *buffer = remaining;
+    if offset == buffer.len() {
+        buffer.clear();
+    } else if offset > 0 {
+        buffer.drain(..offset);
     }
     Ok(chunks)
 }
@@ -594,6 +595,20 @@ mod tests {
         error_frame.extend_from_slice(trailer);
         let error = parse_complete_response(&error_frame).unwrap_err();
         assert!(error.to_string().contains("Windsurf stream error"));
+    }
+
+    #[test]
+    fn drain_text_chunks_reuses_complete_frame_buffer_capacity() {
+        let mut body = Vec::new();
+        body.extend(encode_string(3, "hello"));
+        let mut buffer = connect_envelope(&body);
+        let capacity = buffer.capacity();
+
+        let chunks = drain_text_chunks(&mut buffer).unwrap();
+
+        assert_eq!(chunks, vec!["hello"]);
+        assert!(buffer.is_empty());
+        assert_eq!(buffer.capacity(), capacity);
     }
 
     #[test]
