@@ -414,6 +414,9 @@ fn build_tool_prompt(value: &Value, profile: WindsurfClientProfile) -> AppResult
         .get("messages")
         .and_then(Value::as_array)
         .ok_or_else(|| AppError::BadRequest("messages must be an array".into()))?;
+    let has_tool_result = messages
+        .iter()
+        .any(|message| message.get("role").and_then(Value::as_str) == Some("tool"));
     let conversation = messages
         .iter()
         .map(|message| {
@@ -456,20 +459,30 @@ fn build_tool_prompt(value: &Value, profile: WindsurfClientProfile) -> AppResult
         .collect::<Vec<_>>()
         .join("\n\n");
 
-    Ok([
+    let mut lines = vec![
         "You are running inside an OpenAI-compatible tool-calling client and can either call tools or answer directly.",
         "Return exactly one JSON object and no prose.",
-        "To call tools: {\"action\":\"tool_call\",\"tool_calls\":[{\"name\":\"tool_name\",\"arguments\":{}}]}",
-        "To answer: {\"action\":\"final\",\"content\":\"...\"}",
-        "After a TOOL RESULT, return action final unless more tool data is required.",
+    ];
+    if has_tool_result && tools == "(none)" {
+        lines.push("To answer: {\"action\":\"final\",\"content\":\"...\"}");
+        lines.push("No tools are available on this turn. Do not call tools again for that result.");
+    } else {
+        lines.push("To call tools: {\"action\":\"tool_call\",\"tool_calls\":[{\"name\":\"tool_name\",\"arguments\":{}}]}");
+        lines.push("To answer: {\"action\":\"final\",\"content\":\"...\"}");
+        lines.push(
+            "After a TOOL RESULT, return action final. Do not call tools again for that result.",
+        );
+    }
+    lines.extend([
         "",
         "Available tools:",
         &tools,
         "",
         "Conversation:",
         &conversation,
-    ]
-    .join("\n"))
+    ]);
+
+    Ok(lines.join("\n"))
 }
 
 pub fn map_client_tools_to_windsurf(tools: &mut [Value], profile: WindsurfClientProfile) {
@@ -1253,6 +1266,24 @@ ASSISTANT TOOL_CALLS: [{"id":"call_1","type":"function","function":{"name":"Exec
         assert!(prompt.contains("ASSISTANT TOOL_CALLS"));
         assert!(prompt.contains("TOOL RESULT call_1: result"));
         assert!(prompt.contains("After a TOOL RESULT"));
+        assert!(prompt.contains("Do not call tools again for that result"));
+    }
+
+    #[test]
+    fn tool_prompt_without_available_tools_after_tool_result_disallows_tool_calls() {
+        use super::WindsurfClientProfile;
+        let prompt = build_tool_prompt(&json!({
+            "model": "swe-1.6",
+            "messages": [
+                { "role": "user", "content": "find it" },
+                { "role": "assistant", "content": null, "tool_calls": [{ "id": "call_1", "type": "function", "function": { "name": "lookup", "arguments": "{}" }}] },
+                { "role": "tool", "tool_call_id": "call_1", "content": "result" }
+            ]
+        }), WindsurfClientProfile::Other)
+        .unwrap();
+
+        assert!(prompt.contains("No tools are available on this turn"));
+        assert!(!prompt.contains("To call tools:"));
     }
 
     #[test]
