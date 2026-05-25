@@ -1005,4 +1005,60 @@ mod tests {
         assert_eq!(tool_call_id, "tool_1");
         assert_eq!(decoded, json!({ "q": "ok" }));
     }
+
+    #[test]
+    fn decode_mcp_args_decodes_all_protobuf_value_argument_kinds() {
+        let entries = [
+            ("number", json!(42.5)),
+            ("bool", json!(true)),
+            ("null", serde_json::Value::Null),
+            (
+                "struct",
+                json!({
+                    "nested_string": "ok",
+                    "nested_bool": false,
+                    "nested_null": null
+                }),
+            ),
+            ("list", json!(["ok", 7, false, null])),
+        ]
+        .into_iter()
+        .map(|(key, value)| {
+            concat_bytes(&[
+                encode_string_field(1, key),
+                encode_message_field(2, &encode_protobuf_value(&value)),
+            ])
+        })
+        .collect::<Vec<_>>();
+        let args = concat_bytes(
+            &entries
+                .iter()
+                .map(|entry| encode_message_field(2, entry))
+                .chain([
+                    encode_string_field(3, "tool_1"),
+                    encode_string_field(5, "lookup"),
+                ])
+                .collect::<Vec<_>>(),
+        );
+
+        let (name, tool_call_id, arguments) = decode_mcp_args(&args);
+        let decoded: serde_json::Value = serde_json::from_str(&arguments).unwrap();
+
+        assert_eq!(name, "lookup");
+        assert_eq!(tool_call_id, "tool_1");
+        assert_eq!(
+            decoded,
+            json!({
+                "number": 42.5,
+                "bool": true,
+                "null": null,
+                "struct": {
+                    "nested_string": "ok",
+                    "nested_bool": false,
+                    "nested_null": null
+                },
+                "list": ["ok", 7.0, false, null]
+            })
+        );
+    }
 }

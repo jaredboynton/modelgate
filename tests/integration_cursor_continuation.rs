@@ -394,6 +394,59 @@ async fn cursor_droid_replayed_tool_result_without_matching_pending_call_fails_c
     assert_eq!(error_code(&parsed.1), "unknown_previous_response_id");
 }
 
+#[tokio::test]
+async fn cursor_previous_response_id_invalid_batch_does_not_partially_consume_pending_call() {
+    let homes = common::TestHomes::new();
+    *homes.state.cursor_auth.lock().await =
+        Some(unified_model_proxy_v2::auth::cursor::CursorCredentials {
+            access_token: "test-cursor-token".into(),
+            refresh_token: None,
+            api_key: None,
+            source: unified_model_proxy_v2::auth::cursor::CursorAuthSource::Env,
+            expires_at: None,
+        });
+    let key = prime_cursor_continuation_with_pending(
+        &homes.state,
+        "resp_prior",
+        "conv_prior",
+        "composer-2-fast",
+        CursorClientProfile::GenericOpenAi,
+        vec![CursorToolCall {
+            id: "call_lookup".into(),
+            name: "Grep".into(),
+            arguments: json!({}),
+        }],
+    );
+    let app = build_router(homes.state.clone());
+    let body = json!({
+        "model": "composer-2-fast",
+        "previous_response_id": "resp_prior",
+        "input": [
+            {
+                "type": "function_call_output",
+                "call_id": "call_lookup",
+                "output": "ok"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_missing",
+                "output": "missing"
+            }
+        ],
+    });
+
+    let parsed = post_responses(app, body).await;
+    assert_eq!(parsed.0, StatusCode::BAD_REQUEST);
+    assert_eq!(error_code(&parsed.1), "previous_response_field_mismatch");
+    let pending = homes.state.cursor_sessions.pending_tool_calls_for(&key);
+    assert_eq!(
+        pending.len(),
+        1,
+        "invalid batches must not partially consume pending calls"
+    );
+    assert_eq!(pending[0].id, "call_lookup");
+}
+
 fn prime_cursor_continuation(
     state: &unified_model_proxy_v2::AppState,
     response_id: &str,
@@ -417,7 +470,7 @@ fn prime_cursor_continuation_with_pending(
     upstream_model: &str,
     client_profile: CursorClientProfile,
     pending_tool_calls: Vec<CursorToolCall>,
-) {
+) -> CursorContinuationKey {
     prime_cursor_continuation_with_pending_for_request_model(
         state,
         response_id,
@@ -426,7 +479,7 @@ fn prime_cursor_continuation_with_pending(
         upstream_model,
         client_profile,
         pending_tool_calls,
-    );
+    )
 }
 
 fn prime_cursor_continuation_with_pending_for_request_model(
@@ -437,7 +490,7 @@ fn prime_cursor_continuation_with_pending_for_request_model(
     upstream_model: &str,
     client_profile: CursorClientProfile,
     pending_tool_calls: Vec<CursorToolCall>,
-) {
+) -> CursorContinuationKey {
     let stable = json!({ "model": requested_model });
     prime_cursor_continuation_with_pending_and_stable_fields(
         state,
@@ -447,7 +500,7 @@ fn prime_cursor_continuation_with_pending_for_request_model(
         client_profile,
         stable,
         pending_tool_calls,
-    );
+    )
 }
 
 fn prime_cursor_continuation_with_pending_and_stable_fields(
@@ -458,7 +511,7 @@ fn prime_cursor_continuation_with_pending_and_stable_fields(
     client_profile: CursorClientProfile,
     stable: Value,
     pending_tool_calls: Vec<CursorToolCall>,
-) {
+) -> CursorContinuationKey {
     let key = CursorContinuationKey {
         route: CursorRoute::Responses,
         provider: Provider::Cursor,
@@ -496,6 +549,7 @@ fn prime_cursor_continuation_with_pending_and_stable_fields(
         raw_input_items: Value::Null,
         upstream_codex_minted: false,
     });
+    key
 }
 
 fn replayed_tool_result_body(call_id: &str) -> Value {

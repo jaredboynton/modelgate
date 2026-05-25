@@ -326,6 +326,48 @@ impl CursorSessionStore {
         Some(call)
     }
 
+    /// Remove a batch of pending tool calls atomically. If any submitted
+    /// call_id is missing or maps to an already-selected pending call, no calls
+    /// are removed.
+    pub fn consume_pending_tool_calls(
+        &self,
+        key: &CursorContinuationKey,
+        call_ids: &[String],
+    ) -> Option<()> {
+        let hash = continuation_hash(key);
+        let expected_stable = stable_field_hash(key);
+        let mut guard = self.write();
+        let entry = guard.map.get_mut(&hash)?;
+        if !entry_matches(entry, key, &expected_stable) {
+            return None;
+        }
+
+        let mut positions = Vec::with_capacity(call_ids.len());
+        for call_id in call_ids {
+            let position =
+                entry
+                    .pending_tool_calls
+                    .iter()
+                    .enumerate()
+                    .find_map(|(idx, call)| {
+                        if positions.contains(&idx) {
+                            return None;
+                        }
+                        pending_tool_call_id_matches(entry.client_profile, &call.id, call_id)
+                            .then_some(idx)
+                    })?;
+            positions.push(position);
+        }
+
+        positions.sort_unstable_by(|left, right| right.cmp(left));
+        for position in positions {
+            entry.pending_tool_calls.remove(position);
+        }
+        entry.last_access = Instant::now();
+        guard.touch(&hash);
+        Some(())
+    }
+
     /// Resolve a continuation by pending tool-call IDs when a replaying
     /// client omitted `previous_response_id`. The lookup succeeds only when
     /// exactly one active entry matches the route/provider/model/target/stable

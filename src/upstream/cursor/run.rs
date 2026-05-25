@@ -254,20 +254,27 @@ pub async fn run_with_credentials(
                             }
                             continue;
                         }
-                        finish_reason = CursorFinishReason::ToolCalls;
-                        emitted_public_tool_call = true;
                         if let Some(call) =
                             pending_tool_call_for_exec(request.client_profile.into(), exec)
                         {
                             pending_tool_calls.push(call);
+                            finish_reason = CursorFinishReason::ToolCalls;
+                            emitted_public_tool_call = true;
                         }
-                        for event in
-                            public_tool_events_for_exec(request.client_profile.into(), exec)
-                        {
+                        let public_events =
+                            public_tool_events_for_exec(request.client_profile.into(), exec);
+                        let emitted_provider_error = public_events
+                            .iter()
+                            .any(|event| matches!(event, CursorAgentEvent::ProviderError { .. }));
+                        for event in public_events {
                             if tx.send(event).await.is_err() {
                                 let _ = transport_stream.close().await;
                                 return;
                             }
+                        }
+                        if emitted_provider_error {
+                            let _ = transport_stream.close().await;
+                            return;
                         }
                     }
                 }

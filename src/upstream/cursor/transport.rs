@@ -206,8 +206,6 @@ pub struct RunStream {
     heartbeat_handle: JoinHandle<()>,
     /// Latest connect-end-stream error emitted by the reader, if any.
     terminal_error: Arc<Mutex<Option<ConnectError>>>,
-    /// Flag flipped to `true` once the reader sees END_STREAM.
-    closed: Arc<Mutex<bool>>,
 }
 
 impl RunStream {
@@ -236,11 +234,6 @@ impl RunStream {
         self.terminal_error.lock().await.take()
     }
 
-    /// Indicates whether the reader task has observed a terminal frame.
-    pub async fn is_closed(&self) -> bool {
-        *self.closed.lock().await
-    }
-
     /// Shut down the stream: cancel heartbeat, abort reader, send a final
     /// h2 END_STREAM frame. Idempotent.
     pub async fn close(&mut self) -> TransportResult<()> {
@@ -250,6 +243,13 @@ impl RunStream {
         drop(send);
         self.reader_handle.abort();
         Ok(())
+    }
+}
+
+impl Drop for RunStream {
+    fn drop(&mut self) {
+        self.heartbeat_handle.abort();
+        self.reader_handle.abort();
     }
 }
 
@@ -276,8 +276,8 @@ pub async fn open_streaming_run(token: &str, request_body: Vec<u8>) -> Transport
     };
 
     // Initial body frame: the AgentClientMessage envelope wrapped in Connect.
-    let initial_frame = frame_connect_message(&request_body, 0);
-    if let Err(err) = send_stream.send_data(Bytes::from(initial_frame.clone()), false) {
+    let initial_frame = Bytes::from(frame_connect_message(&request_body, 0));
+    if let Err(err) = send_stream.send_data(initial_frame.clone(), false) {
         tracing::debug!(?err, "cursor h2 pooled body send failed; retrying once");
         evict_pooled_send_request_for_host(CURSOR_API_HOST).await;
         send_request = pooled_send_request_for_host(CURSOR_API_HOST).await?;
@@ -285,7 +285,7 @@ pub async fn open_streaming_run(token: &str, request_body: Vec<u8>) -> Transport
             .send_request(cursor_run_request(token, &request_id)?, false)
             .map_err(|err| TransportError::H2(format!("failed to send cursor request: {err}")))?;
         retry_send_stream
-            .send_data(Bytes::from(initial_frame), false)
+            .send_data(initial_frame, false)
             .map_err(|err| TransportError::H2(format!("failed to send cursor run frame: {err}")))?;
         return finish_open_streaming_run(request_id, retry_response_fut, retry_send_stream).await;
     }
@@ -314,8 +314,19 @@ async fn finish_open_streaming_run(
     response_fut: h2::client::ResponseFuture,
     send_stream: h2::SendStream<Bytes>,
 ) -> TransportResult<RunStream> {
-    let response = response_fut
+    finish_open_streaming_run_with_deadline(request_id, response_fut, send_stream, READ_DEADLINE)
         .await
+}
+
+async fn finish_open_streaming_run_with_deadline(
+    request_id: String,
+    response_fut: h2::client::ResponseFuture,
+    send_stream: h2::SendStream<Bytes>,
+    read_deadline: Duration,
+) -> TransportResult<RunStream> {
+    let response = timeout(read_deadline, response_fut)
+        .await
+        .map_err(|_| TransportError::Timeout)?
         .map_err(|err| TransportError::H2(format!("cursor h2 response failed: {err}")))?;
     if response.status() != StatusCode::OK {
         return Err(TransportError::Upstream {
@@ -329,16 +340,12 @@ async fn finish_open_streaming_run(
     let (frame_tx, frame_rx) = mpsc::channel::<Bytes>(64);
     let stream_send = Arc::new(Mutex::new(send_stream));
     let terminal_error: Arc<Mutex<Option<ConnectError>>> = Arc::new(Mutex::new(None));
-    let closed = Arc::new(Mutex::new(false));
-
     let reader_send = stream_send.clone();
     let reader_terminal = terminal_error.clone();
-    let reader_closed = closed.clone();
     let reader_request_id = request_id.clone();
     let reader_handle = tokio::spawn(async move {
         let result =
             run_reader_loop(body, frame_tx, reader_terminal.clone(), reader_request_id).await;
-        *reader_closed.lock().await = true;
         // Best-effort flush of the END_STREAM frame.
         let mut send = reader_send.lock().await;
         let _ = send.send_data(Bytes::new(), true);
@@ -370,7 +377,6 @@ async fn finish_open_streaming_run(
         reader_handle,
         heartbeat_handle,
         terminal_error,
-        closed,
     })
 }
 
@@ -466,63 +472,68 @@ async fn evict_dns_host(host: &'static str) {
 }
 
 async fn run_reader_loop(
-    mut body: h2::RecvStream,
+    body: h2::RecvStream,
     tx: mpsc::Sender<Bytes>,
     terminal_error: Arc<Mutex<Option<ConnectError>>>,
     request_id: String,
 ) -> TransportResult<()> {
-    let mut pending = BytesMut::new();
-    let outcome = timeout(READ_DEADLINE, async {
-        while let Some(chunk_result) = body.data().await {
-            let chunk = chunk_result
-                .map_err(|err| TransportError::H2(format!("cursor h2 data failed: {err}")))?;
-            let chunk_len = chunk.len();
-            pending.extend_from_slice(&chunk);
-            // Release h2 flow-control window for the bytes we just consumed.
-            let _ = body.flow_control().release_capacity(chunk_len);
+    run_reader_loop_with_deadline(body, tx, terminal_error, request_id, READ_DEADLINE).await
+}
 
-            while let Some((flags, payload)) = take_connect_frame_bytes(&mut pending) {
-                if flags & CONNECT_END_STREAM_FLAG != 0 {
-                    if let Some(error) = parse_connect_end_stream(&payload) {
-                        *terminal_error.lock().await = Some(error.clone());
-                        return Err(TransportError::Connect {
-                            code: error.code,
-                            message: error.message,
-                            request_id: request_id.clone(),
-                        });
-                    }
-                    return Ok(());
+async fn run_reader_loop_with_deadline(
+    mut body: h2::RecvStream,
+    tx: mpsc::Sender<Bytes>,
+    terminal_error: Arc<Mutex<Option<ConnectError>>>,
+    request_id: String,
+    read_deadline: Duration,
+) -> TransportResult<()> {
+    let mut pending = BytesMut::new();
+    while let Some(chunk_result) = timeout(read_deadline, body.data())
+        .await
+        .map_err(|_| TransportError::Timeout)?
+    {
+        let chunk = chunk_result
+            .map_err(|err| TransportError::H2(format!("cursor h2 data failed: {err}")))?;
+        let chunk_len = chunk.len();
+        pending.extend_from_slice(&chunk);
+        // Release h2 flow-control window for the bytes we just consumed.
+        let _ = body.flow_control().release_capacity(chunk_len);
+
+        while let Some((flags, payload)) = take_connect_frame_bytes(&mut pending) {
+            if flags & CONNECT_END_STREAM_FLAG != 0 {
+                if let Some(error) = parse_connect_end_stream(&payload) {
+                    *terminal_error.lock().await = Some(error.clone());
+                    return Err(TransportError::Connect {
+                        code: error.code,
+                        message: error.message,
+                        request_id: request_id.clone(),
+                    });
                 }
-                if flags & GRPC_WEB_TRAILER_FLAG != 0 {
-                    // gRPC-web trailer block. Treat as terminal; body is
-                    // text trailers (e.g. "grpc-status: 0"). Surface a
-                    // ConnectError only when the trailers indicate a
-                    // non-zero status.
-                    if let Some(error) = parse_grpc_trailers(&payload) {
-                        *terminal_error.lock().await = Some(error.clone());
-                        return Err(TransportError::Connect {
-                            code: error.code,
-                            message: error.message,
-                            request_id: request_id.clone(),
-                        });
-                    }
-                    return Ok(());
+                return Ok(());
+            }
+            if flags & GRPC_WEB_TRAILER_FLAG != 0 {
+                // gRPC-web trailer block. Treat as terminal; body is
+                // text trailers (e.g. "grpc-status: 0"). Surface a
+                // ConnectError only when the trailers indicate a
+                // non-zero status.
+                if let Some(error) = parse_grpc_trailers(&payload) {
+                    *terminal_error.lock().await = Some(error.clone());
+                    return Err(TransportError::Connect {
+                        code: error.code,
+                        message: error.message,
+                        request_id: request_id.clone(),
+                    });
                 }
-                if tx.send(payload).await.is_err() {
-                    // Receiver dropped; bail out.
-                    return Ok(());
-                }
+                return Ok(());
+            }
+            if tx.send(payload).await.is_err() {
+                // Receiver dropped; bail out.
+                return Ok(());
             }
         }
-        Ok::<(), TransportError>(())
-    })
-    .await;
-
-    match outcome {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(err)) => Err(err),
-        Err(_) => Err(TransportError::Timeout),
     }
+
+    Ok(())
 }
 
 fn parse_grpc_trailers(payload: &[u8]) -> Option<ConnectError> {
@@ -657,4 +668,106 @@ pub fn strip_optional_connect_envelope(bytes: &[u8]) -> &[u8] {
         return &bytes[5..];
     }
     bytes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::future;
+    use tokio::{io::duplex, time::sleep};
+
+    #[tokio::test]
+    async fn finish_streaming_run_times_out_waiting_for_response_headers() {
+        let (client_io, server_io) = duplex(4096);
+        let (mut client, client_connection) = h2::client::handshake(client_io).await.unwrap();
+        tokio::spawn(async move {
+            let _ = client_connection.await;
+        });
+        tokio::spawn(async move {
+            let mut server = h2::server::handshake(server_io).await.unwrap();
+            let Some(Ok((_request, _respond))) = server.accept().await else {
+                return;
+            };
+            future::pending::<()>().await;
+        });
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("https://cursor.example/agent.v1.AgentService/Run")
+            .body(())
+            .unwrap();
+        let (response_fut, mut send_stream) = client.send_request(request, false).unwrap();
+        send_stream.send_data(Bytes::new(), false).unwrap();
+
+        let result = finish_open_streaming_run_with_deadline(
+            "test-request".to_string(),
+            response_fut,
+            send_stream,
+            Duration::from_millis(10),
+        )
+        .await;
+
+        assert!(matches!(result, Err(TransportError::Timeout)));
+    }
+
+    #[tokio::test]
+    async fn reader_deadline_is_per_read_idle_timeout_not_total_stream_timeout() {
+        let (client_io, server_io) = duplex(4096);
+        let (mut client, client_connection) = h2::client::handshake(client_io).await.unwrap();
+        tokio::spawn(async move {
+            let _ = client_connection.await;
+        });
+        tokio::spawn(async move {
+            let mut server = h2::server::handshake(server_io).await.unwrap();
+            let Some(Ok((request, mut respond))) = server.accept().await else {
+                return;
+            };
+            tokio::spawn(async move {
+                let mut request_body = request.into_body();
+                while let Some(chunk) = request_body.data().await {
+                    if chunk.is_err() {
+                        return;
+                    }
+                }
+                let response = http::Response::builder().status(200).body(()).unwrap();
+                let mut send = respond.send_response(response, false).unwrap();
+                send.send_data(Bytes::from(frame_connect_message(b"one", 0)), false)
+                    .unwrap();
+                sleep(Duration::from_millis(30)).await;
+                send.send_data(Bytes::from(frame_connect_message(b"two", 0)), false)
+                    .unwrap();
+                sleep(Duration::from_millis(30)).await;
+                send.send_data(
+                    Bytes::from(frame_connect_message(&[], CONNECT_END_STREAM_FLAG)),
+                    true,
+                )
+                .unwrap();
+            });
+            while server.accept().await.is_some() {}
+        });
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("https://cursor.example/agent.v1.AgentService/Run")
+            .body(())
+            .unwrap();
+        let (response_fut, _send_stream) = client.send_request(request, true).unwrap();
+        let response = response_fut.await.unwrap();
+
+        let (tx, mut rx) = mpsc::channel(4);
+        let terminal_error = Arc::new(Mutex::new(None));
+        let result = run_reader_loop_with_deadline(
+            response.into_body(),
+            tx,
+            terminal_error,
+            "test-request".to_string(),
+            Duration::from_millis(50),
+        )
+        .await;
+
+        assert!(result.is_ok(), "reader should not time out: {result:?}");
+        assert_eq!(rx.recv().await.unwrap(), Bytes::from_static(b"one"));
+        assert_eq!(rx.recv().await.unwrap(), Bytes::from_static(b"two"));
+        assert!(rx.recv().await.is_none());
+    }
 }

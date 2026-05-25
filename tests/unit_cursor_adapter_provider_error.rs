@@ -56,6 +56,40 @@ fn responses_adapter_emits_response_failed_for_provider_error_after_started() {
 }
 
 #[test]
+fn responses_adapter_ignores_done_after_provider_error_terminal() {
+    let mut ctx = ResponseContext::new("composer-2", "resp_test");
+
+    let failed_frames = cursor_responses::emit_event(
+        &CursorAgentEvent::ProviderError {
+            code: "unsupported_exec_kind".to_string(),
+            message: "test".to_string(),
+            cursor_request_id: Some("exec_1".to_string()),
+        },
+        &mut ctx,
+    );
+    assert!(
+        failed_frames
+            .iter()
+            .any(|frame| frame.event == "response.failed"),
+        "provider error must emit a terminal response.failed frame"
+    );
+
+    let done_frames = cursor_responses::emit_event(
+        &CursorAgentEvent::Done {
+            finish_reason: unified_model_proxy_v2::cursor_agent::CursorFinishReason::Stop,
+            response_id: "resp_test".to_string(),
+            conversation_id: "conv_test".to_string(),
+        },
+        &mut ctx,
+    );
+
+    assert!(
+        done_frames.is_empty(),
+        "Done after ProviderError must not emit a second terminal frame: {done_frames:?}",
+    );
+}
+
+#[test]
 fn responses_adapter_initial_prelude_is_single_response_created() {
     let mut ctx = ResponseContext::new("composer-2", "resp_test");
 
