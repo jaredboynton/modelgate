@@ -1,5 +1,6 @@
 pub mod bedrock;
 pub mod codex;
+pub mod connect;
 pub mod cursor;
 pub mod google;
 pub mod openai_audio;

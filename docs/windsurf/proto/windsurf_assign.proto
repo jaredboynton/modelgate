@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package exa.api_server_pb;
+
+import "google/protobuf/timestamp.proto";
+
+enum AuthSource {
+  AUTH_SOURCE_UNSPECIFIED = 0;
+  AUTH_SOURCE_WIND_SURF_IDE = 1;
+  // Other sources...
+}
+
+enum DisplayOption {
+  DISPLAY_OPTION_UNSPECIFIED = 0;
+  DISPLAY_OPTION_BATTLE_GROUP_ONLY = 1;
+  // Other options...
+}
+
+// exa.codeium_common_pb.Metadata
+message Metadata {
+  string ide_name = 1;
+  string extension_version = 2;
+  string api_key = 3;
+  string locale = 4;
+  string os = 5;
+  bool disable_telemetry = 6;
+  string ide_version = 7;
+  string hardware = 8;
+  uint64 request_id = 9;
+  string session_id = 10;
+  string source_address = 11;
+  string extension_name = 12;
+  string user_agent = 13;
+  string url = 14;
+  AuthSource auth_source = 15;
+  google.protobuf.Timestamp ls_timestamp = 16;
+  string extension_path = 17;
+  string user_id = 20;
+  string user_jwt = 21;
+  string force_team_id = 22;
+  string device_fingerprint = 24;
+  string trigger_id = 25;
+  string plan_name = 26;
+  string id = 27;
+  string ide_type = 28;
+  string impersonate_tier = 29;
+  repeated DisplayOption supported_model_displays = 30;
+  string f = 31;
+  string team_id = 32;
+}
+
+// exa.chat_pb.ChatMessagePrompt
+message ChatMessagePrompt {
+  string id = 1;
+  uint64 source = 2; // maps to role (user=1, assistant=2, tool=4, system=5)
+  string prompt = 3;
+}
+
+// /exa.api_server_pb.ApiServerService/AssignModel request
+message AssignModelRequest {
+  Metadata metadata = 1;
+  string model_router_uid = 2;
+  string cascade_id = 3;
+  ChatMessagePrompt chat_message_prompt = 5;
+}
+
+// Response sub-message details
+message ModelAssignment {
+  string assignment_jwt = 1;
+  string model_uid = 2;
+  repeated string harness_uids = 3;
+}
+
+// /exa.api_server_pb.ApiServerService/AssignModel response
+message AssignModelResponse {
+  ModelAssignment assignment = 1;
+}
+
+// /exa.seat_management_pb.SeatManagementService/MigrateApiKey request
+message MigrateApiKeyRequest {
+  string api_key = 1;
+}
+
+// /exa.seat_management_pb.SeatManagementService/MigrateApiKey response
+message MigrateApiKeyResponse {
+  string session_token = 1;
+}

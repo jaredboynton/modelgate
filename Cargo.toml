@@ -2,6 +2,20 @@
 name = "unified-model-proxy-v2"
 version = "0.1.11"
 edition = "2021"
+autobins = false
+
+[features]
+default = []
+mcp = []
+
+[[bin]]
+name = "unified-model-proxy-v2"
+path = "src/main.rs"
+
+[[bin]]
+name = "fast-context-mcp"
+path = "src/bin/fast_context_mcp/main.rs"
+required-features = ["mcp"]
 
 [dependencies]
 aes = "0.8.4"

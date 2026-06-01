@@ -52,6 +52,10 @@ fn maps_known_aliases() {
     assert_eq!(alias.provider, Provider::Bedrock);
     assert_eq!(alias.upstream_model, "global.anthropic.claude-opus-4-7");
 
+    let alias = resolve_model("claude-opus-4-8").unwrap();
+    assert_eq!(alias.provider, Provider::Bedrock);
+    assert_eq!(alias.upstream_model, "global.anthropic.claude-opus-4-8");
+
     let alias = resolve_model("gemini-3.1-flash-lite").unwrap();
     assert_eq!(alias.provider, Provider::Google);
     assert_eq!(alias.upstream_model, "gemini-3.1-flash-lite");
@@ -100,6 +104,14 @@ fn maps_known_aliases() {
     let alias = resolve_model("windsurf/swe-1.5-fast").unwrap();
     assert_eq!(alias.provider, Provider::Windsurf);
     assert_eq!(alias.upstream_model, "swe-1-5");
+
+    let alias = resolve_model("swe-grep-mini").unwrap();
+    assert_eq!(alias.provider, Provider::Windsurf);
+    assert_eq!(alias.upstream_model, "swe-grep-mini");
+
+    let alias = resolve_model("windsurf/swe-grep").unwrap();
+    assert_eq!(alias.provider, Provider::Windsurf);
+    assert_eq!(alias.upstream_model, "swe-grep");
 
     let alias = resolve_model("adaptive").unwrap();
     assert_eq!(alias.provider, Provider::Windsurf);
@@ -168,7 +180,15 @@ fn known_model_list_is_stable_and_resolvable() {
         .any(|model| model.id == "claude-sonnet-4-6-max"));
     assert!(KNOWN_MODELS
         .iter()
+        .any(|model| model.id == "anthropic/claude-opus-4-8"));
+    assert!(KNOWN_MODELS
+        .iter()
+        .any(|model| model.id == "claude-opus-4-8-max"));
+    assert!(KNOWN_MODELS
+        .iter()
         .any(|model| model.id == "openai:gpt-5.5"));
+    assert!(KNOWN_MODELS.iter().any(|model| model.id == "swe-grep-mini"));
+    assert!(KNOWN_MODELS.iter().any(|model| model.id == "swe-grep"));
     assert!(KNOWN_MODELS.iter().any(|model| model.id == "gpt-image-2"));
 
     for model in KNOWN_MODELS {
@@ -452,6 +472,14 @@ fn responses_route_helper_selects_supported_provider_routes() {
         route_for_responses_model(&swe).unwrap(),
         ResponsesRoute::WindsurfChat {
             upstream_model: "swe-1-6".to_string()
+        }
+    );
+
+    let swe_grep = serde_json::json!({ "model": "swe-grep-mini", "input": "hello" });
+    assert_eq!(
+        route_for_responses_model(&swe_grep).unwrap(),
+        ResponsesRoute::WindsurfChat {
+            upstream_model: "swe-grep-mini".to_string()
         }
     );
 }

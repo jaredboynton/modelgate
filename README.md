@@ -39,12 +39,16 @@ secret or best-effort provider.
 | Codex | GPT/Codex aliases such as `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.3-codex` | ChatGPT Codex OAuth from `~/.codex/auth.json`; Responses over HTTP or WSS |
 | Google | Gemini aliases such as `gemini-3.1-flash-lite`, `gemini-3.1-pro-preview`, and image-capable Gemini IDs | `gemini.api_key` in `~/.ump/auth.json` or `GOOGLE_API_KEY`; GenerateContent plus Responses bridge |
 | Cursor | `composer-1.5`, `composer-2`, `composer-2-fast`, plus live usable-model discovery when credentials work | Cursor AgentService over h2/Connect; auth from `CURSOR_ACCESS_TOKEN`, system secret store, or `<UMP_V2_AUTH_HOME>/.cursor/auth.json` |
-| Windsurf | `swe-1.6-fast`, `swe-1.6`, `swe-1.5-fast`, and `adaptive` | Windsurf Cloud Connect/proto chat transport; auth from `windsurf.api_key` in `~/.ump/auth.json`, `<UMP_V2_AUTH_HOME>/windsurf/auth.json`, `~/.windsurf/auth.json`, or `WINDSURF_API_KEY` |
+| Windsurf | `swe-grep-mini`, `swe-grep`, `swe-1.6-fast`, `swe-1.6`, `swe-1.5-fast`, and `adaptive` | Windsurf Cloud Connect/proto chat transport; auth from `windsurf.api_key` in `~/.ump/auth.json`, `<UMP_V2_AUTH_HOME>/windsurf/auth.json`, `~/.windsurf/auth.json`, or `WINDSURF_API_KEY` |
 
 The canonical static allowlist lives in `src/model_alias.rs`; `/v1/models` also
 includes hot-route models and any live Cursor models discovered at request time.
 `/api/provider/openai/v1/models` fetches the live Codex model catalog through
-Codex OAuth.
+Codex OAuth, so non-Codex rows such as Cursor Composer and Windsurf Fast Context
+models only appear on the aggregate `/v1/models` facade. If a client does not
+show `swe-grep-mini` or `swe-grep`, check that its base URL is
+`http://127.0.0.1:18743/v1` and that the running daemon includes this catalog
+update.
 
 ## Run Locally
 
@@ -105,8 +109,8 @@ amp -x "say hi"
 ```
 
 Select models using ModelGate model IDs, for example `claude-sonnet-4-6` for Bedrock,
-`gpt-5.5` for Codex/ChatGPT OAuth, `gemini-3.1-flash-lite` for Google, or
-`composer-2-fast` for Cursor, or `swe-1.6` for Windsurf.
+`gpt-5.5` for Codex/ChatGPT OAuth, `gemini-3.1-flash-lite` for Google,
+`composer-2-fast` for Cursor, or `swe-grep-mini` / `swe-1.6` for Windsurf.
 
 ### Factory Droid
 

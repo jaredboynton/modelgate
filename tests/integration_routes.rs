@@ -574,7 +574,22 @@ async fn integration_routes_models_route_returns_stable_known_models() {
     assert!(ids.contains(&"claude-sonnet-4-6-max"));
     assert!(ids.contains(&"gemini-3.1-pro-preview"));
     assert!(ids.contains(&"openai:gpt-5.5"));
+    assert!(ids.contains(&"swe-grep-mini"));
+    assert!(ids.contains(&"swe-grep"));
     assert!(ids.contains(&"gpt-image-2"));
+
+    for windsurf_id in ["swe-grep-mini", "swe-grep", "swe-1.6-fast"] {
+        let row = body["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|model| model["id"] == windsurf_id)
+            .unwrap_or_else(|| panic!("Windsurf row {windsurf_id} not present"));
+        assert_eq!(
+            row["owned_by"], "windsurf",
+            "Windsurf row {windsurf_id} owned_by should be windsurf",
+        );
+    }
 
     // Composer rows added in Phase 1: `/v1/models` lists Cursor models with
     // `owned_by: "cursor"` so downstream clients can distinguish provider.
@@ -628,10 +643,17 @@ async fn integration_routes_openai_provider_models_does_not_expose_cursor_rows()
                     .collect()
             })
             .unwrap_or_default();
-        for composer_id in ["composer-1.5", "composer-2", "composer-2-fast"] {
+        for non_codex_id in [
+            "composer-1.5",
+            "composer-2",
+            "composer-2-fast",
+            "swe-grep-mini",
+            "swe-grep",
+            "swe-1.6-fast",
+        ] {
             assert!(
-                !ids.contains(&composer_id),
-                "/api/provider/openai/v1/models leaked Composer row {composer_id}",
+                !ids.contains(&non_codex_id),
+                "/api/provider/openai/v1/models leaked non-Codex row {non_codex_id}",
             );
         }
     }

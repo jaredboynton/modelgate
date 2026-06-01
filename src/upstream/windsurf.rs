@@ -8,8 +8,13 @@ use uuid::Uuid;
 
 use crate::{
     auth,
+    upstream::connect::{extend_message, extend_string, extend_varint_field},
     upstream_response::{collect_specter_body, specter_body_stream},
     AppError, AppResult, AppState,
+};
+
+pub use crate::upstream::connect::{
+    connect_envelope, encode_message, encode_string, encode_varint_field,
 };
 
 pub const WINDSURF_PROVIDER: &str = "windsurf";
@@ -214,6 +219,22 @@ pub fn build_get_chat_message_request(
     version: &str,
     upstream_model: &str,
 ) -> AppResult<Vec<u8>> {
+    build_get_chat_message_request_with_uuids(
+        request,
+        api_key,
+        version,
+        upstream_model,
+        &RandomUuids,
+    )
+}
+
+pub(crate) fn build_get_chat_message_request_with_uuids(
+    request: &Value,
+    api_key: &str,
+    version: &str,
+    upstream_model: &str,
+    uuids: &dyn UuidSource,
+) -> AppResult<Vec<u8>> {
     let object = request
         .as_object()
         .ok_or_else(|| AppError::BadRequest("request body must be a JSON object".into()))?;
@@ -223,7 +244,7 @@ pub fn build_get_chat_message_request(
         .ok_or_else(|| AppError::BadRequest("messages must be an array".into()))?;
 
     let mut out = Vec::with_capacity(512);
-    let metadata = build_metadata(api_key, version);
+    let metadata = build_metadata(api_key, version, uuids);
     extend_message(&mut out, 1, &metadata);
 
     let mut prompt_count = 0;
@@ -237,7 +258,7 @@ pub fn build_get_chat_message_request(
         if prompt_text.is_empty() && !has_assistant_tool_calls {
             continue;
         }
-        let prompt = build_chat_prompt(message);
+        let prompt = build_chat_prompt(message, uuids);
         extend_message(&mut out, 3, &prompt);
         prompt_count += 1;
     }
@@ -264,46 +285,32 @@ pub fn parse_complete_response(bytes: &[u8]) -> AppResult<String> {
     Ok(chunks.join(""))
 }
 
-pub fn connect_envelope(payload: &[u8]) -> Vec<u8> {
-    let mut frame = Vec::with_capacity(payload.len() + 5);
-    frame.push(0);
-    frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-    frame.extend_from_slice(payload);
-    frame
+pub(crate) trait UuidSource {
+    fn new_uuid(&self) -> String;
 }
 
-pub fn encode_string(field_num: u32, value: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(value.len() + 8);
-    extend_string(&mut out, field_num, value);
-    out
+struct RandomUuids;
+
+impl UuidSource for RandomUuids {
+    fn new_uuid(&self) -> String {
+        Uuid::new_v4().to_string()
+    }
 }
 
-pub fn encode_message(field_num: u32, value: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(value.len() + 8);
-    extend_message(&mut out, field_num, value);
-    out
-}
-
-pub fn encode_varint_field(field_num: u32, value: u64) -> Vec<u8> {
-    let mut out = Vec::with_capacity(16);
-    extend_varint_field(&mut out, field_num, value);
-    out
-}
-
-fn build_metadata(api_key: &str, version: &str) -> Vec<u8> {
+fn build_metadata(api_key: &str, version: &str, uuids: &dyn UuidSource) -> Vec<u8> {
     let mut out = Vec::with_capacity(api_key.len() + version.len() * 2 + 96);
     extend_string(&mut out, 3, api_key);
     extend_string(&mut out, 1, "windsurf");
     extend_string(&mut out, 7, version);
     extend_string(&mut out, 2, version);
     extend_string(&mut out, 12, "windsurf");
-    extend_string(&mut out, 10, &Uuid::new_v4().to_string());
+    extend_string(&mut out, 10, &uuids.new_uuid());
     extend_string(&mut out, 4, "en-US");
     extend_string(&mut out, 28, "windsurf");
     out
 }
 
-fn build_chat_prompt(message: &Value) -> Vec<u8> {
+fn build_chat_prompt(message: &Value, uuids: &dyn UuidSource) -> Vec<u8> {
     let role = message
         .get("role")
         .and_then(Value::as_str)
@@ -330,7 +337,7 @@ fn build_chat_prompt(message: &Value) -> Vec<u8> {
     }
 
     let mut out = Vec::with_capacity(prompt.len() + 64);
-    extend_string(&mut out, 1, &Uuid::new_v4().to_string());
+    extend_string(&mut out, 1, &uuids.new_uuid());
     extend_varint_field(&mut out, 2, source_for_role(role));
     extend_string(&mut out, 3, &prompt);
     out
@@ -355,36 +362,6 @@ fn text_content(value: Option<&Value>) -> String {
         }
         _ => String::new(),
     }
-}
-
-fn extend_string(out: &mut Vec<u8>, field_num: u32, value: &str) {
-    let bytes = value.as_bytes();
-    extend_key(out, field_num, 2);
-    extend_varint(out, bytes.len() as u64);
-    out.extend_from_slice(bytes);
-}
-
-fn extend_message(out: &mut Vec<u8>, field_num: u32, value: &[u8]) {
-    extend_key(out, field_num, 2);
-    extend_varint(out, value.len() as u64);
-    out.extend_from_slice(value);
-}
-
-fn extend_varint_field(out: &mut Vec<u8>, field_num: u32, value: u64) {
-    extend_key(out, field_num, 0);
-    extend_varint(out, value);
-}
-
-fn extend_key(out: &mut Vec<u8>, field_num: u32, wire_type: u8) {
-    extend_varint(out, ((field_num << 3) | u32::from(wire_type)) as u64);
-}
-
-fn extend_varint(out: &mut Vec<u8>, mut value: u64) {
-    while value > 127 {
-        out.push(((value & 0x7f) as u8) | 0x80);
-        value >>= 7;
-    }
-    out.push(value as u8);
 }
 
 fn source_for_role(role: &str) -> u64 {
@@ -533,12 +510,26 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test]
-    fn connect_envelope_prefixes_flags_and_big_endian_length() {
-        let frame = connect_envelope(b"abc");
+    struct FixedUuids {
+        values: std::sync::Mutex<std::collections::VecDeque<String>>,
+    }
 
-        assert_eq!(&frame[..5], &[0, 0, 0, 0, 3]);
-        assert_eq!(&frame[5..], b"abc");
+    impl FixedUuids {
+        fn new(values: impl IntoIterator<Item = &'static str>) -> Self {
+            Self {
+                values: std::sync::Mutex::new(values.into_iter().map(str::to_string).collect()),
+            }
+        }
+    }
+
+    impl UuidSource for FixedUuids {
+        fn new_uuid(&self) -> String {
+            self.values
+                .lock()
+                .expect("uuid lock")
+                .pop_front()
+                .expect("fixed uuid")
+        }
     }
 
     #[test]
@@ -573,6 +564,35 @@ mod tests {
         assert!(haystack.contains("ASSISTANT TOOL_CALLS"));
         assert!(haystack.contains("TOOL RESULT call_1: result"));
         assert!(haystack.contains("swe-1-6"));
+    }
+
+    #[test]
+    fn get_chat_message_request_can_use_fixed_uuids_for_parity_tests() {
+        let request = json!({
+            "messages": [
+                { "role": "user", "content": "hello" },
+                { "role": "assistant", "content": "hi" }
+            ]
+        });
+        let uuids = FixedUuids::new([
+            "00000000-0000-0000-0000-000000000001",
+            "00000000-0000-0000-0000-000000000002",
+            "00000000-0000-0000-0000-000000000003",
+        ]);
+
+        let body = build_get_chat_message_request_with_uuids(
+            &request,
+            "fake_windsurf_key",
+            "1.13.104",
+            "swe-1-6-fast",
+            &uuids,
+        )
+        .unwrap();
+        let haystack = String::from_utf8_lossy(&body);
+
+        assert!(haystack.contains("00000000-0000-0000-0000-000000000001"));
+        assert!(haystack.contains("00000000-0000-0000-0000-000000000002"));
+        assert!(haystack.contains("00000000-0000-0000-0000-000000000003"));
     }
 
     #[test]

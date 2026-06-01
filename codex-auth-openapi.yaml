@@ -1,0 +1,2308 @@
+openapi: 3.1.0
+info:
+  title: Codex OAuth Upstream Endpoint Surface
+  version: 0.1.0
+  summary: Upstream endpoints observed with Codex OAuth bearer tokens.
+  description: |
+    This document describes upstream ChatGPT, Codex, and public OpenAI
+    endpoints that Guidewire has evidence for with Codex OAuth bearer tokens.
+    It intentionally excludes local Guidewire loopback routes.
+
+    Operations use Guidewire vendor extensions to distinguish proven support
+    and auth-accepted body validation failures where applicable.
+  x-guidewire-scope: upstream-codex-oauth-only
+  x-guidewire-primary-evidence:
+    - docs/CODEX-TO-RESPONSES-ADAPTER.md
+    - docs/CHATGPT-TO-RESPONSES-ADAPTER.md
+    - docs/gpt-web-evidence/atlas_voice_re_20260515/INDEX.md
+    - fixtures/codex/models-upstream.json
+servers:
+  - url: https://chatgpt.com
+    description: ChatGPT and Codex HTTPS backend surfaces.
+  - url: https://api.openai.com
+    description: Public OpenAI HTTPS surfaces probed with Codex OAuth.
+  - url: wss://chatgpt.com
+    description: ChatGPT and Codex WebSocket surfaces.
+  - url: wss://api.openai.com
+    description: Public OpenAI WebSocket realtime surface.
+security:
+  - codexOAuthBearer: []
+tags:
+  - name: Codex catalog
+    description: Codex model discovery and capability catalog.
+  - name: Codex responses
+    description: Codex backend Responses-style generation and compaction.
+  - name: Codex usage
+    description: Codex backend usage, quota, configuration, and task endpoints.
+  - name: Codex connectors
+    description: Codex connector directory and workspace connector management.
+  - name: Codex plugins
+    description: Codex plugin catalog and curated plugin export.
+  - name: Codex tasks
+    description: Codex cloud task listing and retrieval.
+  - name: Codex files
+    description: Internal Codex file upload and transcription surfaces.
+  - name: Public realtime
+    description: Public OpenAI realtime and audio endpoints tested with Codex OAuth.
+  - name: Public embeddings
+    description: Public OpenAI embeddings endpoints tested with Codex OAuth.
+  - name: ChatGPT product
+    description: ChatGPT product backend surfaces accepted with Codex OAuth.
+paths:
+  /backend-api/models:
+    get:
+      operationId: getChatGptWebModelCatalog
+      tags:
+        - ChatGPT product
+      summary: Fetch the ChatGPT web product model catalog.
+      description: |
+        Returns the ChatGPT web product model picker catalog. These slugs use
+        hyphen form (e.g. `gpt-5-5-pro`) and are accepted by
+        `/backend-api/f/conversation`. The response includes `title`,
+        `secondary_title`, and a `models` array with `slug`, `max_tokens`,
+        `title`, `description`, `tags`, and `capabilities`.
+
+        **Notable absence:** `gpt-5-4-nano` does not appear in this catalog,
+        confirming the observed remap behavior documented in
+        `docs/gpt-5-4-nano-probe.md`.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+      responses:
+        '200':
+          description: ChatGPT web model catalog.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatGptWebModelCatalog'
+              examples:
+                observed:
+                  summary: Observed model IDs from May 2026 validation.
+                  value:
+                    title: ChatGPT
+                    secondary_title: ""
+                    models:
+                      - slug: gpt-5-5-pro
+                        max_tokens: 410000
+                        title: GPT-5.5 Pro
+                        description: Best for complex tasks
+                        tags:
+                          - history_off_approved
+                        capabilities: {}
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - docs/gpt-5-4-nano-probe.md
+        - fixtures/codex/models-web-chatgpt.json
+
+  /backend-api/codex/models:
+    get:
+      operationId: getCodexModelCatalog
+      tags:
+        - Codex catalog
+      summary: Fetch the Codex model catalog.
+      description: |
+        Returns a Codex-specific model catalog, not the public OpenAI
+        `/v1/models` shape. The `client_version` query parameter is required;
+        missing it returned `400 invalid_request_error` in live validation.
+
+        **Response wrapping:** Live probes show the response is wrapped as
+        `{"detail": {"models": [...]}}` rather than a top-level `{"models": [...]}`.
+        Parsers must unwrap the `detail` envelope.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+        - name: client_version
+          in: query
+          required: true
+          description: Codex app or CLI client version used for entitlement-gated catalog selection.
+          schema:
+            type: string
+          examples:
+            appVersion:
+              value: 26.506.31421
+            bundledCli:
+              value: 0.130.0-alpha.5
+      responses:
+        '200':
+          description: Codex model catalog.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodexModelCatalogWrapped'
+              examples:
+                observed:
+                  summary: Observed model IDs from May 2026 validation.
+                  value:
+                    detail:
+                      models:
+                        - slug: gpt-5.5
+                          display_name: GPT-5.5
+                          input_modalities:
+                            - text
+                            - image
+                          default_reasoning_level: xhigh
+                          supported_reasoning_levels:
+                            - effort: low
+                              description: Fast responses with lighter reasoning
+                            - effort: medium
+                              description: Balances speed and reasoning depth for everyday tasks
+                            - effort: high
+                              description: Greater reasoning depth for complex problems
+                            - effort: xhigh
+                              description: Extra high reasoning depth for complex problems
+                          support_verbosity: true
+                          default_verbosity: low
+                          service_tiers:
+                            - id: priority
+                              name: Fast
+                              description: 1.5x speed, increased usage
+                          supports_image_detail_original: true
+                          truncation_policy:
+                            mode: tokens
+                            limit: 10000
+                          supported_in_api: true
+                          visibility: list
+        '400':
+          description: Missing or rejected `client_version`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAIStyleErrorEnvelope'
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - docs/CODEX-TO-RESPONSES-ADAPTER.md#model-discovery-and-selection
+        - docs/CODEX-TO-RESPONSES-ADAPTER.md#live-validation-evidence
+        - sidecar/src/codex/modelCatalogService.ts
+        - fixtures/codex/models-upstream.json
+        - fixtures/codex/models-codex-catalog.json
+      x-guidewire-notes:
+        - Hide `codex-auto-review` from public clients unless an internal caller explicitly includes hidden models.
+        - Apply each model capability from this catalog rather than guessing from model names.
+        - The response is wrapped in a `detail` envelope; unwrap before indexing.
+
+  /backend-api/codex/responses:
+    post:
+      operationId: createCodexResponse
+      tags:
+        - Codex responses
+      summary: Create a Codex backend response over HTTPS/SSE.
+      description: |
+        Creates a Codex backend response using a flat Responses-shaped request.
+        Live validation required `instructions`, list-shaped `input`, and
+        `stream: true`. The backend returned `store: false` and streamed
+        `response.*` events, including encrypted reasoning output when requested.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CodexResponseCreateRequest'
+            examples:
+              text:
+                value:
+                  model: gpt-5.5
+                  instructions: You are a helpful assistant.
+                  input:
+                    - role: user
+                      content:
+                        - type: input_text
+                          text: Reply with OK.
+                  stream: true
+                  store: false
+                  reasoning:
+                    effort: medium
+                    summary: auto
+                  include:
+                    - reasoning.encrypted_content
+              compactionTrigger:
+                value:
+                  model: gpt-5.5
+                  instructions: You are a helpful assistant.
+                  input:
+                    - type: compaction_trigger
+                  stream: true
+                  store: false
+      responses:
+        '200':
+          description: SSE stream containing Responses-style events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                textDelta:
+                  value: |
+                    data: {"type":"response.output_text.delta","delta":"OK"}
+
+                    data: {"type":"response.completed","response":{"store":false}}
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodexResponseObject'
+        '400':
+          description: Invalid request shape, including unsupported compaction item aliases.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAIStyleErrorEnvelope'
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - docs/CODEX-TO-RESPONSES-ADAPTER.md#live-validation-evidence
+        - sidecar/src/codex/responsesClient.ts
+        - sidecar/src/codex/websocketClient.ts
+      x-guidewire-notes:
+        - The live compaction request item is `compaction_trigger`, not `context_compaction`.
+        - Public retrieve semantics for `store: false` responses must be adapter-owned.
+
+    get:
+      operationId: connectCodexResponsesWebSocket
+      tags:
+        - Codex responses
+      summary: Connect to Codex Responses WebSocket.
+      description: |
+        WebSocket connection to the Codex responses backend. Clients send a
+        `response.create` envelope after the WebSocket opens and receive JSON
+        `response.*` event frames.
+      servers:
+        - url: wss://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+        - name: OpenAI-Beta
+          in: header
+          required: true
+          description: Required Codex Responses WebSocket beta header.
+          schema:
+            type: string
+            const: responses_websockets=2026-02-06
+        - name: originator
+          in: header
+          required: true
+          schema:
+            type: string
+            example: guidewire
+        - name: x-client-request-id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: session_id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '101':
+          description: WebSocket upgrade accepted.
+        '401':
+          description: Missing or invalid Codex OAuth bearer.
+        '429':
+          description: Rate limited by Codex backend.
+      x-guidewire-protocol: websocket
+      x-guidewire-websocket-client-message:
+        $ref: '#/components/schemas/CodexResponsesWebSocketCreateMessage'
+      x-guidewire-websocket-server-message:
+        $ref: '#/components/schemas/ResponseStreamEvent'
+      x-guidewire-disposition: implemented
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - sidecar/src/codex/responsesClient.ts
+        - sidecar/src/codex/websocketClient.ts
+
+  /backend-api/codex/responses/compact:
+    post:
+      operationId: compactCodexResponseContext
+      tags:
+        - Codex responses
+      summary: Compact Codex response context.
+      description: |
+        Forwards a compaction request to the Codex backend. Live validation
+        returned preserved user messages plus a `compaction_summary` item with
+        encrypted content. Adapter storage should canonicalize that item to
+        `compaction` before replay.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CodexCompactRequest'
+      responses:
+        '200':
+          description: Compacted message list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodexCompactResponse'
+        '400':
+          description: Invalid compaction request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAIStyleErrorEnvelope'
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - docs/CODEX-TO-RESPONSES-ADAPTER.md#live-validation-evidence
+
+  /v1/realtime:
+    get:
+      operationId: connectPublicRealtimeWebSocketWithCodexOAuth
+      tags:
+        - Public realtime
+      summary: Connect to public Realtime WebSocket with Codex OAuth.
+      description: |
+        Text-only public Realtime WebSocket route accepted Codex OAuth for
+        `gpt-realtime-2` in live validation. GA session fields are required;
+        old beta fields and invalid top-level models were rejected.
+      servers:
+        - url: wss://api.openai.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - name: model
+          in: query
+          required: true
+          schema:
+            type: string
+            enum:
+              - gpt-realtime-2
+              - gpt-realtime
+          description: Realtime session model. Do not use STT or TTS model IDs as top-level session models.
+      responses:
+        '101':
+          description: WebSocket upgrade accepted.
+        '400':
+          description: Invalid session model or request field shape.
+      x-guidewire-protocol: websocket
+      x-guidewire-disposition: auth-accepted
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-diarization: not-supported
+      x-guidewire-diarization-notes: |
+        The GA realtime session schema exposes no per-speaker attribution. User
+        audio items are tagged `role: "user"` and segmented by server VAD only;
+        no `speaker_id`, `participant`, `diarization`, or acoustic-fingerprint
+        keys appear on any `oai-events` event. Verified end-to-end on the
+        sibling WebRTC route `/v1/realtime/calls`; this WebSocket route shares
+        the same session schema family.
+
+        2026-05-19 WebSocket probe: `session.update` with
+        `session.audio.input.transcription.model=gpt-4o-transcribe-diarize`
+        was rejected with `invalid_parameter` and the misleading message
+        `"Your organization does not have access to this transcription
+        model."`. The same model on REST `/v1/audio/transcriptions` returned
+        `200` for the same Codex OAuth bearer, proving the gate is the
+        Realtime route, not the bearer or the org. The dormant
+        `conversation.item.input_audio_transcription.segment.speaker` field
+        on openai-python Realtime types confirms backend plumbing exists
+        but is not enabled. Diarization belongs on REST today.
+      x-guidewire-rejected-transcription-models:
+        - model: gpt-4o-transcribe-diarize
+          status: 400
+          code: invalid_parameter
+          message: Your organization does not have access to this transcription model.
+        - model: gpt-4o-mini-transcribe-diarize
+          status: 400
+          code: invalid_value
+          message: Model not in Realtime transcription allowlist.
+      x-guidewire-realtime-transcription-allowlist:
+        - whisper-1
+        - gpt-realtime-whisper
+        - gpt-4o-transcribe
+        - gpt-4o-mini-transcribe
+        - gpt-4o-mini-transcribe-2025-03-20
+        - gpt-4o-mini-transcribe-2025-12-15
+      x-guidewire-websocket-client-message:
+        oneOf:
+          - $ref: '#/components/schemas/RealtimeSessionUpdateEvent'
+          - $ref: '#/components/schemas/RealtimeConversationItemCreateEvent'
+          - $ref: '#/components/schemas/RealtimeResponseCreateEvent'
+      x-guidewire-websocket-server-message:
+        $ref: '#/components/schemas/RealtimeServerEvent'
+      x-guidewire-rejected-variants:
+        - model: gpt-realtime-whisper
+          reason: STT model must be nested under realtime transcription config.
+        - model: gpt-4o-mini-tts
+          reason: TTS model is not a realtime session model.
+      x-guidewire-evidence:
+        - docs/CODEX-TO-RESPONSES-ADAPTER.md#live-validation-evidence
+
+  /v1/realtime/calls:
+    post:
+      operationId: createRealtimeWebRtcCallWithCodexOAuth
+      tags:
+        - Public realtime
+      summary: Create a public Realtime WebRTC call.
+      description: |
+        Proven working with Codex OAuth for
+        `gpt-4o-realtime-preview-2024-12-17` using `Content-Type:
+        application/sdp` and a raw SDP offer. A minimal invalid SDP body for
+        `gpt-realtime` returned `400 invalid_offer`, proving auth reached body
+        validation.
+      servers:
+        - url: https://api.openai.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - name: model
+          in: query
+          required: true
+          schema:
+            type: string
+            examples:
+              - gpt-4o-realtime-preview-2024-12-17
+              - gpt-realtime
+      requestBody:
+        required: true
+        content:
+          application/sdp:
+            schema:
+              type: string
+              description: Raw SDP offer body.
+      responses:
+        '201':
+          description: SDP answer.
+          content:
+            application/sdp:
+              schema:
+                type: string
+        '400':
+          description: Invalid SDP offer after auth acceptance.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAIStyleErrorEnvelope'
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-diarization: not-supported
+      x-guidewire-diarization-notes: |
+        Codex OAuth on `gpt-realtime-2`: `session.update` is accepted with
+        GA `session.audio.input.transcription`/`turn_detection` nesting.
+        All user-audio items arrive tagged `role: "user"` with no
+        `speaker_id` / `participant` / `diarization` keys, including when
+        two acoustically distinct voices share a single VAD turn. Reproduce
+        with `cargo run -p guidewire-openai --example realtime_console`.
+
+        2026-05-19 probe of `gpt-4o-transcribe-diarize` on this route's
+        sibling WebSocket session is rejected with `invalid_parameter`
+        and the misleading message `"Your organization does not have access
+        to this transcription model."`. The block is route-shaped, not
+        org-shaped: the same bearer succeeds on REST
+        `/v1/audio/transcriptions` for the same model. Use REST for
+        diarization with this Codex OAuth bearer until OpenAI ships
+        diarize on Realtime.
+      x-guidewire-session-update-shape:
+        type: session.update
+        session:
+          type: realtime
+          audio:
+            input:
+              transcription:
+                model: gpt-4o-mini-transcribe
+              turn_detection:
+                type: server_vad
+      x-guidewire-evidence:
+        - docs/CHATGPT-TO-RESPONSES-ADAPTER.md#webrtc-via-apiopenaicomv1realtimecalls--proven-working-may-2026
+        - docs/CODEX-TO-RESPONSES-ADAPTER.md#live-validation-evidence
+        - crates/guidewire-openai/examples/realtime_console.rs
+        - crates/guidewire-openai/src/realtime_console.rs
+
+  /v1/realtime/client_secrets:
+    post:
+      operationId: createRealtimeTranscriptionSessionWithCodexOAuth
+      tags:
+        - Public realtime
+      summary: Create a GA public realtime transcription client secret.
+      description: |
+        Codex OAuth is accepted for GA realtime transcription session creation
+        through the client-secrets route with `session.type: transcription`.
+        A fresh 2026-05-19 probe showed the older
+        `/v1/realtime/transcription_sessions` beta route now returns
+        `beta_api_shape_disabled`, so adapters must use this GA route.
+      servers:
+        - url: https://api.openai.com
+      security:
+        - codexOAuthBearer: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RealtimeTranscriptionSessionRequest'
+            examples:
+              observed:
+                value:
+                  session:
+                    type: transcription
+                    audio:
+                      input:
+                        format:
+                          type: audio/pcm
+                          rate: 24000
+                        transcription:
+                          model: gpt-realtime-whisper
+                        turn_detection: null
+      responses:
+        '200':
+          description: Realtime transcription session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RealtimeTranscriptionSession'
+      x-guidewire-disposition: auth-accepted
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-diarization: not-supported
+      x-guidewire-diarization-notes: |
+        2026-05-19 probe: minting a `client_secret` with
+        `session.audio.input.transcription.model=gpt-4o-transcribe-diarize`
+        returned `400 invalid_parameter` with the misleading message
+        `"Your organization does not have access to this transcription
+        model."`. The legacy beta `/v1/realtime/transcription_sessions`
+        route returned the same error and an additional
+        `beta_api_shape_disabled` close on the WebSocket. REST
+        `/v1/audio/transcriptions` accepts the same model with the same
+        bearer; treat diarization as a REST-only surface in this adapter.
+      x-guidewire-evidence:
+        - docs/CODEX-TO-RESPONSES-ADAPTER.md#live-validation-evidence
+
+  /v1/audio/transcriptions:
+    post:
+      operationId: createAudioTranscriptionWithCodexOAuth
+      tags:
+        - Public realtime
+      summary: Create a public audio transcription.
+      description: |
+        Codex OAuth is positively proven on this REST route, including the
+        diarization-capable `gpt-4o-transcribe-diarize` model. Live probe on
+        2026-05-19 with a valid 24kHz mono WAV returned `200` for
+        `gpt-4o-transcribe`, `gpt-4o-transcribe-diarize`,
+        `gpt-4o-transcribe-diarize` with `response_format=diarized_json`
+        (returning `{text, segments[]}`), and the same model with
+        `stream=true` (SSE `transcript.text.delta`,
+        `transcript.text.segment`, `transcript.text.done`,
+        `[DONE]`). The `transcript.text.segment` SSE event carries
+        `speaker`, `start`, `end`, `text`, `id`, and is only emitted when
+        `response_format=diarized_json` and `stream=true`.
+
+        This REST surface is the only proven path for diarization with this
+        Codex OAuth bearer; see the negative receipts on `/v1/realtime`,
+        `/v1/realtime/calls`, and `/v1/realtime/client_secrets` below.
+      servers:
+        - url: https://api.openai.com
+      security:
+        - codexOAuthBearer: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - model
+              properties:
+                file:
+                  type: string
+                  format: binary
+                model:
+                  type: string
+                  description: |
+                    Transcription model. Diarization requires
+                    `gpt-4o-transcribe-diarize` and `response_format=diarized_json`.
+                  enum:
+                    - whisper-1
+                    - gpt-4o-transcribe
+                    - gpt-4o-mini-transcribe
+                    - gpt-4o-transcribe-diarize
+                  example: gpt-4o-transcribe-diarize
+                response_format:
+                  type: string
+                  enum:
+                    - json
+                    - text
+                    - srt
+                    - verbose_json
+                    - vtt
+                    - diarized_json
+                  description: |
+                    Use `diarized_json` with `gpt-4o-transcribe-diarize` to receive
+                    speaker-tagged segments. Required for `stream=true` segment
+                    speaker events.
+                stream:
+                  type: boolean
+                  description: |
+                    SSE streaming. With `gpt-4o-transcribe-diarize` +
+                    `response_format=diarized_json`, server emits
+                    `transcript.text.delta`, `transcript.text.segment`
+                    (carrying `speaker`), and `transcript.text.done` events
+                    terminated by `data: [DONE]`.
+                known_speaker_names:
+                  type: array
+                  description: |
+                    Optional stable speaker labels paired index-wise with
+                    `known_speaker_references`. Returned `speaker` values fall
+                    back to `A`, `B`, `C` when unset.
+                  items:
+                    type: string
+                known_speaker_references:
+                  type: array
+                  description: |
+                    Optional base64-encoded reference audio clips used as
+                    voiceprints for `known_speaker_names` matching.
+                  items:
+                    type: string
+                    format: byte
+      responses:
+        '200':
+          description: Successful transcription response. Shape depends on `response_format`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioTranscription'
+              examples:
+                diarizedJson:
+                  summary: 2026-05-19 probe shape (sine WAV; segments empty when no speech).
+                  value:
+                    text: ""
+                    segments: []
+                    usage:
+                      type: tokens
+                      total_tokens: 71
+                      input_tokens: 10
+                      output_tokens: 61
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                streamingDiarize:
+                  summary: 2026-05-19 SSE on `gpt-4o-transcribe-diarize`.
+                  value: |
+                    data: {"type":"transcript.text.done","text":"","usage":{"type":"tokens","total_tokens":83}}
+
+                    data: [DONE]
+        '400':
+          description: Body validation rejected the upload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAIStyleErrorEnvelope'
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-diarization: rest-only
+      x-guidewire-diarization-notes: |
+        REST `/v1/audio/transcriptions` is the only proven diarization surface
+        with this Codex OAuth bearer. `gpt-4o-transcribe-diarize` is rejected
+        by every Realtime route with `invalid_parameter` and the misleading
+        message `"Your organization does not have access to this transcription
+        model."`; cross-account research (openai-python SDK enums advertise
+        the model on Realtime, the server still rejects) shows the gate is
+        global, not org-specific. Realtime allowlist enumerated by the server
+        on 2026-05-19 was `whisper-1`, `gpt-realtime-whisper`,
+        `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`,
+        `gpt-4o-mini-transcribe-2025-03-20`, and
+        `gpt-4o-mini-transcribe-2025-12-15` — diarize not listed.
+      x-guidewire-streaming-events:
+        - transcript.text.delta
+        - transcript.text.segment
+        - transcript.text.done
+      x-guidewire-segment-event-fields:
+        - id
+        - start
+        - end
+        - text
+        - speaker
+      x-guidewire-evidence:
+        - docs/CODEX-TO-RESPONSES-ADAPTER.md#live-validation-evidence
+        - docs/CHATGPT-TO-RESPONSES-ADAPTER.md#public-audio-and-realtime-apis
+        - 2026-05-19 live probe artifacts (sidecar smoke transcript)
+
+  /v1/embeddings:
+    post:
+      operationId: createEmbeddingWithCodexOAuth
+      tags:
+        - Public embeddings
+      summary: Create embeddings with Codex OAuth on selected embedding models.
+      description: |
+        Public OpenAI embeddings are not a Codex backend Responses surface and
+        are not discoverable through the Codex model catalog. A 2026-05-19
+        live probe showed the Codex OAuth bearer is accepted by
+        `POST https://api.openai.com/v1/embeddings` for
+        `text-embedding-3-small` and `text-embedding-3-large`.
+
+        Negative probes from the same pass: `text-embedding-ada-002` returned
+        `401` missing `model.request`; `gpt-5.4-mini` returned `403` because
+        embeddings are not allowed from that model; and `GET /v1/models`
+        returned `403` missing `api.model.read`.
+      servers:
+        - url: https://api.openai.com
+      security:
+        - codexOAuthBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmbeddingCreateRequest'
+            examples:
+              small:
+                value:
+                  model: text-embedding-3-small
+                  input: hello
+              large:
+                value:
+                  model: text-embedding-3-large
+                  input: hello
+      responses:
+        '200':
+          description: Embedding vector response for accepted embedding models.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingCreateResponse'
+              examples:
+                smallObserved:
+                  summary: "`text-embedding-3-small` probe result shape."
+                  value:
+                    object: list
+                    data:
+                      - object: embedding
+                        index: 0
+                        embedding:
+                          - 0.0
+                    model: text-embedding-3-small
+                    usage:
+                      prompt_tokens: 1
+                      total_tokens: 1
+                largeObserved:
+                  summary: "`text-embedding-3-large` probe result shape."
+                  value:
+                    object: list
+                    data:
+                      - object: embedding
+                        index: 0
+                        embedding:
+                          - 0.0
+                    model: text-embedding-3-large
+                    usage:
+                      prompt_tokens: 1
+                      total_tokens: 1
+        '401':
+          description: "Missing scope for some embedding models, observed on `text-embedding-ada-002`."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAIStyleErrorEnvelope'
+        '403':
+          description: Model not allowed for embeddings or missing model-list scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAIStyleErrorEnvelope'
+      x-guidewire-disposition: partially-proven
+      x-guidewire-auth-scope-result: accepted-for-selected-models
+      x-guidewire-observed-models:
+        - model: text-embedding-3-small
+          status: 200
+          dimensions: 1536
+        - model: text-embedding-3-large
+          status: 200
+          dimensions: 3072
+      x-guidewire-rejected-variants:
+        - model: text-embedding-ada-002
+          status: 401
+          reason: "Missing `model.request` scope."
+        - model: gpt-5.4-mini
+          status: 403
+          reason: Embeddings are not allowed from this model.
+        - route: GET /v1/models
+          status: 403
+          reason: "Missing `api.model.read` scope; embedding models cannot be discovered through the public model list with this bearer."
+      x-guidewire-notes:
+        - Keep embeddings on explicit public `/v1/embeddings` routing.
+        - Do not validate embedding model IDs against the Codex model catalog.
+        - Do not pass embedding model IDs to `/backend-api/codex/responses`.
+      x-guidewire-evidence:
+        - docs/CODEX-TO-RESPONSES-ADAPTER.md#public-embeddings-auth-probes
+
+  /backend-api/f/conversation/prepare:
+    post:
+      operationId: prepareChatGptConversationWithCodexOAuth
+      tags:
+        - ChatGPT product
+      summary: Prepare a ChatGPT web conversation turn.
+      description: |
+        ChatGPT web product admission route accepted Codex OAuth in the
+        documented end-to-end conversation flow. For Pro models, a successful
+        response may include `conduit_token: null`; continue the flow and omit
+        the `x-conduit-token` header.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: ChatGPT conversation preparation result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  conduit_token:
+                    type:
+                      - string
+                      - 'null'
+                additionalProperties: true
+      x-guidewire-disposition: auth-accepted
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - docs/CHATGPT-TO-RESPONSES-ADAPTER.md
+        - docs/CODEX-TO-RESPONSES-ADAPTER.md#live-validation-evidence
+
+  /backend-api/sentinel/chat-requirements/prepare:
+    post:
+      operationId: prepareChatGptSentinelWithCodexOAuth
+      tags:
+        - ChatGPT product
+      summary: Prepare ChatGPT Sentinel requirements.
+      description: Part of the accepted ChatGPT web conversation admission chain.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Sentinel requirements response.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+      x-guidewire-disposition: auth-accepted
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - docs/CHATGPT-TO-RESPONSES-ADAPTER.md
+
+  /backend-api/sentinel/chat-requirements/finalize:
+    post:
+      operationId: finalizeChatGptSentinelWithCodexOAuth
+      tags:
+        - ChatGPT product
+      summary: Finalize ChatGPT Sentinel requirements.
+      description: Part of the accepted ChatGPT web conversation admission chain.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Sentinel finalize response.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+      x-guidewire-disposition: auth-accepted
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - docs/CHATGPT-TO-RESPONSES-ADAPTER.md
+
+  /backend-api/f/conversation:
+    post:
+      operationId: createChatGptConversationTurnWithCodexOAuth
+      tags:
+        - ChatGPT product
+      summary: Create a ChatGPT web conversation turn.
+      description: |
+        ChatGPT web conversation route accepted Codex OAuth as part of the
+        product flow. This route is a ChatGPT product protocol, not public
+        `/v1/responses`.
+
+        **Model remapping behavior observed:**
+        Some model slugs (e.g. `gpt-5-4-nano`) are accepted in the request body
+        and reflected in `model_slug` / `default_model_slug` metadata, but the
+        backend silently remaps inference to a different model. Check
+        `resolved_model_slug` in the `server_ste_metadata` SSE event and the
+        assistant message metadata to determine the actual model serving the
+        turn. Pro models such as `gpt-5-5-pro` resolve to themselves without
+        remapping. See `docs/gpt-5-4-nano-probe.md` for probe evidence.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: ChatGPT product stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+      x-guidewire-disposition: auth-accepted
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - docs/CHATGPT-TO-RESPONSES-ADAPTER.md
+        - docs/CODEX-TO-RESPONSES-ADAPTER.md#live-validation-evidence
+
+  /backend-api/celsius/ws/user:
+    get:
+      operationId: getCelsiusWebSocketBootstrapWithCodexOAuth
+      tags:
+        - ChatGPT product
+      summary: Fetch ChatGPT Celsius WebSocket bootstrap metadata.
+      description: |
+        Returns signed ChatGPT Celsius WebSocket bootstrap metadata. This is a
+        passive ChatGPT product stream handoff, not public Realtime.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      responses:
+        '200':
+          description: Celsius WebSocket bootstrap metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    format: uri
+                additionalProperties: true
+      x-guidewire-disposition: auth-accepted
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - docs/CHATGPT-TO-RESPONSES-ADAPTER.md
+        - docs/CODEX-TO-RESPONSES-ADAPTER.md#live-validation-evidence
+
+  /realtime/vp:
+    post:
+      operationId: createChatGptVoicePeerWithCodexOAuth
+      tags:
+        - ChatGPT product
+      summary: Create a ChatGPT web voice peer connection.
+      description: |
+        Proven with Codex OAuth through the ChatGPT web voice route. Production
+        evidence uses browser-compatible transport and multipart text fields
+        `sdp` and `session`; do not move production POSTs off the proven
+        browser/Specter transport without fresh validation.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - name: dcid
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 0
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - sdp
+                - session
+              properties:
+                sdp:
+                  type: string
+                  description: Atlas-shaped SDP offer.
+                session:
+                  type: string
+                  description: JSON-encoded ChatGPT web voice session payload.
+      responses:
+        '201':
+          description: SDP answer returned by ChatGPT voice peer endpoint.
+          content:
+            application/sdp:
+              schema:
+                type: string
+            text/plain:
+              schema:
+                type: string
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-diarization: not-supported
+      x-guidewire-diarization-notes: |
+        VP shares the GA realtime session schema family with `/v1/realtime` and
+        `/v1/realtime/calls`. None of those surfaces emit per-speaker attribution
+        on `oai-events`. VP additionally cannot be observed end-to-end from
+        non-Atlas Codex-OAuth clients because ICE admission is gated at the
+        HTTP-admission layer per `docs/gpt-web-evidence/atlas_voice_re_20260515/network.md`
+        sections 3 and 7. The sibling `/v1/realtime/calls` route is therefore the
+        practical proof surface for diarization claims, and its result transfers.
+      x-guidewire-evidence:
+        - docs/CHATGPT-TO-RESPONSES-ADAPTER.md#webrtc-via-apiopenaicomv1realtimecalls--proven-working-may-2026
+        - docs/gpt-web-evidence/atlas_voice_re_20260515/INDEX.md
+        - crates/guidewire-openai/examples/realtime_console.rs
+        - crates/guidewire-openai/src/realtime_console.rs
+
+  /backend-api/codex/usage:
+    get:
+      operationId: getCodexUsage
+      tags:
+        - Codex usage
+      summary: Fetch Codex usage and quota.
+      description: |
+        Returns user account usage, plan type, credits, rate limits, and spend
+        control status. Proven with Codex OAuth bearer in 2026-05-24 live probe.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+      responses:
+        '200':
+          description: Codex usage object.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodexUsage'
+        '401':
+          description: Missing or invalid Codex OAuth bearer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAIStyleErrorEnvelope'
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - 2026-05-24 live probe
+
+  /backend-api/wham/usage:
+    get:
+      operationId: getWhamUsage
+      tags:
+        - Codex usage
+      summary: Fetch WHAM usage and quota.
+      description: |
+        Alias for `/backend-api/codex/usage` using the WHAM path style. Returns
+        identical shape. Proven with Codex OAuth bearer in 2026-05-24 live probe.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+      responses:
+        '200':
+          description: WHAM usage object.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodexUsage'
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - 2026-05-24 live probe
+
+  /backend-api/wham/tasks/list:
+    get:
+      operationId: listWhamTasks
+      tags:
+        - Codex tasks
+      summary: List Codex cloud tasks.
+      description: |
+        Returns a paginated list of Codex cloud tasks with items and cursor.
+        Proven with Codex OAuth bearer in 2026-05-24 live probe; returned empty
+        items for the probed account.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+      responses:
+        '200':
+          description: Task list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodexTaskList'
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - 2026-05-24 live probe
+
+  /backend-api/connectors/directory/list:
+    get:
+      operationId: listConnectorDirectory
+      tags:
+        - Codex connectors
+      summary: List public connector directory.
+      description: |
+        Returns the public connector/app catalog with logos, descriptions, and
+        status fields. Requires `api.connectors.read` scope. Proven with Codex
+        OAuth bearer in 2026-05-24 live probe.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+        - name: external_logos
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Connector directory.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorDirectory'
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - 2026-05-24 live probe
+
+  /backend-api/connectors/directory/list_workspace:
+    get:
+      operationId: listWorkspaceConnectorDirectory
+      tags:
+        - Codex connectors
+      summary: List workspace connector directory.
+      description: |
+        Returns workspace-scoped connectors with install/enable status. Proven
+        with Codex OAuth bearer in 2026-05-24 live probe.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+        - name: external_logos
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Workspace connector directory.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorDirectory'
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - 2026-05-24 live probe
+
+  /backend-api/plugins/list:
+    get:
+      operationId: listPlugins
+      tags:
+        - Codex plugins
+      summary: List available plugins.
+      description: |
+        Returns an array of plugin metadata with id, name, marketplace_name,
+        version, and enabled status. Proven with Codex OAuth bearer in
+        2026-05-24 live probe.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+      responses:
+        '200':
+          description: Plugin list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PluginItem'
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - 2026-05-24 live probe
+
+  /backend-api/plugins/featured:
+    get:
+      operationId: listFeaturedPlugins
+      tags:
+        - Codex plugins
+      summary: List featured plugin IDs.
+      description: |
+        Returns an array of featured plugin identifiers in `name@marketplace`
+        format. Proven with Codex OAuth bearer in 2026-05-24 live probe.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+      responses:
+        '200':
+          description: Featured plugin IDs.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  example: github@openai-curated
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - 2026-05-24 live probe
+
+  /backend-api/plugins/export/curated:
+    get:
+      operationId: exportCuratedPlugins
+      tags:
+        - Codex plugins
+      summary: Export curated plugin bundle.
+      description: |
+        Returns a signed download URL for the curated plugin bundle. Proven
+        with Codex OAuth bearer in 2026-05-24 live probe.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+      responses:
+        '200':
+          description: Curated plugin export URL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginCuratedExport'
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - 2026-05-24 live probe
+
+  /backend-api/codex/config/requirements:
+    get:
+      operationId: getCodexConfigRequirements
+      tags:
+        - Codex usage
+      summary: Fetch Codex configuration requirements.
+      description: |
+        Returns custom configuration requirements metadata. Proven with Codex
+        OAuth bearer in 2026-05-24 live probe.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+      responses:
+        '200':
+          description: Config requirements.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodexConfigRequirements'
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - 2026-05-24 live probe
+
+  /backend-api/wham/config/requirements:
+    get:
+      operationId: getWhamConfigRequirements
+      tags:
+        - Codex usage
+      summary: Fetch WHAM configuration requirements.
+      description: |
+        Alias for `/backend-api/codex/config/requirements` using WHAM path style.
+        Proven with Codex OAuth bearer in 2026-05-24 live probe.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+      responses:
+        '200':
+          description: Config requirements.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodexConfigRequirements'
+      x-guidewire-disposition: proven
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - 2026-05-24 live probe
+
+  /backend-api/files:
+    post:
+      operationId: createCodexFile
+      tags:
+        - Codex files
+      summary: Create an internal Codex file upload.
+      description: |
+        Internal ChatGPT-backend file upload path used by Codex App. Returns
+        422 body-validation when required fields are missing; auth is accepted.
+        Distinct from public `/v1/files`. Proven with Codex OAuth bearer in
+        2026-05-24 live probe.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CodexFileCreateRequest'
+      responses:
+        '200':
+          description: File created.
+        '422':
+          description: Missing required fields (e.g. file_name, use_case).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAIStyleErrorEnvelope'
+      x-guidewire-disposition: auth-accepted
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - 2026-05-24 live probe
+
+  /backend-api/transcribe:
+    post:
+      operationId: createCodexTranscription
+      tags:
+        - Codex files
+      summary: Transcribe audio for Codex.
+      description: |
+        Codex Desktop dictation/audio transcription endpoint. Auth is accepted;
+        a null/invalid file body returns 500 ASR error. Proven with Codex OAuth
+        bearer in 2026-05-24 live probe.
+      servers:
+        - url: https://chatgpt.com
+      security:
+        - codexOAuthBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ChatGPTAccountId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                model:
+                  type: string
+                  example: whisper-1
+      responses:
+        '200':
+          description: Transcription result.
+        '500':
+          description: ASR processing error for invalid audio bodies.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAIStyleErrorEnvelope'
+      x-guidewire-disposition: auth-accepted
+      x-guidewire-auth-scope-result: accepted
+      x-guidewire-evidence:
+        - 2026-05-24 live probe
+
+components:
+  securitySchemes:
+    codexOAuthBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: Codex OAuth access token
+      description: Codex OAuth bearer token from the Codex/ChatGPT auth flow.
+  parameters:
+    ChatGPTAccountId:
+      name: ChatGPT-Account-Id
+      in: header
+      required: false
+      description: Optional ChatGPT account selector header used by Codex/ChatGPT backend surfaces.
+      schema:
+        type: string
+  schemas:
+    OpenAIStyleErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            message:
+              type: string
+            type:
+              type: string
+            param:
+              type:
+                - string
+                - 'null'
+            code:
+              type:
+                - string
+                - 'null'
+          additionalProperties: true
+      additionalProperties: true
+
+    ChatGptWebModelCatalog:
+      type: object
+      description: ChatGPT web product model picker catalog.
+      properties:
+        title:
+          type: string
+        secondary_title:
+          type: string
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatGptWebCatalogModel'
+      required:
+        - title
+        - models
+
+    ChatGptWebCatalogModel:
+      type: object
+      description: ChatGPT web product model catalog row.
+      properties:
+        slug:
+          type: string
+          description: Web-facing model slug using hyphen form (e.g. gpt-5-5-pro).
+        max_tokens:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        capabilities:
+          type: object
+          additionalProperties: true
+        product_features:
+          type: object
+          additionalProperties: true
+      required:
+        - slug
+        - title
+
+    CodexModelCatalogWrapped:
+      type: object
+      description: Codex model catalog response wrapper observed in live probes.
+      properties:
+        detail:
+          $ref: '#/components/schemas/CodexModelCatalog'
+      required:
+        - detail
+
+    CodexModelCatalog:
+      type: object
+      properties:
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodexCatalogModel'
+      additionalProperties: true
+      required:
+        - models
+
+    CodexCatalogModel:
+      type: object
+      description: Codex-specific model catalog row.
+      properties:
+        slug:
+          type: string
+          description: Stable Codex model ID.
+        id:
+          type: string
+          description: Alternate model ID key accepted by Guidewire parsers.
+        display_name:
+          type: string
+        description:
+          type: string
+        prefer_websockets:
+          type: boolean
+        support_verbosity:
+          type: boolean
+        default_verbosity:
+          type: string
+          enum:
+            - low
+            - medium
+            - high
+        input_modalities:
+          type: array
+          items:
+            type: string
+            enum:
+              - text
+              - image
+        supports_image_detail_original:
+          type: boolean
+        truncation_policy:
+          $ref: '#/components/schemas/CodexTruncationPolicy'
+        supports_parallel_tool_calls:
+          type: boolean
+        context_window:
+          type: integer
+        max_context_window:
+          type: integer
+        auto_compact_token_limit:
+          type:
+            - integer
+            - 'null'
+        reasoning_summary_format:
+          type: string
+        default_reasoning_summary:
+          type: string
+        default_reasoning_level:
+          type: string
+        supported_reasoning_levels:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodexReasoningLevel'
+        shell_type:
+          type: string
+        visibility:
+          type: string
+          enum:
+            - list
+            - hidden
+        minimal_client_version:
+          type: string
+        supported_in_api:
+          type: boolean
+        supports_search_tool:
+          type: boolean
+        service_tiers:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodexServiceTier'
+        additional_speed_tiers:
+          type: array
+          items:
+            type: string
+        supports_reasoning_summaries:
+          type: boolean
+        upgrade:
+          type:
+            - object
+            - 'null'
+          additionalProperties: true
+        priority:
+          type: integer
+      additionalProperties: true
+
+    CodexReasoningLevel:
+      type: object
+      properties:
+        effort:
+          type: string
+          enum:
+            - minimal
+            - low
+            - medium
+            - high
+            - xhigh
+        description:
+          type: string
+      additionalProperties: true
+
+    CodexTruncationPolicy:
+      type: object
+      properties:
+        mode:
+          type: string
+          example: tokens
+        limit:
+          type: integer
+      additionalProperties: true
+
+    CodexServiceTier:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+      additionalProperties: true
+
+    CodexResponseCreateRequest:
+      type: object
+      required:
+        - model
+        - instructions
+        - input
+        - stream
+      properties:
+        model:
+          type: string
+          example: gpt-5.5
+        instructions:
+          type: string
+        input:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/ResponseInputMessage'
+              - $ref: '#/components/schemas/CompactionTriggerItem'
+              - $ref: '#/components/schemas/CompactionItem'
+        stream:
+          type: boolean
+          const: true
+        store:
+          type: boolean
+          default: false
+        reasoning:
+          $ref: '#/components/schemas/ReasoningConfig'
+        include:
+          type: array
+          items:
+            type: string
+          example:
+            - reasoning.encrypted_content
+        tools:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        tool_choice:
+          description: Tool choice object or string, if tools are supplied.
+        metadata:
+          type: object
+          additionalProperties:
+            type:
+              - string
+              - number
+              - boolean
+              - 'null'
+      additionalProperties: true
+
+    CodexResponsesWebSocketCreateMessage:
+      allOf:
+        - $ref: '#/components/schemas/CodexResponseCreateRequest'
+        - type: object
+          required:
+            - type
+          properties:
+            type:
+              type: string
+              const: response.create
+      x-guidewire-notes:
+        - Codex Responses WebSocket is stricter than HTTP for top-level request fields.
+        - Live probes on 2026-05-21 accepted `client_metadata`, `prompt_cache_key`, `reasoning`, `include`, and `tool_choice`, but rejected top-level `metadata`, `originator`, `chatMode`, `temperature`, and arbitrary unknown keys with `400 invalid_request_error`.
+        - Keep session/thread metadata in `client_metadata` or headers, not top-level `metadata` or `originator`.
+
+    ResponseInputMessage:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum:
+            - user
+            - assistant
+            - system
+            - developer
+        content:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/InputTextContent'
+              - $ref: '#/components/schemas/InputImageContent'
+      additionalProperties: true
+
+    InputTextContent:
+      type: object
+      required:
+        - type
+        - text
+      properties:
+        type:
+          type: string
+          const: input_text
+        text:
+          type: string
+      additionalProperties: true
+
+    InputImageContent:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: input_image
+        image_url:
+          type: string
+        detail:
+          type: string
+          enum:
+            - low
+            - high
+            - auto
+            - original
+      additionalProperties: true
+
+    CompactionTriggerItem:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: compaction_trigger
+      additionalProperties: true
+
+    CompactionItem:
+      type: object
+      required:
+        - type
+        - encrypted_content
+      properties:
+        type:
+          type: string
+          enum:
+            - compaction
+            - compaction_summary
+        encrypted_content:
+          type: string
+      additionalProperties: true
+
+    ReasoningConfig:
+      type: object
+      properties:
+        effort:
+          type: string
+          enum:
+            - minimal
+            - low
+            - medium
+            - high
+            - xhigh
+        summary:
+          type: string
+          enum:
+            - auto
+            - none
+            - concise
+            - detailed
+      additionalProperties: true
+
+    CodexResponseObject:
+      type: object
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+        model:
+          type: string
+        store:
+          type: boolean
+        output:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      additionalProperties: true
+
+    ResponseStreamEvent:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          examples:
+            - response.created
+            - response.output_text.delta
+            - response.output_text.done
+            - response.output_item.done
+            - response.completed
+            - response.done
+            - response.failed
+        response:
+          $ref: '#/components/schemas/CodexResponseObject'
+        delta:
+          type: string
+        item:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+
+    CodexCompactRequest:
+      type: object
+      required:
+        - model
+        - input
+      properties:
+        model:
+          type: string
+          example: gpt-5.5
+        input:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/ResponseInputMessage'
+              - $ref: '#/components/schemas/CompactionItem'
+        instructions:
+          type: string
+        tools:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        reasoning:
+          $ref: '#/components/schemas/ReasoningConfig'
+        prompt_cache_key:
+          type: string
+        prompt_cache_retention:
+          type: string
+      additionalProperties: true
+
+    CodexCompactResponse:
+      type: object
+      properties:
+        input:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/ResponseInputMessage'
+              - $ref: '#/components/schemas/CompactionItem'
+        output:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/ResponseInputMessage'
+              - $ref: '#/components/schemas/CompactionItem'
+      additionalProperties: true
+
+    RealtimeSessionUpdateEvent:
+      type: object
+      required:
+        - type
+        - session
+      properties:
+        type:
+          type: string
+          const: session.update
+        session:
+          type: object
+          properties:
+            type:
+              type: string
+              example: realtime
+            output_modalities:
+              type: array
+              items:
+                type: string
+                enum:
+                  - text
+                  - audio
+            audio:
+              type: object
+              additionalProperties: true
+          additionalProperties: true
+      additionalProperties: true
+
+    RealtimeConversationItemCreateEvent:
+      type: object
+      required:
+        - type
+        - item
+      properties:
+        type:
+          type: string
+          const: conversation.item.create
+        item:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+
+    RealtimeResponseCreateEvent:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: response.create
+        response:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+
+    RealtimeServerEvent:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          examples:
+            - response.output_text.delta
+            - response.output_text.done
+            - response.done
+            - input_audio_buffer.speech_started
+            - input_audio_buffer.speech_stopped
+            - conversation.item.input_audio_transcription.delta
+            - conversation.item.input_audio_transcription.completed
+        delta:
+          type: string
+        response:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+
+    RealtimeTranscriptionSessionRequest:
+      type: object
+      properties:
+        session:
+          type: object
+          required:
+            - type
+          properties:
+            type:
+              type: string
+              const: transcription
+            audio:
+              type: object
+              additionalProperties: true
+          additionalProperties: true
+      additionalProperties: true
+
+    RealtimeTranscriptionSession:
+      type: object
+      properties:
+        object:
+          type: string
+          example: realtime.transcription_session
+        id:
+          type: string
+        client_secret:
+          type: object
+          additionalProperties: true
+        session:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+
+    AudioTranscription:
+      type: object
+      properties:
+        text:
+          type: string
+      additionalProperties: true
+
+    EmbeddingCreateRequest:
+      type: object
+      required:
+        - model
+        - input
+      properties:
+        model:
+          type: string
+          enum:
+            - text-embedding-3-small
+            - text-embedding-3-large
+            - text-embedding-ada-002
+          description: |
+            Only `text-embedding-3-small` and `text-embedding-3-large` are
+            positively proven with Codex OAuth in current evidence.
+        input:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+            - type: array
+              items:
+                type: integer
+            - type: array
+              items:
+                type: array
+                items:
+                  type: integer
+        dimensions:
+          type: integer
+          description: Optional public embeddings API dimension override when supported by the selected model.
+        encoding_format:
+          type: string
+          enum:
+            - float
+            - base64
+        user:
+          type: string
+      additionalProperties: true
+
+    EmbeddingCreateResponse:
+      type: object
+      properties:
+        object:
+          type: string
+          example: list
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmbeddingObject'
+        model:
+          type: string
+        usage:
+          $ref: '#/components/schemas/EmbeddingUsage'
+      additionalProperties: true
+
+    EmbeddingObject:
+      type: object
+      properties:
+        object:
+          type: string
+          example: embedding
+        embedding:
+          type: array
+          items:
+            type: number
+            format: float
+        index:
+          type: integer
+      additionalProperties: true
+
+    EmbeddingUsage:
+      type: object
+      properties:
+        prompt_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+      additionalProperties: true
+
+    CodexUsage:
+      type: object
+      properties:
+        user_id:
+          type: string
+        account_id:
+          type: string
+        email:
+          type: string
+        plan_type:
+          type: string
+          example: business
+        rate_limit:
+          type: object
+          nullable: true
+        code_review_rate_limit:
+          type: object
+          nullable: true
+        additional_rate_limits:
+          type: object
+          nullable: true
+        credits:
+          type: object
+          properties:
+            has_credits:
+              type: boolean
+            unlimited:
+              type: boolean
+            overage_limit_reached:
+              type: boolean
+            balance:
+              type: string
+              nullable: true
+            approx_local_messages:
+              type: string
+              nullable: true
+            approx_cloud_messages:
+              type: string
+              nullable: true
+        spend_control:
+          type: object
+          properties:
+            reached:
+              type: boolean
+            individual_limit:
+              type: string
+              nullable: true
+        rate_limit_reached_type:
+          type: string
+          nullable: true
+        promo:
+          type: object
+          nullable: true
+        referral_beacon:
+          type: object
+          nullable: true
+        rate_limit_reset_credits:
+          type: object
+          properties:
+            available_count:
+              type: integer
+
+    CodexTaskList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+        cursor:
+          type: string
+          nullable: true
+
+    ConnectorDirectory:
+      type: object
+      properties:
+        apps:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorApp'
+
+    ConnectorApp:
+      type: object
+      properties:
+        id:
+          type: string
+          example: connector_251970f16cb647d4b76fc445753f9276
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          example: DISABLED_BY_ADMIN
+        connector_type:
+          type: string
+          example: SERVICE
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        logo_url:
+          type: string
+        icon_assets:
+          type: object
+        icon_dark_assets:
+          type: object
+      additionalProperties: true
+
+    PluginItem:
+      type: object
+      properties:
+        id:
+          type: string
+          example: Plugin_e43c38a361308191946213022b038a21
+        name:
+          type: string
+        marketplace_name:
+          type: string
+          example: openai-curated
+        version:
+          type: string
+        enabled:
+          type: boolean
+
+    PluginCuratedExport:
+      type: object
+      properties:
+        download_url:
+          type: string
+          format: uri
+
+    CodexConfigRequirements:
+      type: object
+      properties:
+        contents:
+          type: object
+          nullable: true
+        sha256:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          nullable: true
+        updated_by_user_id:
+          type: string
+          nullable: true
+
+    CodexFileCreateRequest:
+      type: object
+      required:
+        - file_name
+        - use_case
+      properties:
+        file_name:
+          type: string
+        use_case:
+          type: string

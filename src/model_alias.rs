@@ -272,6 +272,30 @@ pub const KNOWN_MODELS: &[KnownModel] = &[
         accepts_dated_snapshots: false,
     },
     KnownModel {
+        id: "anthropic/claude-opus-4-8",
+        provider: Provider::Bedrock,
+        upstream_model: "global.anthropic.claude-opus-4-8",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "claude-opus-4-8",
+        provider: Provider::Bedrock,
+        upstream_model: "global.anthropic.claude-opus-4-8",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "anthropic/claude-opus-4-8-max",
+        provider: Provider::Bedrock,
+        upstream_model: "global.anthropic.claude-opus-4-8",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "claude-opus-4-8-max",
+        provider: Provider::Bedrock,
+        upstream_model: "global.anthropic.claude-opus-4-8",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
         id: "openai:gpt-5.5",
         provider: Provider::Codex,
         upstream_model: "gpt-5.5",
@@ -461,6 +485,30 @@ pub const KNOWN_MODELS: &[KnownModel] = &[
         id: "windsurf/swe-1.5-fast",
         provider: Provider::Windsurf,
         upstream_model: "swe-1-5",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "swe-grep-mini",
+        provider: Provider::Windsurf,
+        upstream_model: "swe-grep-mini",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "windsurf/swe-grep-mini",
+        provider: Provider::Windsurf,
+        upstream_model: "swe-grep-mini",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "swe-grep",
+        provider: Provider::Windsurf,
+        upstream_model: "swe-grep",
+        accepts_dated_snapshots: false,
+    },
+    KnownModel {
+        id: "windsurf/swe-grep",
+        provider: Provider::Windsurf,
+        upstream_model: "swe-grep",
         accepts_dated_snapshots: false,
     },
     KnownModel {

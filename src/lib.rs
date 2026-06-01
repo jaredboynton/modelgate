@@ -9,6 +9,8 @@ pub mod config_graph;
 pub mod cursor_agent;
 pub mod error;
 pub mod failure_capture;
+#[cfg(feature = "mcp")]
+pub mod fast_context;
 pub mod hot_config;
 pub mod model_alias;
 pub mod rate_limit;

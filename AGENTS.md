@@ -50,6 +50,11 @@ Route layer parse/validate request shape, enforce provider/model fit, call relev
 | Launchd/local service setup | `launchd/`, `README.md` |
 | Validation and distribution gates | `docs/guides/local-validation.md`, `docs/guides/distribution-readiness.md`, `scripts/gc/run-all.sh`, `.githooks/pre-commit` |
 | Multi-agent coordination | `.harness/coordination/board.md`, `.harness/tasks/README.md`, `.harness/routing/tasks.yaml` |
+| Model benchmark notes | `MODEL-BENCHMARKS.md` |
+
+## Model Notes
+
+- Cerebras `gpt-oss-120b` is available via `CEREBRAS_API_KEY` and is billed through AWS at $0.35/1M input tokens and $0.75/1M output tokens. Use `reasoning_effort = "low"` for classification/JSONL workloads to avoid burning the output budget on reasoning tokens.
 
 ## Coding Conventions
 

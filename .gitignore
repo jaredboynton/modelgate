@@ -18,6 +18,7 @@
 /.live-harness/
 /live-captures/
 /live-validation/
+/docs/windsurf/captures/
 *.har
 *.pcap
 *.pcapng

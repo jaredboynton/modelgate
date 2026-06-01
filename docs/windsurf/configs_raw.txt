@@ -1,0 +1,8583 @@
+1 {
+  1: "Claude Opus 4.7 Medium"
+  3: 0x42200000
+  5: 1
+  10: 3
+  11: 1
+  13: 1
+  18: 1000000
+  22: "claude-opus-4-7-medium"
+  23 {
+    3: 2
+    4: 1000000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-7-medium"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-opus-4.7"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.7"
+    2 {
+      1: "Effort"
+      2 {
+        1: 1
+        2: "Medium"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+    3: 1
+  }
+  31: 1
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41c80000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Gemini 3.5 Flash Medium"
+  3: 0x41000000
+  5: 1
+  10: 4
+  11: 1
+  13: 1
+  15: 1
+  18: 1048576
+  22: "gemini-3-5-flash-medium"
+  23 {
+    3: 2
+    4: 1048576
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 65535
+    17: "gemini-3-5-flash-medium"
+    18: "https://server.codeium.com"
+    20: "gemini-3-pro"
+    23: "gemini-3.5-flash"
+  }
+  24: 2
+  30 {
+    1: "Gemini 3.5 Flash"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 2
+        2: "Medium"
+      }
+    }
+    3: 1
+  }
+  31: 1
+  32 {
+    1: "Input"
+    2: 0x3fc00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e19999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41100000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Claude Opus 4.6 Thinking"
+  3: 0x41000000
+  5: 1
+  10: 3
+  11: 1
+  13: 1
+  18: 200000
+  22: "claude-opus-4-6-thinking"
+  23 {
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-6-thinking"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    21 {
+      2: 0x428c999a
+    }
+    23: "claude-opus-4.6"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.6"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+    3: 1
+  }
+  31: 1
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41c80000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.5 Low Thinking"
+  3: 0x41400000
+  5: 1
+  10: 2
+  11: 1
+  13: 1
+  18: 272000
+  22: "gpt-5-5-low"
+  23 {
+    3: 2
+    4: 272000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "gpt-5-5-low"
+    18: "https://server.codeium.com"
+    20: "gpt-5p4"
+    20: "gpt-5"
+    21 {
+      2: 0x447a0000
+    }
+    23: "gpt-5.5"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.5"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 1
+        2: "Low"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2 {
+        1: 1
+        2: "24h"
+      }
+    }
+    3: 1
+  }
+  31: 1
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41f00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Claude Sonnet 4.6 Thinking"
+  3: 0x40c00000
+  5: 1
+  10: 3
+  11: 1
+  13: 1
+  18: 200000
+  22: "claude-sonnet-4-6-thinking"
+  23 {
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-sonnet-4-6-thinking"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-sonnet-4.6"
+  }
+  24: 3
+  30 {
+    1: "Claude Sonnet 4.6"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+    3: 1
+  }
+  31: 1
+  32 {
+    1: "Input"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e99999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41700000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Kimi K2.6"
+  5: 1
+  10: 7
+  11: 1
+  13: 1
+  18: 262144
+  19 {
+    1: 1
+    2 {
+      1: 1780646400
+    }
+  }
+  22: "kimi-k2-6"
+  23 {
+    3: 2
+    4: 262144
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      24: 1
+    }
+    13: 8192
+    17: "kimi-k2-6"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    21 {
+      2: 0x43390000
+    }
+    23: "kimi-k2.6"
+  }
+  24: 1
+  30 {
+    1: "Kimi K2.6"
+  }
+}
+1 {
+  1: "SWE-1.6"
+  3: 0x3f000000
+  5: 1
+  10: 1
+  11: 1
+  13: 1
+  18: 200000
+  20: 1
+  22: "swe-1-6"
+  23 {
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      20: 1
+      21: 1
+      24: 1
+      25: 1
+    }
+    13: 128000
+    17: "swe-1-6"
+    18: "https://server.codeium.com"
+    20: "swe-1p6"
+    20: "swe-1p5"
+    23: "swe-1.6"
+  }
+  24: 4
+  30 {
+    1: "SWE-1.6"
+    2 {
+      1: "Speed"
+      2: ""
+    }
+  }
+}
+1 {
+  1: "SWE-1.6 Fast"
+  3: 0x3f000000
+  5: 1
+  10: 1
+  11: 1
+  13: 1
+  18: 200000
+  20: 1
+  22: "swe-1-6-fast"
+  23 {
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      20: 1
+      21: 1
+      24: 1
+      25: 1
+    }
+    13: 128000
+    17: "swe-1-6-fast"
+    18: "https://server.codeium.com"
+    20: "swe-1p6"
+    20: "swe-1p5"
+    21 {
+      2: 0x44670000
+    }
+    23: "swe-1.6-fast"
+  }
+  24: 1
+  30 {
+    1: "SWE-1.6 Fast"
+    2 {
+      1: "Speed"
+      2 {
+        1: 1
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3e99999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3cf5c28f
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x3fc00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Claude Opus 4.7 Low"
+  3: 0x41a00000
+  5: 1
+  10: 3
+  13: 1
+  18: 1000000
+  22: "claude-opus-4-7-low"
+  23 {
+    3: 2
+    4: 1000000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-7-low"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-opus-4.7"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.7"
+    2 {
+      1: "Effort"
+      2 {
+        2: "Low"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41c80000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Claude Opus 4.7 High"
+  3: 0x42700000
+  5: 1
+  10: 3
+  13: 1
+  18: 1000000
+  22: "claude-opus-4-7-high"
+  23 {
+    3: 2
+    4: 1000000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-7-high"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-opus-4.7"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.7"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41c80000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Claude Opus 4.7 XHigh"
+  3: 0x42820000
+  5: 1
+  10: 3
+  13: 1
+  18: 1000000
+  22: "claude-opus-4-7-xhigh"
+  23 {
+    3: 2
+    4: 1000000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-7-xhigh"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-opus-4.7"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.7"
+    2 {
+      1: "Effort"
+      2 {
+        1: 3
+        2: "XHigh"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41c80000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Claude Opus 4.7 Max"
+  3: 0x42960000
+  5: 1
+  10: 3
+  13: 1
+  18: 1000000
+  22: "claude-opus-4-7-max"
+  23 {
+    3: 2
+    4: 1000000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-7-max"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-opus-4.7"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.7"
+    2 {
+      1: "Effort"
+      2 {
+        1: 4
+        2: "Max"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41c80000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Claude Opus 4.7 Low Fast"
+  3: 0x42f00000
+  5: 1
+  10: 3
+  13: 1
+  18: 1000000
+  22: "claude-opus-4-7-low-fast"
+  23 {
+    3: 2
+    4: 1000000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-7-low-fast"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-opus-4.7"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.7"
+    2 {
+      1: "Effort"
+      2 {
+        2: "Low"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x41f00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x43160000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Claude Opus 4.7 Medium Fast"
+  3: 0x43700000
+  5: 1
+  10: 3
+  13: 1
+  18: 1000000
+  22: "claude-opus-4-7-medium-fast"
+  23 {
+    3: 2
+    4: 1000000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-7-medium-fast"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-opus-4.7"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.7"
+    2 {
+      1: "Effort"
+      2 {
+        1: 1
+        2: "Medium"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x41f00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x43160000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Claude Opus 4.7 High Fast"
+  3: 0x43b40000
+  5: 1
+  10: 3
+  13: 1
+  18: 1000000
+  22: "claude-opus-4-7-high-fast"
+  23 {
+    3: 2
+    4: 1000000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-7-high-fast"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-opus-4.7"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.7"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x41f00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x43160000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Claude Opus 4.7 XHigh Fast"
+  3: 0x43c30000
+  5: 1
+  10: 3
+  13: 1
+  18: 1000000
+  22: "claude-opus-4-7-xhigh-fast"
+  23 {
+    3: 2
+    4: 1000000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-7-xhigh-fast"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-opus-4.7"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.7"
+    2 {
+      1: "Effort"
+      2 {
+        1: 3
+        2: "XHigh"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x41f00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x43160000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Claude Opus 4.7 Max Fast"
+  3: 0x43e10000
+  5: 1
+  10: 3
+  13: 1
+  18: 1000000
+  22: "claude-opus-4-7-max-fast"
+  23 {
+    3: 2
+    4: 1000000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-7-max-fast"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-opus-4.7"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.7"
+    2 {
+      1: "Effort"
+      2 {
+        1: 4
+        2: "Max"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x41f00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x43160000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Gemini 3.5 Flash Minimal"
+  3: 0x40000000
+  5: 1
+  10: 4
+  13: 1
+  15: 1
+  18: 1048576
+  22: "gemini-3-5-flash-minimal"
+  23 {
+    3: 2
+    4: 1048576
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 65535
+    17: "gemini-3-5-flash-minimal"
+    18: "https://server.codeium.com"
+    20: "gemini-3-pro"
+    23: "gemini-3.5-flash"
+  }
+  24: 2
+  30 {
+    1: "Gemini 3.5 Flash"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        2: "Minimal"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fc00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e19999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41100000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Gemini 3.5 Flash Low"
+  3: 0x40800000
+  5: 1
+  10: 4
+  13: 1
+  15: 1
+  18: 1048576
+  22: "gemini-3-5-flash-low"
+  23 {
+    3: 2
+    4: 1048576
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 65535
+    17: "gemini-3-5-flash-low"
+    18: "https://server.codeium.com"
+    20: "gemini-3-pro"
+    23: "gemini-3.5-flash"
+  }
+  24: 2
+  30 {
+    1: "Gemini 3.5 Flash"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 1
+        2: "Low"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fc00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e19999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41100000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Gemini 3.5 Flash High"
+  3: 0x41100000
+  5: 1
+  10: 4
+  13: 1
+  15: 1
+  18: 1048576
+  22: "gemini-3-5-flash-high"
+  23 {
+    3: 2
+    4: 1048576
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 65535
+    17: "gemini-3-5-flash-high"
+    18: "https://server.codeium.com"
+    20: "gemini-3-pro"
+    23: "gemini-3.5-flash"
+  }
+  24: 2
+  30 {
+    1: "Gemini 3.5 Flash"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 3
+        2: "High"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fc00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e19999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41100000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Claude Opus 4.6"
+  3: 0x40c00000
+  5: 1
+  10: 3
+  13: 1
+  18: 200000
+  22: "claude-opus-4-6"
+  23 {
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-6"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    21 {
+      2: 0x42890000
+    }
+    23: "claude-opus-4.6"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.6"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2: ""
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41c80000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Claude Opus 4.6 1M"
+  3: 0x41200000
+  5: 1
+  10: 3
+  13: 1
+  18: 1000000
+  22: "claude-opus-4-6-1m"
+  23 {
+    3: 2
+    4: 1000000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-6-1m"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-opus-4.6"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.6"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2: ""
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2 {
+        1: 1
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41c80000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Claude Opus 4.6 Thinking 1M"
+  3: 0x41400000
+  5: 1
+  10: 3
+  13: 1
+  18: 1000000
+  22: "claude-opus-4-6-thinking-1m"
+  23 {
+    3: 2
+    4: 1000000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-6-thinking-1m"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-opus-4.6"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.6"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2 {
+        1: 1
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41c80000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Claude Opus 4.6 Fast"
+  3: 0x41c00000
+  5: 1
+  10: 3
+  13: 1
+  18: 200000
+  22: "claude-opus-4-6-fast"
+  23 {
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-6-fast"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-opus-4.6"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.6"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2: ""
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x41f00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x43160000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Claude Opus 4.6 Thinking Fast"
+  3: 0x41f00000
+  5: 1
+  10: 3
+  13: 1
+  18: 200000
+  22: "claude-opus-4-6-thinking-fast"
+  23 {
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-opus-4-6-thinking-fast"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    21 {
+      2: 0x428c999a
+    }
+    23: "claude-opus-4.6"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.6"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x41f00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x43160000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.5 No Thinking"
+  3: 0x41100000
+  5: 1
+  10: 2
+  13: 1
+  18: 272000
+  22: "gpt-5-5-none"
+  23 {
+    3: 2
+    4: 272000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "gpt-5-5-none"
+    18: "https://server.codeium.com"
+    20: "gpt-5p4"
+    20: "gpt-5"
+    23: "gpt-5.5"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.5"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        2: "None"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2 {
+        1: 1
+        2: "24h"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41f00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.5 Medium Thinking"
+  3: 0x41700000
+  5: 1
+  10: 2
+  13: 1
+  18: 272000
+  22: "gpt-5-5-medium"
+  23 {
+    3: 2
+    4: 272000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "gpt-5-5-medium"
+    18: "https://server.codeium.com"
+    20: "gpt-5p4"
+    20: "gpt-5"
+    23: "gpt-5.5"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.5"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 2
+        2: "Medium"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2 {
+        1: 1
+        2: "24h"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41f00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.5 High Thinking"
+  3: 0x41c00000
+  5: 1
+  10: 2
+  13: 1
+  18: 272000
+  22: "gpt-5-5-high"
+  23 {
+    3: 2
+    4: 272000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "gpt-5-5-high"
+    18: "https://server.codeium.com"
+    20: "gpt-5p4"
+    20: "gpt-5"
+    23: "gpt-5.5"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.5"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 3
+        2: "High"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2 {
+        1: 1
+        2: "24h"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41f00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.5 XHigh Thinking"
+  3: 0x42100000
+  5: 1
+  10: 2
+  13: 1
+  18: 272000
+  22: "gpt-5-5-xhigh"
+  23 {
+    3: 2
+    4: 272000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "gpt-5-5-xhigh"
+    18: "https://server.codeium.com"
+    20: "gpt-5p4"
+    20: "gpt-5"
+    23: "gpt-5.5"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.5"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 4
+        2: "XHigh"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2 {
+        1: 1
+        2: "24h"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41f00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.5 No Thinking Fast"
+  3: 0x41b40000
+  5: 1
+  10: 2
+  13: 1
+  18: 272000
+  22: "gpt-5-5-none-priority"
+  23 {
+    3: 2
+    4: 272000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "gpt-5-5-none-priority"
+    18: "https://server.codeium.com"
+    20: "gpt-5p4"
+    20: "gpt-5"
+    23: "gpt-5.5"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.5"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        2: "None"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2 {
+        1: 1
+        2: "24h"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x41480000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x42960000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.5 Low Thinking Fast"
+  3: 0x41f00000
+  5: 1
+  10: 2
+  13: 1
+  18: 272000
+  22: "gpt-5-5-low-priority"
+  23 {
+    3: 2
+    4: 272000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "gpt-5-5-low-priority"
+    18: "https://server.codeium.com"
+    20: "gpt-5p4"
+    20: "gpt-5"
+    23: "gpt-5.5"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.5"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 1
+        2: "Low"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2 {
+        1: 1
+        2: "24h"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x41480000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x42960000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.5 Medium Thinking Fast"
+  3: 0x42160000
+  5: 1
+  10: 2
+  13: 1
+  18: 272000
+  22: "gpt-5-5-medium-priority"
+  23 {
+    3: 2
+    4: 272000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "gpt-5-5-medium-priority"
+    18: "https://server.codeium.com"
+    20: "gpt-5p4"
+    20: "gpt-5"
+    23: "gpt-5.5"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.5"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 2
+        2: "Medium"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2 {
+        1: 1
+        2: "24h"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x41480000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x42960000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.5 High Thinking Fast"
+  3: 0x42700000
+  5: 1
+  10: 2
+  13: 1
+  18: 272000
+  22: "gpt-5-5-high-priority"
+  23 {
+    3: 2
+    4: 272000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "gpt-5-5-high-priority"
+    18: "https://server.codeium.com"
+    20: "gpt-5p4"
+    20: "gpt-5"
+    23: "gpt-5.5"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.5"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 3
+        2: "High"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2 {
+        1: 1
+        2: "24h"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x41480000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x42960000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.5 XHigh Thinking Fast"
+  3: 0x42b40000
+  5: 1
+  10: 2
+  13: 1
+  18: 272000
+  22: "gpt-5-5-xhigh-priority"
+  23 {
+    3: 2
+    4: 272000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "gpt-5-5-xhigh-priority"
+    18: "https://server.codeium.com"
+    20: "gpt-5p4"
+    20: "gpt-5"
+    23: "gpt-5.5"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.5"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 4
+        2: "XHigh"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2 {
+        1: 1
+        2: "24h"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x41480000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x42960000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.4 Mini Low Thinking"
+  3: 0x3fc00000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "gpt-5-4-mini-low"
+  23 {
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "gpt-5-4-mini-low"
+    18: "https://server.codeium.com"
+    20: "gpt-5p4"
+    23: "gpt-5.4-mini"
+  }
+  24: 1
+  30 {
+    1: "GPT-5.4 Mini"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 1
+        2: "Low"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3f400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3d99999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x40900000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.4 Mini Medium Thinking"
+  3: 0x3fc00000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "gpt-5-4-mini-medium"
+  23 {
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "gpt-5-4-mini-medium"
+    18: "https://server.codeium.com"
+    20: "gpt-5p4"
+    23: "gpt-5.4-mini"
+  }
+  24: 1
+  30 {
+    1: "GPT-5.4 Mini"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 2
+        2: "Medium"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3f400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3d99999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x40900000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.4 Mini High Thinking"
+  3: 0x40900000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "gpt-5-4-mini-high"
+  23 {
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "gpt-5-4-mini-high"
+    18: "https://server.codeium.com"
+    20: "gpt-5p4"
+    23: "gpt-5.4-mini"
+  }
+  24: 1
+  30 {
+    1: "GPT-5.4 Mini"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 3
+        2: "High"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3f400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3d99999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x40900000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.4 Mini XHigh Thinking"
+  3: 0x41400000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "gpt-5-4-mini-xhigh"
+  23 {
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "gpt-5-4-mini-xhigh"
+    18: "https://server.codeium.com"
+    20: "gpt-5p4"
+    23: "gpt-5.4-mini"
+  }
+  24: 1
+  30 {
+    1: "GPT-5.4 Mini"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 4
+        2: "XHigh"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3f400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3d99999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x40900000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Claude Sonnet 4.6"
+  3: 0x40800000
+  5: 1
+  10: 3
+  13: 1
+  18: 200000
+  22: "claude-sonnet-4-6"
+  23 {
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-sonnet-4-6"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-sonnet-4.6"
+  }
+  24: 3
+  30 {
+    1: "Claude Sonnet 4.6"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2: ""
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e99999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41700000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Claude Sonnet 4.6 1M"
+  3: 0x41400000
+  5: 1
+  10: 3
+  13: 1
+  18: 1000000
+  22: "claude-sonnet-4-6-1m"
+  23 {
+    3: 2
+    4: 1000000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-sonnet-4-6-1m"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-sonnet-4.6"
+  }
+  24: 3
+  30 {
+    1: "Claude Sonnet 4.6"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2: ""
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2 {
+        1: 1
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e99999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41700000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Claude Sonnet 4.6 Thinking 1M"
+  3: 0x41800000
+  5: 1
+  10: 3
+  13: 1
+  18: 1000000
+  22: "claude-sonnet-4-6-thinking-1m"
+  23 {
+    3: 2
+    4: 1000000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "claude-sonnet-4-6-thinking-1m"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    23: "claude-sonnet-4.6"
+  }
+  24: 3
+  30 {
+    1: "Claude Sonnet 4.6"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2 {
+        1: 1
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e99999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41700000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.2 Low Thinking"
+  2 {
+    1: 400
+  }
+  3: 0x3f800000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_GPT_5_2_LOW"
+  23 {
+    1: 400
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_LOW"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x429c6666
+    }
+    23: "gpt-5.2"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.2"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 1
+        2: "Low"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fe00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e333333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.2 Medium Thinking"
+  2 {
+    1: 401
+  }
+  3: 0x40000000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_GPT_5_2_MEDIUM"
+  23 {
+    1: 401
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_MEDIUM"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x429bcccd
+    }
+    23: "gpt-5.2"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.2"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 2
+        2: "Medium"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fe00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e333333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.2 Low Thinking Fast"
+  2 {
+    1: 405
+  }
+  3: 0x40000000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_GPT_5_2_LOW_PRIORITY"
+  23 {
+    1: 405
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_LOW_PRIORITY"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42f00000
+    }
+    23: "gpt-5.2"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.2"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 1
+        2: "Low"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3eb33333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41e00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.2 Medium Thinking Fast"
+  2 {
+    1: 406
+  }
+  3: 0x40800000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_GPT_5_2_MEDIUM_PRIORITY"
+  23 {
+    1: 406
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_MEDIUM_PRIORITY"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42e60000
+    }
+    23: "gpt-5.2"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.2"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 2
+        2: "Medium"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3eb33333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41e00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Claude Opus 4.5"
+  2 {
+    1: 391
+  }
+  3: 0x40800000
+  5: 1
+  10: 3
+  13: 1
+  18: 200000
+  22: "MODEL_CLAUDE_4_5_OPUS"
+  23 {
+    1: 391
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      21: 1
+    }
+    13: 64000
+    17: "MODEL_CLAUDE_4_5_OPUS"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x429b0000
+    }
+    23: "claude-opus-4.5"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.5"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2: ""
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41c80000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Claude Opus 4.5 Thinking"
+  2 {
+    1: 392
+  }
+  3: 0x40a00000
+  5: 1
+  10: 3
+  13: 1
+  18: 200000
+  22: "MODEL_CLAUDE_4_5_OPUS_THINKING"
+  23 {
+    1: 392
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 64000
+    17: "MODEL_CLAUDE_4_5_OPUS_THINKING"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42a6cccd
+    }
+    23: "claude-opus-4.5"
+  }
+  24: 3
+  30 {
+    1: "Claude Opus 4.5"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41c80000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "SWE-1.5 Fast"
+  2 {
+    1: 359
+  }
+  3: 0x3f000000
+  5: 1
+  10: 1
+  13: 1
+  18: 128000
+  19 {
+    1: 1
+  }
+  20: 1
+  22: "MODEL_SWE_1_5"
+  23 {
+    1: 359
+    3: 2
+    4: 128000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      20: 1
+      21: 1
+    }
+    13: 96000
+    17: "MODEL_SWE_1_5"
+    18: "https://server.codeium.com"
+    20: "swe-1p5"
+    21 {
+      2: 0x44670000
+    }
+  }
+  24: 1
+  30 {
+    1: "SWE-1.5"
+    2 {
+      1: "Speed"
+      2 {
+        1: 1
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3e99999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3cf5c28f
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x3fc00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Claude Haiku 4.5"
+  2 {
+    1: 347
+  }
+  3: 0x3f800000
+  5: 1
+  10: 3
+  13: 1
+  18: 200000
+  22: "MODEL_PRIVATE_11"
+  23 {
+    1: 347
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      21: 1
+    }
+    13: 64000
+    17: "MODEL_PRIVATE_11"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42d1999a
+    }
+  }
+  24: 2
+  32 {
+    1: "Input"
+    2: 0x3f800000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3dcccccd
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x40a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Claude Sonnet 4.5"
+  2 {
+    1: 220
+  }
+  3: 0x40000000
+  5: 1
+  10: 3
+  13: 1
+  18: 200000
+  19 {
+    1: 1
+  }
+  22: "MODEL_PRIVATE_2"
+  23 {
+    1: 220
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      21: 1
+    }
+    13: 64000
+    17: "MODEL_PRIVATE_2"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42b8999a
+    }
+    23: "claude-sonnet-4.5"
+  }
+  24: 3
+  30 {
+    1: "Claude Sonnet 4.5"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2: ""
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+    3: 1
+  }
+  31: 1
+  32 {
+    1: "Input"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e99999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41700000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Claude Sonnet 4.5 Thinking"
+  2 {
+    1: 221
+  }
+  3: 0x40400000
+  5: 1
+  10: 3
+  13: 1
+  18: 200000
+  19 {
+    1: 1
+  }
+  22: "MODEL_PRIVATE_3"
+  23 {
+    1: 221
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 64000
+    17: "MODEL_PRIVATE_3"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x429b999a
+    }
+    23: "claude-sonnet-4.5"
+  }
+  24: 3
+  30 {
+    1: "Claude Sonnet 4.5"
+    2 {
+      1: "Effort"
+      2 {
+        1: 2
+        2: "High"
+      }
+    }
+    2 {
+      1: "Thinking"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "1M Context"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e99999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41700000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5 Low Thinking"
+  2 {
+    1: 314
+  }
+  3: 0x3f000000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_PRIVATE_6"
+  23 {
+    1: 314
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_PRIVATE_6"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x43180000
+    }
+  }
+  24: 2
+  32 {
+    1: "Input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-4.1"
+  2 {
+    1: 259
+  }
+  3: 0x3f800000
+  5: 1
+  6: 1
+  10: 2
+  13: 1
+  18: 1047576
+  22: "MODEL_CHAT_GPT_4_1_2025_04_14"
+  23 {
+    1: 259
+    3: 2
+    4: 1047576
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+    }
+    13: 32768
+    17: "MODEL_CHAT_GPT_4_1_2025_04_14"
+    18: "https://server.codeium.com"
+  }
+  24: 2
+  32 {
+    1: "Input"
+    2: 0x40000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Gemini 2.5 Pro"
+  2 {
+    1: 246
+  }
+  3: 0x3f800000
+  5: 1
+  10: 4
+  13: 1
+  18: 1048576
+  22: "MODEL_GOOGLE_GEMINI_2_5_PRO"
+  23 {
+    1: 246
+    3: 2
+    4: 1048576
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+    }
+    13: 65535
+    15: 3
+    17: "MODEL_GOOGLE_GEMINI_2_5_PRO"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x43180000
+    }
+  }
+  24: 2
+  32 {
+    1: "Input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Claude Sonnet 4 BYOK"
+  2 {
+    1: 279
+  }
+  5: 1
+  6: 1
+  10: 3
+  13: 3
+  18: 200000
+  22: "MODEL_CLAUDE_4_SONNET_BYOK"
+  23 {
+    1: 279
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      21: 1
+    }
+    13: 64000
+    17: "MODEL_CLAUDE_4_SONNET_BYOK"
+    18: "https://server.codeium.com"
+  }
+  24: 4
+}
+1 {
+  1: "Claude Sonnet 4 Thinking BYOK"
+  2 {
+    1: 280
+  }
+  5: 1
+  6: 1
+  10: 3
+  13: 3
+  18: 200000
+  22: "MODEL_CLAUDE_4_SONNET_THINKING_BYOK"
+  23 {
+    1: 280
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 64000
+    17: "MODEL_CLAUDE_4_SONNET_THINKING_BYOK"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42aa0000
+    }
+  }
+  24: 4
+}
+1 {
+  1: "Claude Opus 4 BYOK"
+  2 {
+    1: 277
+  }
+  5: 1
+  6: 1
+  8: "Register your Anthropic API key in Windsurf settings."
+  9: 1
+  10: 3
+  13: 3
+  18: 200000
+  22: "MODEL_CLAUDE_4_OPUS_BYOK"
+  23 {
+    1: 277
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+    }
+    13: 32000
+    17: "MODEL_CLAUDE_4_OPUS_BYOK"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x435f0000
+    }
+  }
+  24: 4
+}
+1 {
+  1: "Claude Opus 4 Thinking BYOK"
+  2 {
+    1: 278
+  }
+  5: 1
+  6: 1
+  8: "Register your Anthropic API key in Windsurf settings."
+  9: 1
+  10: 3
+  13: 3
+  18: 200000
+  22: "MODEL_CLAUDE_4_OPUS_THINKING_BYOK"
+  23 {
+    1: 278
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+    }
+    13: 32000
+    17: "MODEL_CLAUDE_4_OPUS_THINKING_BYOK"
+    18: "https://server.codeium.com"
+  }
+  24: 4
+}
+1 {
+  1: "o3"
+  2 {
+    1: 218
+  }
+  3: 0x3f800000
+  5: 1
+  10: 2
+  13: 1
+  18: 200000
+  22: "MODEL_CHAT_O3"
+  23 {
+    1: 218
+    3: 2
+    4: 200000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+    }
+    13: 100000
+    17: "MODEL_CHAT_O3"
+    18: "https://server.codeium.com"
+    23: "o3"
+  }
+  24: 2
+  30 {
+    1: "o3"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 2
+        2: "Medium"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "o3 High Reasoning"
+  2 {
+    1: 263
+  }
+  3: 0x3f800000
+  5: 1
+  10: 2
+  13: 1
+  18: 200000
+  22: "MODEL_CHAT_O3_HIGH"
+  23 {
+    1: 263
+    3: 2
+    4: 200000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+    }
+    13: 100000
+    17: "MODEL_CHAT_O3_HIGH"
+    18: "https://server.codeium.com"
+    23: "o3"
+  }
+  24: 2
+  30 {
+    1: "o3"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 3
+        2: "High"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Grok Code Fast 1"
+  2 {
+    1: 222
+  }
+  3: 0x3f000000
+  10: 5
+  13: 1
+  18: 256000
+  22: "MODEL_PRIVATE_4"
+  23 {
+    1: 222
+    3: 2
+    4: 256000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      12: 1
+      15: 1
+    }
+    13: 100000
+    17: "MODEL_PRIVATE_4"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42aa0000
+    }
+  }
+  24: 1
+  32 {
+    1: "Input"
+    2: 0x3e4ccccd
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3ca3d70a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x3fc00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5-Codex"
+  2 {
+    1: 346
+  }
+  3: 0x3f000000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "MODEL_CHAT_GPT_5_CODEX"
+  23 {
+    1: 346
+    3: 2
+    4: 400000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_CHAT_GPT_5_CODEX"
+    18: "https://server.codeium.com"
+  }
+  24: 2
+  32 {
+    1: "Input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5 Medium Thinking"
+  2 {
+    1: 315
+  }
+  3: 0x3f800000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_PRIVATE_7"
+  23 {
+    1: 315
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_PRIVATE_7"
+    18: "https://server.codeium.com"
+  }
+  24: 2
+  32 {
+    1: "Input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5 High Thinking"
+  2 {
+    1: 316
+  }
+  3: 0x40000000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_PRIVATE_8"
+  23 {
+    1: 316
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_PRIVATE_8"
+    18: "https://server.codeium.com"
+  }
+  24: 2
+  32 {
+    1: "Input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.1 No Thinking"
+  2 {
+    1: 348
+  }
+  3: 0x3f000000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_PRIVATE_12"
+  23 {
+    1: 348
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_PRIVATE_12"
+    18: "https://server.codeium.com"
+    23: "gpt-5.1"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.1"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        2: "None"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.1 Low Thinking"
+  2 {
+    1: 349
+  }
+  3: 0x3f000000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_PRIVATE_13"
+  23 {
+    1: 349
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_PRIVATE_13"
+    18: "https://server.codeium.com"
+    23: "gpt-5.1"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.1"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 1
+        2: "Low"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.1 Medium Thinking"
+  2 {
+    1: 350
+  }
+  3: 0x3f800000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_PRIVATE_14"
+  23 {
+    1: 350
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_PRIVATE_14"
+    18: "https://server.codeium.com"
+    23: "gpt-5.1"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.1"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 2
+        2: "Medium"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.1 High Thinking"
+  2 {
+    1: 351
+  }
+  3: 0x40000000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_PRIVATE_15"
+  23 {
+    1: 351
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_PRIVATE_15"
+    18: "https://server.codeium.com"
+    23: "gpt-5.1"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.1"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 3
+        2: "High"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.1 No Thinking Fast"
+  2 {
+    1: 367
+  }
+  3: 0x3f800000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_PRIVATE_20"
+  23 {
+    1: 367
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_PRIVATE_20"
+    18: "https://server.codeium.com"
+    23: "gpt-5.1"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.1"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        2: "None"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e800000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.1 Low Thinking Fast"
+  2 {
+    1: 372
+  }
+  3: 0x3f800000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_PRIVATE_21"
+  23 {
+    1: 372
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_PRIVATE_21"
+    18: "https://server.codeium.com"
+    23: "gpt-5.1"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.1"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 1
+        2: "Low"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e800000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.1 Medium Thinking Fast"
+  2 {
+    1: 373
+  }
+  3: 0x40000000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_PRIVATE_22"
+  23 {
+    1: 373
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_PRIVATE_22"
+    18: "https://server.codeium.com"
+    23: "gpt-5.1"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.1"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 2
+        2: "Medium"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e800000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.1 High Thinking Fast"
+  2 {
+    1: 374
+  }
+  3: 0x40800000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_PRIVATE_23"
+  23 {
+    1: 374
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_PRIVATE_23"
+    18: "https://server.codeium.com"
+    23: "gpt-5.1"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.1"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 3
+        2: "High"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e800000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41a00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.2 No Thinking"
+  2 {
+    1: 399
+  }
+  3: 0x3f800000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_GPT_5_2_NONE"
+  23 {
+    1: 399
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_NONE"
+    18: "https://server.codeium.com"
+    23: "gpt-5.2"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.2"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        2: "None"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fe00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e333333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.2 High Thinking"
+  2 {
+    1: 402
+  }
+  3: 0x40400000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_GPT_5_2_HIGH"
+  23 {
+    1: 402
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_HIGH"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42b40000
+    }
+    23: "gpt-5.2"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.2"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 3
+        2: "High"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fe00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e333333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.2 XHigh Thinking"
+  2 {
+    1: 403
+  }
+  3: 0x41000000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_GPT_5_2_XHIGH"
+  23 {
+    1: 403
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_XHIGH"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42a00000
+    }
+    23: "gpt-5.2"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.2"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 4
+        2: "XHigh"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fe00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e333333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.2 No Thinking Fast"
+  2 {
+    1: 404
+  }
+  3: 0x40000000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_GPT_5_2_NONE_PRIORITY"
+  23 {
+    1: 404
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_NONE_PRIORITY"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42d20000
+    }
+    23: "gpt-5.2"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.2"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        2: "None"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3eb33333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41e00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.2 High Thinking Fast"
+  2 {
+    1: 407
+  }
+  3: 0x40c00000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_GPT_5_2_HIGH_PRIORITY"
+  23 {
+    1: 407
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_HIGH_PRIORITY"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42d20000
+    }
+    23: "gpt-5.2"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.2"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 3
+        2: "High"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3eb33333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41e00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.2 XHigh Thinking Fast"
+  2 {
+    1: 408
+  }
+  3: 0x41800000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_GPT_5_2_XHIGH_PRIORITY"
+  23 {
+    1: 408
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_XHIGH_PRIORITY"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42be0000
+    }
+    23: "gpt-5.2"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.2"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 4
+        2: "XHigh"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3eb33333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41e00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.2-Codex Low"
+  2 {
+    1: 422
+  }
+  3: 0x3f800000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "MODEL_GPT_5_2_CODEX_LOW"
+  23 {
+    1: 422
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_CODEX_LOW"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42dc0000
+    }
+    23: "gpt-5.2-codex"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.2-Codex"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 1
+        2: "Low"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fe00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e333333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.2-Codex Medium"
+  2 {
+    1: 423
+  }
+  3: 0x3f800000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "MODEL_GPT_5_2_CODEX_MEDIUM"
+  23 {
+    1: 423
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_CODEX_MEDIUM"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42d20000
+    }
+    23: "gpt-5.2-codex"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.2-Codex"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 2
+        2: "Medium"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fe00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e333333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.2-Codex High"
+  2 {
+    1: 424
+  }
+  3: 0x40000000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "MODEL_GPT_5_2_CODEX_HIGH"
+  23 {
+    1: 424
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_CODEX_HIGH"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42be0000
+    }
+    23: "gpt-5.2-codex"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.2-Codex"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 3
+        2: "High"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fe00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e333333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.2-Codex XHigh"
+  2 {
+    1: 425
+  }
+  3: 0x40400000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "MODEL_GPT_5_2_CODEX_XHIGH"
+  23 {
+    1: 425
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_CODEX_XHIGH"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42aa0000
+    }
+    23: "gpt-5.2-codex"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.2-Codex"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 4
+        2: "XHigh"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fe00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e333333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.2-Codex Low Fast"
+  2 {
+    1: 426
+  }
+  3: 0x40000000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "MODEL_GPT_5_2_CODEX_LOW_PRIORITY"
+  23 {
+    1: 426
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_CODEX_LOW_PRIORITY"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42dc0000
+    }
+    23: "gpt-5.2-codex"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.2-Codex"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 1
+        2: "Low"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3eb33333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41e00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.2-Codex Medium Fast"
+  2 {
+    1: 427
+  }
+  3: 0x40000000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "MODEL_GPT_5_2_CODEX_MEDIUM_PRIORITY"
+  23 {
+    1: 427
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_CODEX_MEDIUM_PRIORITY"
+    18: "https://server.codeium.com"
+    23: "gpt-5.2-codex"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.2-Codex"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 2
+        2: "Medium"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3eb33333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41e00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.2-Codex High Fast"
+  2 {
+    1: 428
+  }
+  3: 0x40800000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "MODEL_GPT_5_2_CODEX_HIGH_PRIORITY"
+  23 {
+    1: 428
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_CODEX_HIGH_PRIORITY"
+    18: "https://server.codeium.com"
+    23: "gpt-5.2-codex"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.2-Codex"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 3
+        2: "High"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3eb33333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41e00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.2-Codex XHigh Fast"
+  2 {
+    1: 429
+  }
+  3: 0x40c00000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "MODEL_GPT_5_2_CODEX_XHIGH_PRIORITY"
+  23 {
+    1: 429
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_2_CODEX_XHIGH_PRIORITY"
+    18: "https://server.codeium.com"
+    23: "gpt-5.2-codex"
+  }
+  24: 3
+  30 {
+    1: "GPT-5.2-Codex"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 4
+        2: "XHigh"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2 {
+        1: 1
+      }
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40600000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3eb33333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41e00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.1-Codex Max Low"
+  2 {
+    1: 395
+  }
+  3: 0x3f800000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_GPT_5_1_CODEX_MAX_LOW"
+  23 {
+    1: 395
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_1_CODEX_MAX_LOW"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42dc0000
+    }
+    23: "gpt-5.1-codex-max"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.1-Codex Max"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 1
+        2: "Low"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.1-Codex Max Medium"
+  2 {
+    1: 396
+  }
+  3: 0x3fa00000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_GPT_5_1_CODEX_MAX_MEDIUM"
+  23 {
+    1: 396
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_1_CODEX_MAX_MEDIUM"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42c80000
+    }
+    23: "gpt-5.1-codex-max"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.1-Codex Max"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 2
+        2: "Medium"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.1-Codex Max High"
+  2 {
+    1: 397
+  }
+  3: 0x3fc00000
+  5: 1
+  10: 2
+  13: 1
+  18: 384000
+  22: "MODEL_GPT_5_1_CODEX_MAX_HIGH"
+  23 {
+    1: 397
+    3: 2
+    4: 384000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_1_CODEX_MAX_HIGH"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42b40000
+    }
+    23: "gpt-5.1-codex-max"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.1-Codex Max"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 3
+        2: "High"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.1-Codex Low"
+  2 {
+    1: 388
+  }
+  3: 0x3f000000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "MODEL_GPT_5_1_CODEX_LOW"
+  23 {
+    1: 388
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_1_CODEX_LOW"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42f00000
+    }
+    23: "gpt-5.1-codex"
+  }
+  24: 2
+  30 {
+    1: "GPT-5.1-Codex"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 1
+        2: "Low"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.1-Codex-Mini Low"
+  2 {
+    1: 385
+  }
+  3: 0x3e800000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "MODEL_GPT_5_1_CODEX_MINI_LOW"
+  23 {
+    1: 385
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_GPT_5_1_CODEX_MINI_LOW"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x42a40000
+    }
+    23: "gpt-5.1-codex-mini"
+  }
+  24: 1
+  30 {
+    1: "GPT-5.1-Codex-Mini"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 1
+        2: "Low"
+      }
+    }
+    2 {
+      1: "Fast Mode"
+      2: ""
+    }
+    2 {
+      1: "Prompt Cache Retention"
+      2: ""
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3e800000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3ccccccd
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x40000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "GPT-5.1-Codex Medium"
+  2 {
+    1: 317
+  }
+  3: 0x3f800000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "MODEL_PRIVATE_9"
+  23 {
+    1: 317
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_PRIVATE_9"
+    18: "https://server.codeium.com"
+  }
+  24: 1
+  32 {
+    1: "Input"
+    2: 0x3e800000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3ccccccd
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x40000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-5.1-Codex-Mini"
+  2 {
+    1: 366
+  }
+  3: 0x3f000000
+  5: 1
+  10: 2
+  13: 1
+  18: 400000
+  22: "MODEL_PRIVATE_19"
+  23 {
+    1: 366
+    3: 2
+    4: 400000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_PRIVATE_19"
+    18: "https://server.codeium.com"
+  }
+  24: 2
+  32 {
+    1: "Input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GPT-4o"
+  2 {
+    1: 109
+  }
+  3: 0x3f800000
+  5: 1
+  6: 1
+  10: 2
+  13: 1
+  18: 128000
+  22: "MODEL_CHAT_GPT_4O_2024_08_06"
+  23 {
+    1: 109
+    3: 2
+    4: 128000
+    5: "CL100K_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+    }
+    13: 16384
+    17: "MODEL_CHAT_GPT_4O_2024_08_06"
+    18: "https://server.codeium.com"
+  }
+  24: 2
+  32 {
+    1: "Input"
+    2: 0x40200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3fa00000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41200000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Kimi K2.5"
+  3: 0x3f800000
+  5: 1
+  10: 7
+  13: 1
+  18: 262144
+  22: "kimi-k2-5"
+  23 {
+    3: 2
+    4: 262144
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      24: 1
+    }
+    13: 8192
+    17: "kimi-k2-5"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    21 {
+      2: 0x43390000
+    }
+    23: "kimi-k2.5"
+  }
+  24: 1
+  30 {
+    1: "Kimi K2.5"
+  }
+  32 {
+    1: "Input"
+    2: 0x3f19999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3dcccccd
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "GLM-5.1"
+  3: 0x3fc00000
+  13: 1
+  18: 200000
+  22: "glm-5-1"
+  23 {
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      12: 1
+      15: 1
+      24: 1
+    }
+    13: 128000
+    17: "glm-5-1"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    21 {
+      2: 0x425c0000
+    }
+    23: "glm-5.1"
+  }
+  24: 1
+  30 {
+    1: "GLM-5.1"
+  }
+  32 {
+    1: "Input"
+    2: 0x3fb33333
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e851eb8
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x408ccccd
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Minimax M2.5"
+  3: 0x3f800000
+  13: 1
+  18: 204800
+  22: "minimax-m2-5"
+  23 {
+    3: 2
+    4: 204800
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      12: 1
+      15: 1
+      24: 1
+    }
+    13: 131000
+    17: "minimax-m2-5"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    21 {
+      2: 0x428c0000
+    }
+  }
+  24: 1
+  32 {
+    1: "Input"
+    2: 0x3e99999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3cf5c28f
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x3f99999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "SWE-1.5"
+  2 {
+    1: 377
+  }
+  5: 1
+  10: 1
+  13: 1
+  18: 200000
+  19 {
+    1: 1
+    2 {
+      1: 1782287999
+    }
+    3: "Full SWE-1.5 intelligence at regular throughput"
+  }
+  22: "MODEL_SWE_1_5_SLOW"
+  23 {
+    1: 377
+    3: 2
+    4: 200000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      20: 1
+      21: 1
+    }
+    13: 128000
+    17: "MODEL_SWE_1_5_SLOW"
+    18: "https://server.codeium.com"
+    20: "swe-1p5"
+  }
+  24: 4
+  30 {
+    1: "SWE-1.5"
+    2 {
+      1: "Speed"
+      2: ""
+    }
+  }
+}
+1 {
+  1: "GPT-OSS 120B Medium Thinking"
+  2 {
+    1: 326
+  }
+  3: 0x3e800000
+  10: 2
+  13: 1
+  18: 128000
+  22: "MODEL_GPT_OSS_120B"
+  23 {
+    1: 326
+    3: 2
+    4: 128000
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      12: 1
+      15: 1
+    }
+    13: 16384
+    17: "MODEL_GPT_OSS_120B"
+    18: "https://server.codeium.com"
+  }
+  24: 1
+  32 {
+    1: "Input"
+    2: 0x3e19999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3d8f5c29
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x3f19999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "xAI Grok-3"
+  2 {
+    1: 217
+  }
+  3: 0x3f800000
+  6: 1
+  10: 5
+  13: 1
+  18: 131072
+  22: "MODEL_XAI_GROK_3"
+  23 {
+    1: 217
+    3: 2
+    4: 131072
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      12: 1
+    }
+    13: 8192
+    15: 3
+    17: "MODEL_XAI_GROK_3"
+    18: "https://server.codeium.com"
+  }
+  24: 3
+  32 {
+    1: "Input"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41700000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "xAI Grok-3 mini Thinking"
+  2 {
+    1: 234
+  }
+  3: 0x3e000000
+  6: 1
+  10: 5
+  13: 1
+  18: 131072
+  22: "MODEL_XAI_GROK_3_MINI_REASONING"
+  23 {
+    1: 234
+    3: 2
+    4: 131072
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      12: 1
+      15: 1
+    }
+    13: 8192
+    15: 3
+    17: "MODEL_XAI_GROK_3_MINI_REASONING"
+    18: "https://server.codeium.com"
+  }
+  24: 1
+  32 {
+    1: "Input"
+    2: 0x3e99999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Gemini 3.1 Pro Low Thinking"
+  3: 0x3f800000
+  5: 1
+  10: 4
+  13: 1
+  18: 1048576
+  22: "gemini-3-1-pro-low"
+  23 {
+    3: 2
+    4: 1048576
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 65535
+    17: "gemini-3-1-pro-low"
+    18: "https://server.codeium.com"
+    20: "gemini-3-pro"
+    21 {
+      2: 0x43060000
+    }
+    23: "gemini-3.1-pro"
+  }
+  24: 3
+  30 {
+    1: "Gemini 3.1 Pro"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 1
+        2: "Low"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e4ccccd
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x41400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Gemini 3.1 Pro High Thinking"
+  3: 0x40000000
+  5: 1
+  10: 4
+  13: 1
+  18: 1048576
+  22: "gemini-3-1-pro-high"
+  23 {
+    3: 2
+    4: 1048576
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 65535
+    17: "gemini-3-1-pro-high"
+    18: "https://server.codeium.com"
+    20: "gemini-3-pro"
+    21 {
+      2: 0x43060000
+    }
+    23: "gemini-3.1-pro"
+  }
+  24: 3
+  30 {
+    1: "Gemini 3.1 Pro"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 3
+        2: "High"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x40000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e4ccccd
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x41400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Gemini 3 Flash Minimal"
+  2 {
+    1: 413
+  }
+  3: 0x3f400000
+  5: 1
+  10: 4
+  13: 1
+  18: 1048576
+  22: "MODEL_GOOGLE_GEMINI_3_0_FLASH_MINIMAL"
+  23 {
+    1: 413
+    3: 2
+    4: 1048576
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 65535
+    17: "MODEL_GOOGLE_GEMINI_3_0_FLASH_MINIMAL"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x43440000
+    }
+    23: "gemini-3.0-flash"
+  }
+  24: 1
+  30 {
+    1: "Gemini 3 Flash"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        2: "Minimal"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3d4ccccd
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Gemini 3 Flash Low"
+  2 {
+    1: 414
+  }
+  3: 0x3f800000
+  5: 1
+  10: 4
+  13: 1
+  18: 1048576
+  22: "MODEL_GOOGLE_GEMINI_3_0_FLASH_LOW"
+  23 {
+    1: 414
+    3: 2
+    4: 1048576
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 65535
+    17: "MODEL_GOOGLE_GEMINI_3_0_FLASH_LOW"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x43244ccd
+    }
+    23: "gemini-3.0-flash"
+  }
+  24: 1
+  30 {
+    1: "Gemini 3 Flash"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 1
+        2: "Low"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3d4ccccd
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+  }
+  32 {
+    1: "Output"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+  }
+}
+1 {
+  1: "Gemini 3 Flash Medium"
+  2 {
+    1: 415
+  }
+  3: 0x3f800000
+  5: 1
+  10: 4
+  13: 1
+  18: 1048576
+  22: "MODEL_GOOGLE_GEMINI_3_0_FLASH_MEDIUM"
+  23 {
+    1: 415
+    3: 2
+    4: 1048576
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 65535
+    17: "MODEL_GOOGLE_GEMINI_3_0_FLASH_MEDIUM"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x43440000
+    }
+    23: "gemini-3.0-flash"
+  }
+  24: 1
+  30 {
+    1: "Gemini 3 Flash"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 2
+        2: "Medium"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3d4ccccd
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "Gemini 3 Flash High"
+  2 {
+    1: 416
+  }
+  3: 0x3fe00000
+  5: 1
+  10: 4
+  13: 1
+  18: 1048576
+  22: "MODEL_GOOGLE_GEMINI_3_0_FLASH_HIGH"
+  23 {
+    1: 416
+    3: 2
+    4: 1048576
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      11: 1
+      12: 1
+      15: 1
+      21: 1
+    }
+    13: 65535
+    17: "MODEL_GOOGLE_GEMINI_3_0_FLASH_HIGH"
+    18: "https://server.codeium.com"
+    21 {
+      2: 0x43440000
+    }
+    23: "gemini-3.0-flash"
+  }
+  24: 1
+  30 {
+    1: "Gemini 3 Flash"
+    2 {
+      1: "Reasoning Effort"
+      2 {
+        1: 3
+        2: "High"
+      }
+    }
+  }
+  32 {
+    1: "Input"
+    2: 0x3f000000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3d4ccccd
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x40400000
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+1 {
+  1: "DeepSeek V4"
+  3: 0x40400000
+  10: 6
+  13: 1
+  18: 1048576
+  22: "deepseek-v4"
+  23 {
+    3: 2
+    4: 1048576
+    5: "LLAMA_WITH_SPECIAL"
+    6 {
+      8: 1
+      12: 1
+      15: 1
+      24: 1
+    }
+    13: 384000
+    17: "deepseek-v4"
+    18: "https://server.codeium.com"
+    20: "strawberry-pancake"
+    21 {
+      2: 0x42c80000
+    }
+    23: "deepseek-v4"
+  }
+  24: 1
+  30 {
+    1: "DeepSeek V4"
+  }
+  32 {
+    1: "Input"
+    2: 0x3fdeb852
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3e19999a
+    5: 0x41f00000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Cached input"
+    2: 0x3e19999a
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3ca3d70a
+    5: 0x40400000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+  32 {
+    1: "Output"
+    2: 0x405eb852
+    3 {
+      6: 0x736e656b6f74204d
+    }
+    4: 0x3f000000
+    5: 0x43160000
+    6: 1
+    7: "Higher effort consumes more tokens"
+  }
+}
+2 {
+  1: "Recommended"
+  2 {
+    2: "GPT-5.5 Low Thinking"
+    2: "Claude Opus 4.7 Medium"
+    2: "Kimi K2.6"
+    2: "Claude Opus 4.6 Thinking"
+    2: "Claude Sonnet 4.6 Thinking"
+    2: "SWE-1.6"
+    2: "SWE-1.6 Fast"
+    2: "Gemini 3.5 Flash Medium"
+  }
+}
+2 {
+  1: "Provider"
+  2 {
+    1: "Windsurf"
+    2: "SWE-1.6"
+    2: "SWE-1.6 Fast"
+    2: "SWE-1.5 Fast"
+    2: "SWE-1.5"
+  }
+  2 {
+    1: "OpenAI"
+    2: "GPT-5.5 Low Thinking"
+    2: "GPT-5.5 No Thinking"
+    2: "GPT-5.5 Medium Thinking"
+    2: "GPT-5.5 High Thinking"
+    2: "GPT-5.5 XHigh Thinking"
+    2: "GPT-5.5 No Thinking Fast"
+    2: "GPT-5.5 Low Thinking Fast"
+    2: "GPT-5.5 Medium Thinking Fast"
+    2: "GPT-5.5 High Thinking Fast"
+    2: "GPT-5.5 XHigh Thinking Fast"
+    2: "GPT-5.4 Mini Low Thinking"
+    2: "GPT-5.4 Mini Medium Thinking"
+    2: "GPT-5.4 Mini High Thinking"
+    2: "GPT-5.4 Mini XHigh Thinking"
+    2: "GPT-5.2 Low Thinking"
+    2: "GPT-5.2 Medium Thinking"
+    2: "GPT-5.2 Low Thinking Fast"
+    2: "GPT-5.2 Medium Thinking Fast"
+    2: "GPT-5 Low Thinking"
+    2: "GPT-4.1"
+    2: "o3"
+    2: "o3 High Reasoning"
+    2: "GPT-5-Codex"
+    2: "GPT-5 Medium Thinking"
+    2: "GPT-5 High Thinking"
+    2: "GPT-5.1 No Thinking"
+    2: "GPT-5.1 Low Thinking"
+    2: "GPT-5.1 Medium Thinking"
+    2: "GPT-5.1 High Thinking"
+    2: "GPT-5.1 No Thinking Fast"
+    2: "GPT-5.1 Low Thinking Fast"
+    2: "GPT-5.1 Medium Thinking Fast"
+    2: "GPT-5.1 High Thinking Fast"
+    2: "GPT-5.2 No Thinking"
+    2: "GPT-5.2 High Thinking"
+    2: "GPT-5.2 XHigh Thinking"
+    2: "GPT-5.2 No Thinking Fast"
+    2: "GPT-5.2 High Thinking Fast"
+    2: "GPT-5.2 XHigh Thinking Fast"
+    2: "GPT-5.2-Codex Low"
+    2: "GPT-5.2-Codex Medium"
+    2: "GPT-5.2-Codex High"
+    2: "GPT-5.2-Codex XHigh"
+    2: "GPT-5.2-Codex Low Fast"
+    2: "GPT-5.2-Codex Medium Fast"
+    2: "GPT-5.2-Codex High Fast"
+    2: "GPT-5.2-Codex XHigh Fast"
+    2: "GPT-5.1-Codex Max Low"
+    2: "GPT-5.1-Codex Max Medium"
+    2: "GPT-5.1-Codex Max High"
+    2: "GPT-5.1-Codex Low"
+    2: "GPT-5.1-Codex-Mini Low"
+    2: "GPT-5.1-Codex Medium"
+    2: "GPT-5.1-Codex-Mini"
+    2: "GPT-4o"
+    2: "GPT-OSS 120B Medium Thinking"
+  }
+  2 {
+    1 {
+      8: 0x6369706f7268746e
+    }
+    2: "Claude Opus 4.7 Medium"
+    2: "Claude Opus 4.6 Thinking"
+    2: "Claude Sonnet 4.6 Thinking"
+    2: "Claude Opus 4.7 Low"
+    2: "Claude Opus 4.7 High"
+    2: "Claude Opus 4.7 XHigh"
+    2: "Claude Opus 4.7 Max"
+    2: "Claude Opus 4.7 Low Fast"
+    2: "Claude Opus 4.7 Medium Fast"
+    2: "Claude Opus 4.7 High Fast"
+    2: "Claude Opus 4.7 XHigh Fast"
+    2: "Claude Opus 4.7 Max Fast"
+    2: "Claude Opus 4.6"
+    2: "Claude Opus 4.6 1M"
+    2: "Claude Opus 4.6 Thinking 1M"
+    2: "Claude Opus 4.6 Fast"
+    2: "Claude Opus 4.6 Thinking Fast"
+    2: "Claude Sonnet 4.6"
+    2: "Claude Sonnet 4.6 1M"
+    2: "Claude Sonnet 4.6 Thinking 1M"
+    2: "Claude Opus 4.5"
+    2: "Claude Opus 4.5 Thinking"
+    2: "Claude Haiku 4.5"
+    2: "Claude Sonnet 4.5"
+    2: "Claude Sonnet 4.5 Thinking"
+    2: "Claude Sonnet 4 BYOK"
+    2: "Claude Sonnet 4 Thinking BYOK"
+    2: "Claude Opus 4 BYOK"
+    2: "Claude Opus 4 Thinking BYOK"
+  }
+  2 {
+    1: "Google"
+    2: "Gemini 3.5 Flash Medium"
+    2: "Gemini 3.5 Flash Minimal"
+    2: "Gemini 3.5 Flash Low"
+    2: "Gemini 3.5 Flash High"
+    2: "Gemini 2.5 Pro"
+    2: "Gemini 3.1 Pro Low Thinking"
+    2: "Gemini 3.1 Pro High Thinking"
+    2: "Gemini 3 Flash Minimal"
+    2: "Gemini 3 Flash Low"
+    2: "Gemini 3 Flash Medium"
+    2: "Gemini 3 Flash High"
+  }
+  2 {
+    1: "xAI"
+    2: "Grok Code Fast 1"
+    2: "xAI Grok-3"
+    2: "xAI Grok-3 mini Thinking"
+  }
+  2 {
+    1: "DeepSeek"
+    2: "DeepSeek V4"
+  }
+  2 {
+    1: "Other"
+    2: "Kimi K2.6"
+    2: "Kimi K2.5"
+    2: "GLM-5.1"
+    2: "Minimax M2.5"
+  }
+}
+2 {
+  1: "Input cost"
+  2 {
+    2: "GPT-OSS 120B Medium Thinking"
+    2: "Grok Code Fast 1"
+    2: "GPT-5.1-Codex-Mini Low"
+    2: "GPT-5.1-Codex Medium"
+    2: "SWE-1.6 Fast"
+    2: "SWE-1.5 Fast"
+    2: "Minimax M2.5"
+    2: "xAI Grok-3 mini Thinking"
+    2: "Gemini 3 Flash Minimal"
+    2: "Gemini 3 Flash Low"
+    2: "Gemini 3 Flash Medium"
+    2: "Gemini 3 Flash High"
+    2: "Kimi K2.5"
+    2: "GPT-5.4 Mini Low Thinking"
+    2: "GPT-5.4 Mini Medium Thinking"
+    2: "GPT-5.4 Mini High Thinking"
+    2: "GPT-5.4 Mini XHigh Thinking"
+    2: "Claude Haiku 4.5"
+    2: "GPT-5 Low Thinking"
+    2: "Gemini 2.5 Pro"
+    2: "GPT-5-Codex"
+    2: "GPT-5 Medium Thinking"
+    2: "GPT-5 High Thinking"
+    2: "GPT-5.1 No Thinking"
+    2: "GPT-5.1 Low Thinking"
+    2: "GPT-5.1 Medium Thinking"
+    2: "GPT-5.1 High Thinking"
+    2: "GPT-5.1-Codex Max Low"
+    2: "GPT-5.1-Codex Max Medium"
+    2: "GPT-5.1-Codex Max High"
+    2: "GPT-5.1-Codex Low"
+    2: "GPT-5.1-Codex-Mini"
+    2: "GLM-5.1"
+    2: "Gemini 3.5 Flash Medium"
+    2: "Gemini 3.5 Flash Minimal"
+    2: "Gemini 3.5 Flash Low"
+    2: "Gemini 3.5 Flash High"
+    2: "DeepSeek V4"
+    2: "GPT-5.2 Low Thinking"
+    2: "GPT-5.2 Medium Thinking"
+    2: "GPT-5.2 No Thinking"
+    2: "GPT-5.2 High Thinking"
+    2: "GPT-5.2 XHigh Thinking"
+    2: "GPT-5.2-Codex Low"
+    2: "GPT-5.2-Codex Medium"
+    2: "GPT-5.2-Codex High"
+    2: "GPT-5.2-Codex XHigh"
+    2: "GPT-4.1"
+    2: "o3"
+    2: "o3 High Reasoning"
+    2: "Gemini 3.1 Pro Low Thinking"
+    2: "Gemini 3.1 Pro High Thinking"
+    2: "GPT-5.1 No Thinking Fast"
+    2: "GPT-5.1 Low Thinking Fast"
+    2: "GPT-5.1 Medium Thinking Fast"
+    2: "GPT-5.1 High Thinking Fast"
+    2: "GPT-4o"
+    2: "Claude Sonnet 4.6 Thinking"
+    2: "Claude Sonnet 4.6"
+    2: "Claude Sonnet 4.6 1M"
+    2: "Claude Sonnet 4.6 Thinking 1M"
+    2: "Claude Sonnet 4.5"
+    2: "Claude Sonnet 4.5 Thinking"
+    2: "xAI Grok-3"
+    2: "GPT-5.2 Low Thinking Fast"
+    2: "GPT-5.2 Medium Thinking Fast"
+    2: "GPT-5.2 No Thinking Fast"
+    2: "GPT-5.2 High Thinking Fast"
+    2: "GPT-5.2 XHigh Thinking Fast"
+    2: "GPT-5.2-Codex Low Fast"
+    2: "GPT-5.2-Codex Medium Fast"
+    2: "GPT-5.2-Codex High Fast"
+    2: "GPT-5.2-Codex XHigh Fast"
+    2: "Claude Opus 4.7 Medium"
+    2: "Claude Opus 4.6 Thinking"
+    2: "GPT-5.5 Low Thinking"
+    2: "Claude Opus 4.7 Low"
+    2: "Claude Opus 4.7 High"
+    2: "Claude Opus 4.7 XHigh"
+    2: "Claude Opus 4.7 Max"
+    2: "Claude Opus 4.6"
+    2: "Claude Opus 4.6 1M"
+    2: "Claude Opus 4.6 Thinking 1M"
+    2: "GPT-5.5 No Thinking"
+    2: "GPT-5.5 Medium Thinking"
+    2: "GPT-5.5 High Thinking"
+    2: "GPT-5.5 XHigh Thinking"
+    2: "Claude Opus 4.5"
+    2: "Claude Opus 4.5 Thinking"
+    2: "GPT-5.5 No Thinking Fast"
+    2: "GPT-5.5 Low Thinking Fast"
+    2: "GPT-5.5 Medium Thinking Fast"
+    2: "GPT-5.5 High Thinking Fast"
+    2: "GPT-5.5 XHigh Thinking Fast"
+    2: "Claude Opus 4.7 Low Fast"
+    2: "Claude Opus 4.7 Medium Fast"
+    2: "Claude Opus 4.7 High Fast"
+    2: "Claude Opus 4.7 XHigh Fast"
+    2: "Claude Opus 4.7 Max Fast"
+    2: "Claude Opus 4.6 Fast"
+    2: "Claude Opus 4.6 Thinking Fast"
+    2: "Kimi K2.6"
+    2: "SWE-1.6"
+    2: "Claude Sonnet 4 BYOK"
+    2: "Claude Sonnet 4 Thinking BYOK"
+    2: "Claude Opus 4 BYOK"
+    2: "Claude Opus 4 Thinking BYOK"
+    2: "SWE-1.5"
+  }
+  3: "Input"
+}
+2 {
+  1: "Cached input cost"
+  2 {
+    2: "Grok Code Fast 1"
+    2: "GPT-5.1-Codex-Mini Low"
+    2: "GPT-5.1-Codex Medium"
+    2: "SWE-1.6 Fast"
+    2: "SWE-1.5 Fast"
+    2: "Minimax M2.5"
+    2: "Gemini 3 Flash Minimal"
+    2: "Gemini 3 Flash Low"
+    2: "Gemini 3 Flash Medium"
+    2: "Gemini 3 Flash High"
+    2: "GPT-OSS 120B Medium Thinking"
+    2: "GPT-5.4 Mini Low Thinking"
+    2: "GPT-5.4 Mini Medium Thinking"
+    2: "GPT-5.4 Mini High Thinking"
+    2: "GPT-5.4 Mini XHigh Thinking"
+    2: "Claude Haiku 4.5"
+    2: "Kimi K2.5"
+    2: "GPT-5 Low Thinking"
+    2: "Gemini 2.5 Pro"
+    2: "GPT-5-Codex"
+    2: "GPT-5 Medium Thinking"
+    2: "GPT-5 High Thinking"
+    2: "GPT-5.1 No Thinking"
+    2: "GPT-5.1 Low Thinking"
+    2: "GPT-5.1 Medium Thinking"
+    2: "GPT-5.1 High Thinking"
+    2: "GPT-5.1-Codex Max Low"
+    2: "GPT-5.1-Codex Max Medium"
+    2: "GPT-5.1-Codex Max High"
+    2: "GPT-5.1-Codex Low"
+    2: "GPT-5.1-Codex-Mini"
+    2: "Gemini 3.5 Flash Medium"
+    2: "Gemini 3.5 Flash Minimal"
+    2: "Gemini 3.5 Flash Low"
+    2: "Gemini 3.5 Flash High"
+    2: "DeepSeek V4"
+    2: "GPT-5.2 Low Thinking"
+    2: "GPT-5.2 Medium Thinking"
+    2: "GPT-5.2 No Thinking"
+    2: "GPT-5.2 High Thinking"
+    2: "GPT-5.2 XHigh Thinking"
+    2: "GPT-5.2-Codex Low"
+    2: "GPT-5.2-Codex Medium"
+    2: "GPT-5.2-Codex High"
+    2: "GPT-5.2-Codex XHigh"
+    2: "Gemini 3.1 Pro Low Thinking"
+    2: "Gemini 3.1 Pro High Thinking"
+    2: "GPT-5.1 No Thinking Fast"
+    2: "GPT-5.1 Low Thinking Fast"
+    2: "GPT-5.1 Medium Thinking Fast"
+    2: "GPT-5.1 High Thinking Fast"
+    2: "GLM-5.1"
+    2: "Claude Sonnet 4.6 Thinking"
+    2: "Claude Sonnet 4.6"
+    2: "Claude Sonnet 4.6 1M"
+    2: "Claude Sonnet 4.6 Thinking 1M"
+    2: "Claude Sonnet 4.5"
+    2: "Claude Sonnet 4.5 Thinking"
+    2: "GPT-5.2 Low Thinking Fast"
+    2: "GPT-5.2 Medium Thinking Fast"
+    2: "GPT-5.2 No Thinking Fast"
+    2: "GPT-5.2 High Thinking Fast"
+    2: "GPT-5.2 XHigh Thinking Fast"
+    2: "GPT-5.2-Codex Low Fast"
+    2: "GPT-5.2-Codex Medium Fast"
+    2: "GPT-5.2-Codex High Fast"
+    2: "GPT-5.2-Codex XHigh Fast"
+    2: "Claude Opus 4.7 Medium"
+    2: "Claude Opus 4.6 Thinking"
+    2: "GPT-5.5 Low Thinking"
+    2: "Claude Opus 4.7 Low"
+    2: "Claude Opus 4.7 High"
+    2: "Claude Opus 4.7 XHigh"
+    2: "Claude Opus 4.7 Max"
+    2: "Claude Opus 4.6"
+    2: "Claude Opus 4.6 1M"
+    2: "Claude Opus 4.6 Thinking 1M"
+    2: "GPT-5.5 No Thinking"
+    2: "GPT-5.5 Medium Thinking"
+    2: "GPT-5.5 High Thinking"
+    2: "GPT-5.5 XHigh Thinking"
+    2: "Claude Opus 4.5"
+    2: "Claude Opus 4.5 Thinking"
+    2: "GPT-4.1"
+    2: "o3"
+    2: "o3 High Reasoning"
+    2: "GPT-5.5 No Thinking Fast"
+    2: "GPT-5.5 Low Thinking Fast"
+    2: "GPT-5.5 Medium Thinking Fast"
+    2: "GPT-5.5 High Thinking Fast"
+    2: "GPT-5.5 XHigh Thinking Fast"
+    2: "GPT-4o"
+    2: "Claude Opus 4.7 Low Fast"
+    2: "Claude Opus 4.7 Medium Fast"
+    2: "Claude Opus 4.7 High Fast"
+    2: "Claude Opus 4.7 XHigh Fast"
+    2: "Claude Opus 4.7 Max Fast"
+    2: "Claude Opus 4.6 Fast"
+    2: "Claude Opus 4.6 Thinking Fast"
+    2: "Kimi K2.6"
+    2: "SWE-1.6"
+    2: "Claude Sonnet 4 BYOK"
+    2: "Claude Sonnet 4 Thinking BYOK"
+    2: "Claude Opus 4 BYOK"
+    2: "Claude Opus 4 Thinking BYOK"
+    2: "SWE-1.5"
+    2: "xAI Grok-3"
+    2: "xAI Grok-3 mini Thinking"
+  }
+  3: "Cached input"
+}
+2 {
+  1: "Output cost"
+  2 {
+    2: "xAI Grok-3 mini Thinking"
+    2: "GPT-OSS 120B Medium Thinking"
+    2: "Minimax M2.5"
+    2: "SWE-1.6 Fast"
+    2: "SWE-1.5 Fast"
+    2: "Grok Code Fast 1"
+    2: "GPT-5.1-Codex-Mini Low"
+    2: "GPT-5.1-Codex Medium"
+    2: "Kimi K2.5"
+    2: "Gemini 3 Flash Minimal"
+    2: "Gemini 3 Flash Low"
+    2: "Gemini 3 Flash Medium"
+    2: "Gemini 3 Flash High"
+    2: "DeepSeek V4"
+    2: "GLM-5.1"
+    2: "GPT-5.4 Mini Low Thinking"
+    2: "GPT-5.4 Mini Medium Thinking"
+    2: "GPT-5.4 Mini High Thinking"
+    2: "GPT-5.4 Mini XHigh Thinking"
+    2: "Claude Haiku 4.5"
+    2: "GPT-4.1"
+    2: "o3"
+    2: "o3 High Reasoning"
+    2: "Gemini 3.5 Flash Medium"
+    2: "Gemini 3.5 Flash Minimal"
+    2: "Gemini 3.5 Flash Low"
+    2: "Gemini 3.5 Flash High"
+    2: "GPT-5 Low Thinking"
+    2: "Gemini 2.5 Pro"
+    2: "GPT-5-Codex"
+    2: "GPT-5 Medium Thinking"
+    2: "GPT-5 High Thinking"
+    2: "GPT-5.1 No Thinking"
+    2: "GPT-5.1 Low Thinking"
+    2: "GPT-5.1 Medium Thinking"
+    2: "GPT-5.1 High Thinking"
+    2: "GPT-5.1-Codex Max Low"
+    2: "GPT-5.1-Codex Max Medium"
+    2: "GPT-5.1-Codex Max High"
+    2: "GPT-5.1-Codex Low"
+    2: "GPT-5.1-Codex-Mini"
+    2: "GPT-4o"
+    2: "Gemini 3.1 Pro Low Thinking"
+    2: "Gemini 3.1 Pro High Thinking"
+    2: "GPT-5.2 Low Thinking"
+    2: "GPT-5.2 Medium Thinking"
+    2: "GPT-5.2 No Thinking"
+    2: "GPT-5.2 High Thinking"
+    2: "GPT-5.2 XHigh Thinking"
+    2: "GPT-5.2-Codex Low"
+    2: "GPT-5.2-Codex Medium"
+    2: "GPT-5.2-Codex High"
+    2: "GPT-5.2-Codex XHigh"
+    2: "Claude Sonnet 4.6 Thinking"
+    2: "Claude Sonnet 4.6"
+    2: "Claude Sonnet 4.6 1M"
+    2: "Claude Sonnet 4.6 Thinking 1M"
+    2: "Claude Sonnet 4.5"
+    2: "Claude Sonnet 4.5 Thinking"
+    2: "xAI Grok-3"
+    2: "GPT-5.1 No Thinking Fast"
+    2: "GPT-5.1 Low Thinking Fast"
+    2: "GPT-5.1 Medium Thinking Fast"
+    2: "GPT-5.1 High Thinking Fast"
+    2: "Claude Opus 4.7 Medium"
+    2: "Claude Opus 4.6 Thinking"
+    2: "Claude Opus 4.7 Low"
+    2: "Claude Opus 4.7 High"
+    2: "Claude Opus 4.7 XHigh"
+    2: "Claude Opus 4.7 Max"
+    2: "Claude Opus 4.6"
+    2: "Claude Opus 4.6 1M"
+    2: "Claude Opus 4.6 Thinking 1M"
+    2: "Claude Opus 4.5"
+    2: "Claude Opus 4.5 Thinking"
+    2: "GPT-5.2 Low Thinking Fast"
+    2: "GPT-5.2 Medium Thinking Fast"
+    2: "GPT-5.2 No Thinking Fast"
+    2: "GPT-5.2 High Thinking Fast"
+    2: "GPT-5.2 XHigh Thinking Fast"
+    2: "GPT-5.2-Codex Low Fast"
+    2: "GPT-5.2-Codex Medium Fast"
+    2: "GPT-5.2-Codex High Fast"
+    2: "GPT-5.2-Codex XHigh Fast"
+    2: "GPT-5.5 Low Thinking"
+    2: "GPT-5.5 No Thinking"
+    2: "GPT-5.5 Medium Thinking"
+    2: "GPT-5.5 High Thinking"
+    2: "GPT-5.5 XHigh Thinking"
+    2: "GPT-5.5 No Thinking Fast"
+    2: "GPT-5.5 Low Thinking Fast"
+    2: "GPT-5.5 Medium Thinking Fast"
+    2: "GPT-5.5 High Thinking Fast"
+    2: "GPT-5.5 XHigh Thinking Fast"
+    2: "Claude Opus 4.7 Low Fast"
+    2: "Claude Opus 4.7 Medium Fast"
+    2: "Claude Opus 4.7 High Fast"
+    2: "Claude Opus 4.7 XHigh Fast"
+    2: "Claude Opus 4.7 Max Fast"
+    2: "Claude Opus 4.6 Fast"
+    2: "Claude Opus 4.6 Thinking Fast"
+    2: "Kimi K2.6"
+    2: "SWE-1.6"
+    2: "Claude Sonnet 4 BYOK"
+    2: "Claude Sonnet 4 Thinking BYOK"
+    2: "Claude Opus 4 BYOK"
+    2: "Claude Opus 4 Thinking BYOK"
+    2: "SWE-1.5"
+  }
+  3: "Output"
+}
+3 {
+  2: "gpt-5.5-low-04302026"
+  3: "gpt-5-5-low"
+}
