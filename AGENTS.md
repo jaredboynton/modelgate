@@ -92,7 +92,7 @@ Route layer parse/validate request shape, enforce provider/model fit, call relev
 - Don't weaken test-home guards; prevent accidental reads/writes to real auth state
 - Don't reorder model-not-supported/missing-credential failures w/o updating route tests + relevant planning note
 - Don't rely on close-frame-only WebSocket failures for Codex CLI. Use wrapped top-level error events with `type = "error"`, numeric `status`, and `error.code`
-- Don't claim remote clone readiness while `specter` uses `/Users/jaredboynton/__devlocal/specter`; it is a pre-remote blocker, and CI stays manual/pending or dependency-gated until portable
+- Don't reintroduce local `warpsock` path dependencies; remote clone readiness depends on the tracked GitHub dependency remaining portable
 - Don't commit `.env`, `.omx/`, `target/`, logs, live runtime captures
 
 ## Commands

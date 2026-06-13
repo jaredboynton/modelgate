@@ -111,7 +111,7 @@ async fn live_cursor_composer_models_endpoint_returns_three_composer_rows_via_re
         return;
     };
 
-    let client = specter::Client::new().unwrap();
+    let client = warpsock::Client::new().unwrap();
     let response = client
         .get(format!("{}/v1/models", live_base_url()))
         .timeout(std::time::Duration::from_secs(30))
@@ -138,7 +138,7 @@ async fn live_cursor_responses_streaming_emits_assistant_text_delta_for_each_com
         return;
     };
 
-    let client = specter::Client::new().unwrap();
+    let client = warpsock::Client::new().unwrap();
     for model in COMPOSER_MODELS {
         let response = client
             .post(format!("{}/v1/responses", live_base_url()))
@@ -181,7 +181,7 @@ async fn live_cursor_responses_emits_reasoning_event_for_composer_2_family() {
         return;
     };
 
-    let client = specter::Client::new().unwrap();
+    let client = warpsock::Client::new().unwrap();
     for model in &["composer-2", "composer-2-fast"] {
         let response = client
             .post(format!("{}/v1/responses", live_base_url()))
@@ -210,7 +210,7 @@ async fn live_cursor_chat_tool_call_round_trips_for_each_composer() {
         return;
     };
 
-    let client = specter::Client::new().unwrap();
+    let client = warpsock::Client::new().unwrap();
     for model in COMPOSER_MODELS {
         let response = client
             .post(format!("{}/v1/chat/completions", live_base_url()))
@@ -252,7 +252,7 @@ async fn live_cursor_responses_multi_turn_continuation_via_previous_response_id(
         return;
     };
 
-    let client = specter::Client::new().unwrap();
+    let client = warpsock::Client::new().unwrap();
     let model = "composer-2-fast";
 
     // Turn 1.
@@ -316,7 +316,7 @@ async fn live_cursor_cloud_indexing_emits_handshake_upload_ensure_sync_evidence(
         "live cloud bootstrap validation is mandatory when {LIVE_CURSOR_OPT_IN}=1; set UMP_CURSOR_INDEX_BOOTSTRAP=1"
     );
 
-    let client = specter::Client::new().unwrap();
+    let client = warpsock::Client::new().unwrap();
     let response = client
         .post(format!("{}/v1/chat/completions", live_base_url()))
         .timeout(std::time::Duration::from_secs(180))

@@ -8,7 +8,7 @@ use std::{
 use http::StatusCode;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use specter::Message as SpecterMessage;
+use warpsock::Message as WarpsockMessage;
 
 const LIVE_OPT_IN: &str = "UMP_V2_LIVE_CODEX_REALTIME_AUDIO";
 const LIVE_CI_OPT_IN: &str = "UMP_V2_ALLOW_LIVE_TESTS_IN_CI";
@@ -25,8 +25,8 @@ async fn live_codex_realtime_ws_text_roundtrip_when_opted_in() {
     };
 
     let url = live_ws_url("/v1/realtime", &[("model", REALTIME_MODEL)]);
-    let mut ws = match specter::Client::new()
-        .expect("create specter client")
+    let mut ws = match warpsock::Client::new()
+        .expect("create warpsock client")
         .websocket(url)
         .connect()
         .await
@@ -103,8 +103,8 @@ async fn live_codex_realtime_transcription_session_when_opted_in() {
         return;
     };
 
-    let response = specter::Client::new()
-        .expect("create specter client")
+    let response = warpsock::Client::new()
+        .expect("create warpsock client")
         .post(live_http_url("/v1/realtime/transcription_sessions"))
         .header("content-type", "application/json")
         .json(&json!({
@@ -152,8 +152,8 @@ async fn live_codex_realtime_calls_invalid_offer_auth_passes_when_opted_in() {
         return;
     };
 
-    let response = specter::Client::new()
-        .expect("create specter client")
+    let response = warpsock::Client::new()
+        .expect("create warpsock client")
         .post(live_http_url("/v1/realtime/calls"))
         .header("content-type", "application/sdp")
         .body("v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=ump-v2-live-invalid-offer\r\n")
@@ -245,8 +245,8 @@ async fn live_codex_audio_transcription_nonempty_spoken_fixture_when_opted_in() 
         ],
     );
 
-    let response = specter::Client::new()
-        .expect("create specter client")
+    let response = warpsock::Client::new()
+        .expect("create warpsock client")
         .post(live_http_url("/v1/audio/transcriptions"))
         .header("content-type", content_type)
         .body(body)
@@ -337,7 +337,7 @@ fn live_ws_url(path: &str, query: &[(&str, &str)]) -> String {
     format!("{base}{path}?{query}")
 }
 
-async fn next_ws_json(ws: &mut specter::WebSocket) -> Option<Value> {
+async fn next_ws_json(ws: &mut warpsock::WebSocket) -> Option<Value> {
     loop {
         let message = match tokio::time::timeout(Duration::from_secs(30), ws.next()).await {
             Ok(Ok(Some(message))) => message,
@@ -346,20 +346,20 @@ async fn next_ws_json(ws: &mut specter::WebSocket) -> Option<Value> {
             Err(_) => panic!("live realtime websocket read timed out"),
         };
         match message {
-            SpecterMessage::Text(text) => {
+            WarpsockMessage::Text(text) => {
                 common::assert_no_unredacted_sensitive_values(&text);
                 return Some(
                     serde_json::from_str(&text).expect("parse live realtime websocket JSON event"),
                 );
             }
-            SpecterMessage::Binary(bytes) => {
+            WarpsockMessage::Binary(bytes) => {
                 return Some(
                     serde_json::from_slice(&bytes)
                         .expect("parse live realtime websocket binary JSON"),
                 );
             }
-            SpecterMessage::Ping(_) | SpecterMessage::Pong(_) => {}
-            SpecterMessage::Close(_) => return None,
+            WarpsockMessage::Ping(_) | WarpsockMessage::Pong(_) => {}
+            WarpsockMessage::Close(_) => return None,
         }
     }
 }
@@ -370,7 +370,7 @@ fn parse_json_body(text: &str, endpoint_class: &str) -> Value {
     })
 }
 
-fn response_request_id_hash(response: &specter::Response) -> Option<String> {
+fn response_request_id_hash(response: &warpsock::Response) -> Option<String> {
     response.headers().get("x-request-id").map(hash_for_log)
 }
 

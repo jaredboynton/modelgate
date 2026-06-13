@@ -5,7 +5,7 @@ use serde_json::Value;
 use crate::{
     auth::codex::{load_codex_auth, refresh_codex_auth},
     error::openai_error_body,
-    upstream_response::{observe_specter_response, sanitize_specter_headers},
+    upstream_response::{observe_warpsock_response, sanitize_warpsock_headers},
     AppError, AppResult, AppState, UpstreamResponse,
 };
 
@@ -162,7 +162,7 @@ pub async fn send_public_openai_http_with_refresh(
     };
 
     let first_status = first.status();
-    let first_headers = sanitize_specter_headers(first.headers());
+    let first_headers = sanitize_warpsock_headers(first.headers());
     let first_body = first.bytes()?;
     if !is_refresh_eligible_401(first_status, &first_body, false) {
         return Ok(classify_or_passthrough_response(
@@ -181,7 +181,7 @@ pub async fn send_public_openai_http_with_refresh(
 
     let second = send_public_openai_http_once(state, method, &url, &inbound_headers, body).await?;
     let second_status = second.status();
-    let second_headers = sanitize_specter_headers(second.headers());
+    let second_headers = sanitize_warpsock_headers(second.headers());
     let second_body = second.bytes()?;
     Ok(classify_or_passthrough_response(
         second_status,
@@ -235,9 +235,9 @@ async fn send_public_openai_http_once(
     url: &str,
     inbound_headers: &HeaderMap,
     body: Bytes,
-) -> AppResult<specter::Response> {
+) -> AppResult<warpsock::Response> {
     let request = build_public_openai_request(state, url, inbound_headers)?;
-    let client = state.specter.clone();
+    let client = state.warpsock.clone();
     let response = client
         .request(method, request.url)
         .headers(request.headers)
@@ -245,7 +245,7 @@ async fn send_public_openai_http_once(
         .send()
         .await
         .map_err(|error| AppError::Upstream(format!("OpenAI public transport: {error}")))?;
-    observe_specter_response(OPENAI_PUBLIC_PROVIDER, &response);
+    observe_warpsock_response(OPENAI_PUBLIC_PROVIDER, &response);
     Ok(response)
 }
 

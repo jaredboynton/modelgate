@@ -162,7 +162,7 @@ impl CodexCatalogCache {
 
     pub async fn refresh_from_endpoint(
         &self,
-        client: &specter::Client,
+        client: &warpsock::Client,
         headers: &HeaderMap,
         base_url: &str,
     ) -> AppResult<Arc<CodexCatalog>> {

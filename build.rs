@@ -11,7 +11,7 @@ fn main() {
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=Cargo.lock");
 
-    enforce_specter_only_transport();
+    enforce_warpsock_only_transport();
 
     if let Some(git_dir) = git_dir() {
         println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
@@ -86,7 +86,7 @@ fn run_command(program: &str, args: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn enforce_specter_only_transport() {
+fn enforce_warpsock_only_transport() {
     let repo_root = repo_root();
     let mut violations = Vec::new();
 
@@ -96,7 +96,9 @@ fn enforce_specter_only_transport() {
 
     if !violations.is_empty() {
         let joined = violations.join("\n - ");
-        panic!("reqwest is forbidden in this repo. Use specter instead.\nViolations:\n - {joined}");
+        panic!(
+            "reqwest is forbidden in this repo. Use warpsock instead.\nViolations:\n - {joined}"
+        );
     }
 }
 

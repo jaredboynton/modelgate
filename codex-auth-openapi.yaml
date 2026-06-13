@@ -1040,7 +1040,7 @@ paths:
         Proven with Codex OAuth through the ChatGPT web voice route. Production
         evidence uses browser-compatible transport and multipart text fields
         `sdp` and `session`; do not move production POSTs off the proven
-        browser/Specter transport without fresh validation.
+        browser/Warpsock transport without fresh validation.
       servers:
         - url: https://chatgpt.com
       security:

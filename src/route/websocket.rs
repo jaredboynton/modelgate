@@ -10,8 +10,8 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use specter::Message as UpstreamMessage;
 use tokio::{sync::mpsc, time::Instant};
+use warpsock::Message as UpstreamMessage;
 
 use crate::{
     adapter::responses_sse::ResponsesSseParser,
@@ -223,12 +223,12 @@ async fn connect_public_openai_realtime_ws(
     state: &AppState,
     inbound_headers: &HeaderMap,
     model: &str,
-) -> AppResult<specter::WebSocket> {
+) -> AppResult<warpsock::WebSocket> {
     debug_assert_eq!(model, OPENAI_PUBLIC_REALTIME_MODEL);
     let request =
         upstream::openai_realtime::build_realtime_ws_request(state, inbound_headers, model)?;
     let mut builder = state
-        .specter
+        .warpsock
         .websocket(request.url)
         .connect_timeout(Duration::from_millis(REALTIME_WS_HANDSHAKE_TIMEOUT_MS))
         .handshake_timeout(Duration::from_millis(REALTIME_WS_HANDSHAKE_TIMEOUT_MS))
@@ -251,7 +251,7 @@ async fn connect_public_openai_realtime_ws(
 
 async fn bridge_public_openai_realtime(
     client: WebSocket,
-    mut upstream: specter::WebSocket,
+    mut upstream: warpsock::WebSocket,
 ) -> AppResult<()> {
     let (mut client_sender, mut client_receiver) = client.split();
     let heartbeat = tokio::time::sleep(Duration::from_millis(REALTIME_WS_HEARTBEAT_TIMEOUT_MS));
@@ -270,8 +270,8 @@ async fn bridge_public_openai_realtime(
                 );
                 send_realtime_error_to_client_sender(&mut client_sender, &error).await?;
                 close_client_sender(&mut client_sender, error.close_code, error.close_reason).await?;
-                let _ = upstream.close(Some(specter::CloseFrame {
-                    code: specter::CloseCode::Error,
+                let _ = upstream.close(Some(warpsock::CloseFrame {
+                    code: warpsock::CloseCode::Error,
                     reason: "heartbeat timeout".to_string(),
                 })).await;
                 return Ok(());
@@ -321,7 +321,7 @@ async fn bridge_public_openai_realtime(
 
 async fn forward_realtime_client_message(
     message: Message,
-    upstream: &mut specter::WebSocket,
+    upstream: &mut warpsock::WebSocket,
     client_sender: &mut futures::stream::SplitSink<WebSocket, Message>,
 ) -> AppResult<bool> {
     let upstream_message = match message {
@@ -375,7 +375,7 @@ async fn forward_realtime_upstream_message(
 }
 
 async fn send_upstream_with_saturation(
-    upstream: &mut specter::WebSocket,
+    upstream: &mut warpsock::WebSocket,
     message: UpstreamMessage,
     client_sender: &mut futures::stream::SplitSink<WebSocket, Message>,
 ) -> AppResult<()> {
@@ -419,7 +419,7 @@ async fn send_client_with_saturation(
 
 async fn send_realtime_oversize_and_close(
     client_sender: &mut futures::stream::SplitSink<WebSocket, Message>,
-    upstream: &mut specter::WebSocket,
+    upstream: &mut warpsock::WebSocket,
 ) -> AppResult<()> {
     let error = RealtimeWsLocalError::new(
         StatusCode::PAYLOAD_TOO_LARGE,
@@ -432,8 +432,8 @@ async fn send_realtime_oversize_and_close(
     send_realtime_error_to_client_sender(client_sender, &error).await?;
     close_client_sender(client_sender, error.close_code, error.close_reason).await?;
     let _ = upstream
-        .close(Some(specter::CloseFrame {
-            code: specter::CloseCode::Size,
+        .close(Some(warpsock::CloseFrame {
+            code: warpsock::CloseCode::Size,
             reason: "frame too large".to_string(),
         }))
         .await;
@@ -625,14 +625,14 @@ impl std::fmt::Debug for RealtimeWsLocalError {
     }
 }
 
-fn close_code_from_upstream(frame: Option<&specter::CloseFrame>) -> u16 {
+fn close_code_from_upstream(frame: Option<&warpsock::CloseFrame>) -> u16 {
     frame
         .map(|frame| frame.code.as_u16())
         .filter(|code| (1000..=4999).contains(code))
         .unwrap_or(close_code::NORMAL)
 }
 
-fn close_reason_from_upstream(frame: Option<&specter::CloseFrame>) -> &'static str {
+fn close_reason_from_upstream(frame: Option<&warpsock::CloseFrame>) -> &'static str {
     let _ = frame;
     "upstream realtime closed"
 }
@@ -676,7 +676,10 @@ fn ensure_responses_websocket_capable(state: &AppState, value: &Value) -> AppRes
         DispatchAction::BedrockAnthropicMessages
         | DispatchAction::GoogleGenerateContent
         | DispatchAction::CursorAgent
-        | DispatchAction::WindsurfChat => Err(AppError::ModelNotSupported(plan.requested_model)),
+        | DispatchAction::WindsurfChat
+        | DispatchAction::MinimaxChatCompletions => {
+            Err(AppError::ModelNotSupported(plan.requested_model))
+        }
     }
 }
 
@@ -836,6 +839,9 @@ async fn resolve_bridge_route(
             return Err(AppError::ModelNotSupported(plan.requested_model))
         }
         DispatchAction::WindsurfChat => {
+            return Err(AppError::ModelNotSupported(plan.requested_model))
+        }
+        DispatchAction::MinimaxChatCompletions => {
             return Err(AppError::ModelNotSupported(plan.requested_model))
         }
     };
@@ -1599,7 +1605,7 @@ async fn send_codex_upstream_failure(
 async fn handle_codex_inflight_client_message(
     client: &mut WebSocket,
     message: Message,
-    upstream: &mut specter::WebSocket,
+    upstream: &mut warpsock::WebSocket,
 ) -> AppResult<bool> {
     match message {
         Message::Text(text) => {
@@ -2060,15 +2066,15 @@ fn prepare_responses_frame_payload(state: &AppState, value: Value) -> AppResult<
     Ok(payload.to_string())
 }
 
-fn to_upstream_close_frame(frame: Option<CloseFrame<'static>>) -> Option<specter::CloseFrame> {
-    frame.map(|frame| specter::CloseFrame {
-        code: specter::CloseCode::from_u16(frame.code)
-            .unwrap_or(specter::CloseCode::Library(frame.code)),
+fn to_upstream_close_frame(frame: Option<CloseFrame<'static>>) -> Option<warpsock::CloseFrame> {
+    frame.map(|frame| warpsock::CloseFrame {
+        code: warpsock::CloseCode::from_u16(frame.code)
+            .unwrap_or(warpsock::CloseCode::Library(frame.code)),
         reason: frame.reason.into_owned(),
     })
 }
 
-fn to_client_close_frame(frame: Option<specter::CloseFrame>) -> Option<CloseFrame<'static>> {
+fn to_client_close_frame(frame: Option<warpsock::CloseFrame>) -> Option<CloseFrame<'static>> {
     frame.map(|frame| CloseFrame {
         code: frame.code.as_u16(),
         reason: Cow::Owned(frame.reason),

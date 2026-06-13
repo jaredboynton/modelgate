@@ -7,7 +7,7 @@ use axum::{
 };
 use bytes::Bytes;
 use futures::{stream, Stream, TryStreamExt};
-use specter::{Body as SpecterBody, Headers as SpecterHeaders, Response as SpecterResponse};
+use warpsock::{Body as WarpsockBody, Headers as WarpsockHeaders, Response as WarpsockResponse};
 
 use crate::AppError;
 
@@ -107,13 +107,13 @@ impl UpstreamResponse {
         }
     }
 
-    pub fn from_specter(provider: &'static str, response: SpecterResponse) -> Self {
-        observe_specter_response(provider, &response);
+    pub fn from_warpsock(provider: &'static str, response: WarpsockResponse) -> Self {
+        observe_warpsock_response(provider, &response);
         let status = response.status();
         Self {
             status,
-            headers: sanitize_specter_headers(response.headers()),
-            body: specter_body_to_axum_body(response.into_body()),
+            headers: sanitize_warpsock_headers(response.headers()),
+            body: warpsock_body_to_axum_body(response.into_body()),
             provider,
             upstream_status: Some(status),
             latency_ms: None,
@@ -143,7 +143,7 @@ pub fn sse_headers() -> HeaderMap {
     headers
 }
 
-pub fn observe_specter_response(provider: &'static str, response: &SpecterResponse) {
+pub fn observe_warpsock_response(provider: &'static str, response: &WarpsockResponse) {
     tracing::debug!(
         provider,
         status = %response.status(),
@@ -165,8 +165,8 @@ pub async fn collect_upstream_error_body(body: Body) -> Result<Bytes, AppError> 
     .await
 }
 
-pub async fn collect_specter_body(
-    mut body: SpecterBody,
+pub async fn collect_warpsock_body(
+    mut body: WarpsockBody,
     context: &'static str,
 ) -> Result<Bytes, AppError> {
     body.collect_to_bytes()
@@ -174,8 +174,8 @@ pub async fn collect_specter_body(
         .map_err(|error| AppError::Upstream(format!("{context}: {error}")))
 }
 
-pub fn specter_body_stream(
-    body: SpecterBody,
+pub fn warpsock_body_stream(
+    body: WarpsockBody,
     context: &'static str,
 ) -> futures::stream::BoxStream<'static, Result<Bytes, AppError>> {
     Box::pin(stream::unfold(body, move |mut body| async move {
@@ -186,8 +186,8 @@ pub fn specter_body_stream(
     }))
 }
 
-fn specter_body_to_axum_body(body: SpecterBody) -> Body {
-    let stream = specter_body_stream(body, "upstream response").map_err(io::Error::other);
+fn warpsock_body_to_axum_body(body: WarpsockBody) -> Body {
+    let stream = warpsock_body_stream(body, "upstream response").map_err(io::Error::other);
     Body::from_stream(stream)
 }
 
@@ -199,7 +199,7 @@ async fn collect_limited_body(body: Body, limit: usize, context: &str) -> Result
     })
 }
 
-pub fn sanitize_specter_headers(headers: &SpecterHeaders) -> HeaderMap {
+pub fn sanitize_warpsock_headers(headers: &WarpsockHeaders) -> HeaderMap {
     let mut sanitized = HeaderMap::new();
     for (name, value) in headers.iter() {
         let Ok(name) = HeaderName::from_bytes(name.as_bytes()) else {

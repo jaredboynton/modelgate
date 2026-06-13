@@ -40,6 +40,7 @@ secret or best-effort provider.
 | Google | Gemini aliases such as `gemini-3.1-flash-lite`, `gemini-3.1-pro-preview`, and image-capable Gemini IDs | `gemini.api_key` in `~/.ump/auth.json` or `GOOGLE_API_KEY`; GenerateContent plus Responses bridge |
 | Cursor | `composer-1.5`, `composer-2`, `composer-2-fast`, plus live usable-model discovery when credentials work | Cursor AgentService over h2/Connect; auth from `CURSOR_ACCESS_TOKEN`, system secret store, or `<UMP_V2_AUTH_HOME>/.cursor/auth.json` |
 | Windsurf | `swe-grep-mini`, `swe-grep`, `swe-1.6-fast`, `swe-1.6`, `swe-1.5-fast`, and `adaptive` | Windsurf Cloud Connect/proto chat transport; auth from `windsurf.api_key` in `~/.ump/auth.json`, `<UMP_V2_AUTH_HOME>/windsurf/auth.json`, `~/.windsurf/auth.json`, or `WINDSURF_API_KEY` |
+| MiniMax | `MiniMax-M3` (aliases `minimax-m3`, `minimax/minimax-m3`) | MiniMax direct OpenAI-compatible Chat Completions at `https://api.minimax.io`; bearer auth from `minimax.api_key` in `~/.ump/auth.json` or `MINIMAX_API_KEY` |
 
 The canonical static allowlist lives in `src/model_alias.rs`; `/v1/models` also
 includes hot-route models and any live Cursor models discovered at request time.
@@ -224,16 +225,17 @@ Common environment variables:
 - `UMP_V2_CODEX_HANDSHAKES_PER_MIN`, default `55`
 - `UMP_V2_CODEX_CLIENT_VERSION`, default from `src/codex_catalog.rs`
 - `UMP_V2_CODEX_CATALOG_TTL_SECS`, default `3600`; refreshed at startup and in the background
-- `UMP_V2_SPECTER_H3_UPGRADE`, default `true`; set `false` to disable Alt-Svc HTTP/3 upgrades
-- `UMP_V2_SPECTER_HTTP_TLS_EARLY_DATA`, default `true`; Specter applies it only to eligible idempotent H1 requests
-- `UMP_V2_SPECTER_DNS_CACHE`, default `true`
-- `UMP_V2_SPECTER_DNS_CACHE_TTL_MS`, default `300000`
-- `UMP_V2_SPECTER_MAX_PENDING_PER_ORIGIN`, default `20`
-- `UMP_V2_SPECTER_STREAM_BODY_BUFFER_SLOTS`, default `32`
-- `UMP_V2_SPECTER_H3_TUNNEL_BYTE_BUDGET`, default `262144`
+- `UMP_V2_WARPSOCK_H3_UPGRADE`, default `true`; set `false` to disable Alt-Svc HTTP/3 upgrades
+- `UMP_V2_WARPSOCK_HTTP_TLS_EARLY_DATA`, default `true`; Warpsock applies it only to eligible idempotent H1 requests
+- `UMP_V2_WARPSOCK_DNS_CACHE`, default `true`
+- `UMP_V2_WARPSOCK_DNS_CACHE_TTL_MS`, default `300000`
+- `UMP_V2_WARPSOCK_MAX_PENDING_PER_ORIGIN`, default `20`
+- `UMP_V2_WARPSOCK_STREAM_BODY_BUFFER_SLOTS`, default `32`
+- `UMP_V2_WARPSOCK_H3_TUNNEL_BYTE_BUDGET`, default `262144`
 - `AWS_REGION` / `AWS_DEFAULT_REGION`, default `us-west-2` for Bedrock Runtime
 - `UMP_V2_GOOGLE_GENERATE_BASE_URL`, default `https://generativelanguage.googleapis.com`
 - `UMP_V2_WINDSURF_CLOUD_BASE_URL`, default `https://server.codeium.com`
+- `UMP_V2_MINIMAX_BASE_URL`, default `https://api.minimax.io`
 - `UMP_V2_BEDROCK_DISCOVERY_TIMEOUT_MS`, default `5000`
 - `UMP_V2_CODEX_HOME`, default `~/.codex`
 - `UMP_V2_AUTH_HOME`, default `~/.ump`
@@ -260,6 +262,9 @@ Provider auth file shape under `~/.ump/auth.json`:
   },
   "windsurf": {
     "api_key": "wsk_..."
+  },
+  "minimax": {
+    "api_key": "sk-..."
   }
 }
 ```
@@ -369,9 +374,9 @@ Harness cleanup/contract checks:
 scripts/gc/run-all.sh
 ```
 
-Current dependency state: `Cargo.toml` depends on the portable crates.io
-`specters` package at version `4.1.7`; no local `specter` path is required for
-fresh clones.
+Current dependency state: `Cargo.toml` depends on the portable GitHub
+`warpsock` dependency at `https://github.com/jaredboynton/warpsock`; no local
+`warpsock` path is required for fresh clones.
 
 ## Signals
 

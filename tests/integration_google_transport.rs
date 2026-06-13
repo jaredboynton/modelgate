@@ -23,7 +23,7 @@ fn google_test_state() -> AppState {
 }
 
 #[tokio::test]
-async fn google_direct_transport_uses_specter_to_post_body_and_headers() {
+async fn google_direct_transport_uses_warpsock_to_post_body_and_headers() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path(

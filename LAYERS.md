@@ -35,8 +35,7 @@ adapters keep their unknown-item rejection as defense in depth.
 
 ## Current distribution gate
 
-`Cargo.toml` depends on `specter` through the local path
-`/Users/jaredboynton/__devlocal/specter`. That is a pre-remote blocker. Do not
-claim the repo is clone-portable or that hosted CI is required-green until
-`specter` is made portable through a published crate, git dependency, vendor
-policy, or another explicit dependency decision.
+`Cargo.toml` depends on `warpsock` through the portable GitHub dependency
+`https://github.com/jaredboynton/warpsock`. Do not reintroduce local path
+dependencies in tracked manifests; hosted CI and fresh clones depend on the
+GitHub dependency resolving from `Cargo.lock`.

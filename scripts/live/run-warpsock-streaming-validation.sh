@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Specter-backed streaming live validation harness.
+# Warpsock-backed streaming live validation harness.
 #
 # Exercises the proxy's Codex and Windsurf streaming routes that are intended to
-# go through the Specter HTTP transport. When opt-in flags or credentials are
+# go through the Warpsock HTTP transport. When opt-in flags or credentials are
 # missing, each row is recorded as `skipped-with-reason` instead of failing the
 # deterministic validators. All emitted artifacts are redacted: secret values
 # and bearer tokens never reach the row JSON or the saved transcripts.
@@ -18,7 +18,7 @@
 #   UMP_V2_LIVE_BASE_URL=http://127.0.0.1:18743
 #   UMP_V2_LIVE_HARNESS_RUNS_ROOT=<path>  (default ./.live-harness/runs)
 #
-# Outputs JSON summary at $RUN_DIR/specter-streaming-summary.json containing
+# Outputs JSON summary at $RUN_DIR/warpsock-streaming-summary.json containing
 # per-row provider, model, route, streaming mode, status, and reason.
 
 set -uo pipefail
@@ -28,7 +28,7 @@ RUNS_ROOT="${UMP_V2_LIVE_HARNESS_RUNS_ROOT:-${REPO_ROOT}/.live-harness/runs}"
 STAMP="${UMP_V2_LIVE_HARNESS_STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
 RUN_DIR="${RUNS_ROOT}/${STAMP}"
 mkdir -p "${RUN_DIR}"
-SUMMARY="${RUN_DIR}/specter-streaming-summary.json"
+SUMMARY="${RUN_DIR}/warpsock-streaming-summary.json"
 
 UMP_BASE="${UMP_V2_LIVE_BASE_URL:-http://127.0.0.1:18743}"
 
@@ -57,19 +57,19 @@ run_codex_stream() {
     local model="${UMP_V2_LIVE_CODEX_STREAM_MODEL:-}"
     local out="${RUN_DIR}/codex-streaming.log"
     if [[ "${UMP_V2_LIVE_HARNESS:-0}" != "1" ]]; then
-        push_row "$(printf '{"provider":"codex","route":"/v1/responses","streaming":true,"status":"skipped","reason":"UMP_V2_LIVE_HARNESS=1 not set","specter_route":true}')"
+        push_row "$(printf '{"provider":"codex","route":"/v1/responses","streaming":true,"status":"skipped","reason":"UMP_V2_LIVE_HARNESS=1 not set","warpsock_route":true}')"
         return 0
     fi
     if [[ "${UMP_V2_LIVE_CODEX_STREAM:-0}" != "1" ]]; then
-        push_row "$(printf '{"provider":"codex","route":"/v1/responses","streaming":true,"status":"skipped","reason":"UMP_V2_LIVE_CODEX_STREAM=1 not set","specter_route":true}')"
+        push_row "$(printf '{"provider":"codex","route":"/v1/responses","streaming":true,"status":"skipped","reason":"UMP_V2_LIVE_CODEX_STREAM=1 not set","warpsock_route":true}')"
         return 0
     fi
     if [[ -z "${model}" ]]; then
-        push_row "$(printf '{"provider":"codex","route":"/v1/responses","streaming":true,"status":"skipped","reason":"UMP_V2_LIVE_CODEX_STREAM_MODEL not set","specter_route":true}')"
+        push_row "$(printf '{"provider":"codex","route":"/v1/responses","streaming":true,"status":"skipped","reason":"UMP_V2_LIVE_CODEX_STREAM_MODEL not set","warpsock_route":true}')"
         return 0
     fi
     if [[ ! -d "${HOME}/.codex" ]] || [[ ! -e "${HOME}/.codex/auth.json" && ! -e "${HOME}/.codex/auth-backups" ]]; then
-        push_row "$(printf '{"provider":"codex","route":"/v1/responses","streaming":true,"status":"skipped","reason":"local Codex OAuth credentials missing","specter_route":true}')"
+        push_row "$(printf '{"provider":"codex","route":"/v1/responses","streaming":true,"status":"skipped","reason":"local Codex OAuth credentials missing","warpsock_route":true}')"
         return 0
     fi
 
@@ -78,28 +78,28 @@ run_codex_stream() {
     if curl -fsS -N -H 'content-type: application/json' "${UMP_BASE%/}/v1/responses" -d "${body}" > "${out}" 2>&1; then
         redact_transcript "${out}"
         if grep -q 'response\.completed' "${out}" || grep -q '"done"\s*:\s*true' "${out}"; then
-            push_row "$(printf '{"provider":"codex","model":"%s","route":"/v1/responses","streaming":true,"status":"pass","specter_route":true,"transcript":"%s"}' "${model}" "${out#${REPO_ROOT}/}")"
+            push_row "$(printf '{"provider":"codex","model":"%s","route":"/v1/responses","streaming":true,"status":"pass","warpsock_route":true,"transcript":"%s"}' "${model}" "${out#${REPO_ROOT}/}")"
             return 0
         fi
-        push_row "$(printf '{"provider":"codex","model":"%s","route":"/v1/responses","streaming":true,"status":"warn","reason":"no terminal response.completed event observed","specter_route":true,"transcript":"%s"}' "${model}" "${out#${REPO_ROOT}/}")"
+        push_row "$(printf '{"provider":"codex","model":"%s","route":"/v1/responses","streaming":true,"status":"warn","reason":"no terminal response.completed event observed","warpsock_route":true,"transcript":"%s"}' "${model}" "${out#${REPO_ROOT}/}")"
         return 0
     fi
     redact_transcript "${out}"
-    push_row "$(printf '{"provider":"codex","model":"%s","route":"/v1/responses","streaming":true,"status":"warn","reason":"curl returned non-zero exit; see redacted transcript","specter_route":true,"transcript":"%s"}' "${model}" "${out#${REPO_ROOT}/}")"
+    push_row "$(printf '{"provider":"codex","model":"%s","route":"/v1/responses","streaming":true,"status":"warn","reason":"curl returned non-zero exit; see redacted transcript","warpsock_route":true,"transcript":"%s"}' "${model}" "${out#${REPO_ROOT}/}")"
 }
 
 run_windsurf_stream() {
     local out="${RUN_DIR}/windsurf-streaming.log"
     if [[ "${UMP_V2_LIVE_HARNESS:-0}" != "1" ]]; then
-        push_row "$(printf '{"provider":"windsurf","route":"/v1/chat/completions","streaming":true,"status":"skipped","reason":"UMP_V2_LIVE_HARNESS=1 not set","specter_route":true}')"
+        push_row "$(printf '{"provider":"windsurf","route":"/v1/chat/completions","streaming":true,"status":"skipped","reason":"UMP_V2_LIVE_HARNESS=1 not set","warpsock_route":true}')"
         return 0
     fi
     if [[ "${UMP_V2_LIVE_WINDSURF_STREAM:-0}" != "1" ]]; then
-        push_row "$(printf '{"provider":"windsurf","route":"/v1/chat/completions","streaming":true,"status":"skipped","reason":"UMP_V2_LIVE_WINDSURF_STREAM=1 not set","specter_route":true}')"
+        push_row "$(printf '{"provider":"windsurf","route":"/v1/chat/completions","streaming":true,"status":"skipped","reason":"UMP_V2_LIVE_WINDSURF_STREAM=1 not set","warpsock_route":true}')"
         return 0
     fi
     if [[ -z "${WINDSURF_API_KEY:-}" ]]; then
-        push_row "$(printf '{"provider":"windsurf","route":"/v1/chat/completions","streaming":true,"status":"skipped","reason":"WINDSURF_API_KEY missing","specter_route":true}')"
+        push_row "$(printf '{"provider":"windsurf","route":"/v1/chat/completions","streaming":true,"status":"skipped","reason":"WINDSURF_API_KEY missing","warpsock_route":true}')"
         return 0
     fi
 
@@ -108,14 +108,14 @@ run_windsurf_stream() {
     if curl -fsS -N -H 'content-type: application/json' "${UMP_BASE%/}/v1/chat/completions" -d "${body}" > "${out}" 2>&1; then
         redact_transcript "${out}"
         if grep -q 'data: \[DONE\]' "${out}"; then
-            push_row "$(printf '{"provider":"windsurf","model":"windsurf/swe-1.6","route":"/v1/chat/completions","streaming":true,"status":"pass","specter_route":true,"transcript":"%s"}' "${out#${REPO_ROOT}/}")"
+            push_row "$(printf '{"provider":"windsurf","model":"windsurf/swe-1.6","route":"/v1/chat/completions","streaming":true,"status":"pass","warpsock_route":true,"transcript":"%s"}' "${out#${REPO_ROOT}/}")"
             return 0
         fi
-        push_row "$(printf '{"provider":"windsurf","model":"windsurf/swe-1.6","route":"/v1/chat/completions","streaming":true,"status":"warn","reason":"no [DONE] terminator observed","specter_route":true,"transcript":"%s"}' "${out#${REPO_ROOT}/}")"
+        push_row "$(printf '{"provider":"windsurf","model":"windsurf/swe-1.6","route":"/v1/chat/completions","streaming":true,"status":"warn","reason":"no [DONE] terminator observed","warpsock_route":true,"transcript":"%s"}' "${out#${REPO_ROOT}/}")"
         return 0
     fi
     redact_transcript "${out}"
-    push_row "$(printf '{"provider":"windsurf","model":"windsurf/swe-1.6","route":"/v1/chat/completions","streaming":true,"status":"warn","reason":"curl returned non-zero exit; see redacted transcript","specter_route":true,"transcript":"%s"}' "${out#${REPO_ROOT}/}")"
+    push_row "$(printf '{"provider":"windsurf","model":"windsurf/swe-1.6","route":"/v1/chat/completions","streaming":true,"status":"warn","reason":"curl returned non-zero exit; see redacted transcript","warpsock_route":true,"transcript":"%s"}' "${out#${REPO_ROOT}/}")"
 }
 
 run_codex_stream
@@ -131,7 +131,7 @@ done
 {
     printf '{\n'
     printf '  "fulfills": ["VAL-INT-004", "VAL-INT-005", "VAL-INT-006", "VAL-INT-007", "VAL-INT-011", "VAL-INT-012"],\n'
-    printf '  "harness": "scripts/live/run-specter-streaming-validation.sh",\n'
+    printf '  "harness": "scripts/live/run-warpsock-streaming-validation.sh",\n'
     printf '  "ump_base_url": "%s",\n' "${UMP_BASE}"
     printf '  "overall_status": "%s",\n' "${OVERALL}"
     printf '  "rows": [\n'

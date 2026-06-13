@@ -528,7 +528,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1536,7 +1536,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1786,44 +1786,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "specters"
-version = "4.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0a5a081b20b1c51cf43bd680efdb2eb9bc2705c666a62259416a0970d530404"
-dependencies = [
- "atomic-waker",
- "base64",
- "boring",
- "boring-sys",
- "brotli",
- "bytes",
- "chrono",
- "flate2",
- "foreign-types-shared",
- "futures-core",
- "getrandom 0.3.4",
- "hex",
- "http",
- "http-body",
- "httparse",
- "libc",
- "parking_lot",
- "pin-project-lite",
- "psl",
- "rustls-native-certs",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "sha2",
- "socket2",
- "thiserror 2.0.18",
- "tokio",
- "tokio-boring",
- "tracing",
- "zstd",
-]
-
-[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1873,7 +1835,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2184,7 +2146,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "specters",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -2194,6 +2155,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "warpsock",
  "wiremock",
  "zstd",
 ]
@@ -2269,6 +2231,43 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa7760aed19e106de2c7c0b581b509f2f25d3dacaf737cb82ac61bc6d760b0e"
 dependencies = [
  "try-lock",
+]
+
+[[package]]
+name = "warpsock"
+version = "4.2.3"
+source = "git+https://github.com/jaredboynton/warpsock?branch=main#938836c8db2a9a4b4783bb808b7ded78b6307cfe"
+dependencies = [
+ "atomic-waker",
+ "base64",
+ "boring",
+ "boring-sys",
+ "brotli",
+ "bytes",
+ "chrono",
+ "flate2",
+ "foreign-types-shared",
+ "futures-core",
+ "getrandom 0.3.4",
+ "hex",
+ "http",
+ "http-body",
+ "httparse",
+ "libc",
+ "parking_lot",
+ "pin-project-lite",
+ "psl",
+ "rustls-native-certs",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sha2",
+ "socket2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-boring",
+ "tracing",
+ "zstd",
 ]
 
 [[package]]

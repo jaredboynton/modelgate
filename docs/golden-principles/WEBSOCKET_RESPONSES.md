@@ -36,12 +36,12 @@ Required fields:
 - nested `error.code`
 - nested `error.message`
 
-## Specter Boundary
+## Warpsock Boundary
 
-- `specter` owns RFC 6455 WebSocket client behavior for Codex WSS.
+- `warpsock` owns RFC 6455 WebSocket client behavior for Codex WSS.
 - Do not add a second WebSocket stack for Codex.
-- H2/H3 WebSocket experiments must use Specter APIs and live evidence before changing default transport.
-- Local integration tests should use Specter for both client and fixture paths where that is the behavior under review.
+- H2/H3 WebSocket experiments must use Warpsock APIs and live evidence before changing default transport.
+- Local integration tests should use Warpsock for both client and fixture paths where that is the behavior under review.
 
 ## Review Checklist
 

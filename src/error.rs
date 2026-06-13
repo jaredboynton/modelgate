@@ -34,8 +34,8 @@ pub enum AppError {
     },
 }
 
-impl From<specter::Error> for AppError {
-    fn from(error: specter::Error) -> Self {
+impl From<warpsock::Error> for AppError {
+    fn from(error: warpsock::Error) -> Self {
         Self::Upstream(error.to_string())
     }
 }

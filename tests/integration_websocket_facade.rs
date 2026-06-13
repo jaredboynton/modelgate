@@ -1,10 +1,10 @@
 use std::{env, ffi::OsString, fs, net::SocketAddr, time::Duration};
 
 use serde_json::{json, Value};
-use specter::Message as SpecterMessage;
 use tempfile::TempDir;
 use tokio::{net::TcpListener, task::JoinHandle};
 use unified_model_proxy_v2::{build_router, AppState};
+use warpsock::Message as WarpsockMessage;
 
 struct TestState {
     _codex_home: TempDir,
@@ -661,8 +661,8 @@ async fn spawn_proxy(state: AppState) -> SpawnedServer {
     SpawnedServer { addr, handle }
 }
 
-async fn connect_proxy_ws(proxy: &SpawnedServer) -> specter::WebSocket {
-    specter::Client::new()
+async fn connect_proxy_ws(proxy: &SpawnedServer) -> warpsock::WebSocket {
+    warpsock::Client::new()
         .unwrap()
         .websocket(format!("ws://{}/v1/responses", proxy.addr))
         .connect()
@@ -670,14 +670,14 @@ async fn connect_proxy_ws(proxy: &SpawnedServer) -> specter::WebSocket {
         .unwrap()
 }
 
-async fn expect_json_frame(ws: &mut specter::WebSocket) -> Value {
+async fn expect_json_frame(ws: &mut warpsock::WebSocket) -> Value {
     let message = tokio::time::timeout(Duration::from_secs(2), ws.next())
         .await
         .unwrap()
         .unwrap()
         .unwrap();
     match message {
-        SpecterMessage::Text(text) => {
+        WarpsockMessage::Text(text) => {
             assert!(
                 !text.starts_with("event:") && !text.starts_with("data:"),
                 "raw SSE must not be sent over downstream WS: {text}"

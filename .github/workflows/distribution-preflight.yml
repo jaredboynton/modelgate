@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       run_cargo_probe:
-        description: "Attempt Cargo metadata/build probes even if local path blockers are present"
+        description: "Run Cargo metadata/build probes"
         required: true
         type: boolean
         default: false
@@ -28,7 +28,7 @@ jobs:
         run: |
           cat <<'MSG'
           This workflow is manual and report-only.
-          Local path blockers such as specter are expected until dependency portability is resolved.
+          Local path blockers are regressions now that Warpsock is a portable dependency.
           Findings here are distribution readiness evidence, not a required green remote gate.
           No live credentials are used.
           MSG
@@ -80,13 +80,13 @@ jobs:
           cat <<MSG
           cargo metadata exit code: ${metadata_exit}
           cargo build exit code: ${build_exit}
-          Non-zero exits are expected while specter remains a local absolute path.
+          Non-zero exits indicate a distribution-readiness problem.
           MSG
           exit 0
 
       - name: Summarize current blocker
         run: |
           cat <<'MSG'
-          Pre-remote blocker: specter must be made portable before required GitHub-hosted CI or distribution claims.
-          Current valid claim: CI and distribution-preflight scaffolding exist, with remote-required checks gated by dependency portability.
+          Current blocker status: no known Warpsock local-path blocker remains.
+          Current valid claim: CI and distribution-preflight scaffolding exist, and remote-required checks are no longer dependency-portability gated.
           MSG

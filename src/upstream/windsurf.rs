@@ -3,13 +3,13 @@ use std::collections::VecDeque;
 use bytes::Bytes;
 use futures::{stream, StreamExt};
 use serde_json::Value;
-use specter::HttpVersion;
 use uuid::Uuid;
+use warpsock::HttpVersion;
 
 use crate::{
     auth,
     upstream::connect::{extend_message, extend_string, extend_varint_field},
-    upstream_response::{collect_specter_body, specter_body_stream},
+    upstream_response::{collect_warpsock_body, warpsock_body_stream},
     AppError, AppResult, AppState,
 };
 
@@ -61,13 +61,13 @@ pub async fn stream_chat_text(
             let status = response.status();
             let body = response.into_body();
             if !status.is_success() {
-                let body = collect_specter_body(body, "Windsurf stream failed").await?;
+                let body = collect_warpsock_body(body, "Windsurf stream failed").await?;
                 return Err(AppError::Upstream(format!(
                     "Windsurf returned {status}: {}",
                     String::from_utf8_lossy(&body)
                 )));
             }
-            let source = specter_body_stream(body, "Windsurf stream failed");
+            let source = warpsock_body_stream(body, "Windsurf stream failed");
             let state = StreamState {
                 source,
                 buffer: Vec::new(),
@@ -135,7 +135,7 @@ async fn send_chat_request(
     state: &AppState,
     request: &Value,
     upstream_model: &str,
-) -> AppResult<specter::Response> {
+) -> AppResult<warpsock::Response> {
     let api_key = auth::windsurf::api_key(state)?;
     let payload = build_get_chat_message_request(
         request,
@@ -149,7 +149,7 @@ async fn send_chat_request(
         state.runtime.windsurf_cloud_base_url.trim_end_matches('/'),
         GET_CHAT_MESSAGE_PATH
     );
-    let client = state.specter.clone();
+    let client = state.warpsock.clone();
     let response = client
         .post(url)
         .header("content-type", "application/connect+proto")
@@ -191,7 +191,7 @@ async fn send_chat_request_streaming(
         state.runtime.windsurf_cloud_base_url.trim_end_matches('/'),
         GET_CHAT_MESSAGE_PATH
     );
-    let client = state.specter.clone();
+    let client = state.warpsock.clone();
     match client
         .post(url)
         .header("content-type", "application/connect+proto")
@@ -497,12 +497,12 @@ struct StreamState {
 }
 
 enum WindsurfStreamResponse {
-    Buffered(specter::Response),
-    Streaming(specter::Response),
+    Buffered(warpsock::Response),
+    Streaming(warpsock::Response),
 }
 
-fn is_non_h2_streaming_error(error: &specter::Error) -> bool {
-    matches!(error, specter::Error::HttpProtocol(message) if message.contains("Expected h2 ALPN"))
+fn is_non_h2_streaming_error(error: &warpsock::Error) -> bool {
+    matches!(error, warpsock::Error::HttpProtocol(message) if message.contains("Expected h2 ALPN"))
 }
 
 #[cfg(test)]

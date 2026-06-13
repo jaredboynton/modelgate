@@ -12,10 +12,10 @@ use axum::{
 };
 use bytes::Bytes;
 use serde_json::{json, Value};
-use specter::Message as SpecterMessage;
 use tempfile::TempDir;
 use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
 use unified_model_proxy_v2::{build_router, AppState};
+use warpsock::Message as WarpsockMessage;
 
 #[derive(Debug)]
 struct CapturedWebSocket {
@@ -56,7 +56,7 @@ async fn responses_websocket_passthrough_uses_codex_auth_and_hot_routing() {
         format!("ws://{}/backend-api/codex/responses", upstream.addr);
     let proxy = spawn_proxy(state).await;
 
-    let client = specter::Client::new().unwrap();
+    let client = warpsock::Client::new().unwrap();
     let mut ws = client
         .websocket(format!("ws://{}/v1/responses", proxy.addr))
         .connect()
@@ -75,7 +75,7 @@ async fn responses_websocket_passthrough_uses_codex_auth_and_hot_routing() {
 
     let upstream_message = ws.next().await.unwrap().unwrap();
     match upstream_message {
-        SpecterMessage::Text(text) => assert!(text.contains("response.completed")),
+        WarpsockMessage::Text(text) => assert!(text.contains("response.completed")),
         other => panic!("unexpected proxy websocket message: {other:?}"),
     }
 
@@ -136,7 +136,7 @@ async fn responses_websocket_accepts_flat_codex_cli_response_create_frame() {
 
     let upstream_message = ws.next().await.unwrap().unwrap();
     match upstream_message {
-        SpecterMessage::Text(text) => assert!(text.contains("response.completed")),
+        WarpsockMessage::Text(text) => assert!(text.contains("response.completed")),
         other => panic!("unexpected proxy websocket message: {other:?}"),
     }
 
@@ -551,7 +551,7 @@ async fn responses_websocket_accepts_binary_raw_responses_body_for_compatibility
     let proxy = spawn_proxy(state).await;
 
     let mut ws = connect_proxy_ws(&proxy, "/api/provider/openai/v1/responses").await;
-    ws.send(SpecterMessage::Binary(Bytes::from(
+    ws.send(WarpsockMessage::Binary(Bytes::from(
         json!({
             "model": "binary-raw-model",
             "input": "raw binary body",
@@ -571,7 +571,7 @@ async fn responses_websocket_accepts_binary_raw_responses_body_for_compatibility
     let completed = expect_json_frame(&mut ws).await;
     assert_eq!(completed["type"], "response.completed");
 
-    ws.send(SpecterMessage::Binary(Bytes::from(
+    ws.send(WarpsockMessage::Binary(Bytes::from(
         json!({
             "model": "binary-raw-second-model",
             "input": "second raw binary body",
@@ -694,7 +694,7 @@ async fn responses_websocket_fails_closed_for_malformed_json_without_upstream() 
 async fn non_responses_routes_reject_websocket_handshakes() {
     let test_state = codex_test_state_without_route();
     let proxy = spawn_proxy(test_state.state.clone()).await;
-    let client = specter::Client::new().unwrap();
+    let client = warpsock::Client::new().unwrap();
 
     let result = client
         .websocket(format!("ws://{}/v1/messages", proxy.addr))
@@ -735,7 +735,7 @@ async fn responses_websocket_forwards_ping_pong_controls_after_first_frame() {
 
     let client_message = ws.next().await.unwrap().unwrap();
     match client_message {
-        SpecterMessage::Ping(bytes) => assert_eq!(bytes.as_ref(), b"proxy-ping"),
+        WarpsockMessage::Ping(bytes) => assert_eq!(bytes.as_ref(), b"proxy-ping"),
         other => panic!("expected ping from upstream through proxy, got {other:?}"),
     }
 
@@ -1105,8 +1105,8 @@ fn codex_test_state_without_route() -> TestState {
     }
 }
 
-async fn connect_proxy_ws(proxy: &SpawnedServer, path: &str) -> specter::WebSocket {
-    specter::Client::new()
+async fn connect_proxy_ws(proxy: &SpawnedServer, path: &str) -> warpsock::WebSocket {
+    warpsock::Client::new()
         .unwrap()
         .websocket(format!("ws://{}{}", proxy.addr, path))
         .connect()
@@ -1149,14 +1149,14 @@ async fn expect_control(capture_rx: &mut mpsc::UnboundedReceiver<CapturedEvent>)
     }
 }
 
-async fn expect_json_frame(ws: &mut specter::WebSocket) -> Value {
+async fn expect_json_frame(ws: &mut warpsock::WebSocket) -> Value {
     let message = tokio::time::timeout(Duration::from_secs(2), ws.next())
         .await
         .unwrap()
         .unwrap()
         .unwrap();
     match message {
-        SpecterMessage::Text(text) => {
+        WarpsockMessage::Text(text) => {
             assert!(
                 !text.starts_with("event:") && !text.starts_with("data:"),
                 "raw SSE must not be sent over downstream WS: {text}"
@@ -1167,7 +1167,7 @@ async fn expect_json_frame(ws: &mut specter::WebSocket) -> Value {
     }
 }
 
-async fn expect_json_frame_type(ws: &mut specter::WebSocket, expected_type: &str) -> Value {
+async fn expect_json_frame_type(ws: &mut warpsock::WebSocket, expected_type: &str) -> Value {
     for _ in 0..8 {
         let frame = expect_json_frame(ws).await;
         if frame["type"] == expected_type {
@@ -1177,7 +1177,7 @@ async fn expect_json_frame_type(ws: &mut specter::WebSocket, expected_type: &str
     panic!("expected websocket frame type {expected_type}");
 }
 
-async fn expect_synthetic_lifecycle(ws: &mut specter::WebSocket) {
+async fn expect_synthetic_lifecycle(ws: &mut warpsock::WebSocket) {
     let created = expect_json_frame(ws).await;
     assert_eq!(created["type"], "response.created");
     let response_id = created["response"]["id"].as_str().unwrap().to_string();
@@ -1189,14 +1189,14 @@ async fn expect_synthetic_lifecycle(ws: &mut specter::WebSocket) {
     assert_eq!(completed["response"]["usage"]["total_tokens"], 0);
 }
 
-async fn expect_proxy_error(ws: &mut specter::WebSocket) -> String {
+async fn expect_proxy_error(ws: &mut warpsock::WebSocket) -> String {
     let message = tokio::time::timeout(Duration::from_secs(2), ws.next())
         .await
         .unwrap()
         .unwrap()
         .unwrap();
     match message {
-        SpecterMessage::Text(text) => {
+        WarpsockMessage::Text(text) => {
             assert!(text.contains("\"type\":\"error\""));
             text
         }

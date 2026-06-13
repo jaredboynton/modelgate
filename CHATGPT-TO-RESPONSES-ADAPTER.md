@@ -218,7 +218,7 @@ ChatGPT web endpoints sit behind Cloudflare bot mitigation that inspects the req
 - Bare `curl` with `Authorization` only -> `HTTP/2 403 text/html` (Cloudflare interstitial).
 - Same `curl` + Chrome 146 desktop `User-Agent`, `sec-ch-ua` triplet, `sec-fetch-*`, `Origin: https://chatgpt.com`, `Referer: https://chatgpt.com/`, `Accept-Language` -> `HTTP/2 200 application/json`.
 
-That is the entire admission gate for ChatGPT-product backend routes. No custom TLS stack, no JA3/JA4 fingerprint match, and no HTTP/2 frame ordering tricks are required: any HTTP client that lets you set headers will pass the edge if the headers are coherent. This contradicts earlier guidance in this file that recommended Specter/BoringSSL fingerprinting for admission; that recommendation is retracted.
+That is the entire admission gate for ChatGPT-product backend routes. No custom TLS stack, no JA3/JA4 fingerprint match, and no HTTP/2 frame ordering tricks are required: any HTTP client that lets you set headers will pass the edge if the headers are coherent. This contradicts earlier guidance in this file that recommended Warpsock/BoringSSL fingerprinting for admission; that recommendation is retracted.
 
 Minimum browser-like header set (apply on every ChatGPT-backend request):
 
@@ -256,7 +256,7 @@ Focused validation results (browser-headered `curl` unless noted):
 | `GET /backend-api/celsius/ws/user` | HTML `403` Cloudflare | `200` over HTTP/2 with signed `wss://ws.chatgpt.com/p4/ws/user/...?...` URL | Same. |
 | Celsius `wss://ws.chatgpt.com/p4/ws/user/...` | n/a | RFC 6455 handshake succeeds, idle channel | Celsius is a passive stream-handoff channel; not a standalone transcript feed. |
 | `POST /realtime/vp?dcid=0` (trivial SDP) | HTML `403` Cloudflare | JSON `400 invalid_offer` | Edge passes; SDP body validates separately. |
-| `POST /realtime/vp?dcid=0` (Atlas-shaped offer) | STUN timeouts on offers with gathered local candidates or two audio tracks | `201` SDP answer; ICE connects after `setRemoteDescription` | VP works for any client that can build an Atlas-shaped offer; admission is browser-headers, not Specter-only. |
+| `POST /realtime/vp?dcid=0` (Atlas-shaped offer) | STUN timeouts on offers with gathered local candidates or two audio tracks | `201` SDP answer; ICE connects after `setRemoteDescription` | VP works for any client that can build an Atlas-shaped offer; admission is browser-headers, not Warpsock-only. |
 
 Embeddings note: this admission story applies only to ChatGPT-product routes (`chatgpt.com/backend-api/*` and the Cloudflare-fronted ChatGPT voice surfaces). The public OpenAI API origin (`api.openai.com/v1/*`) does **not** care about browser headers; it gates by token scope and project billing. Browser headers will not turn an OpenAI `429 insufficient_quota` on `/v1/embeddings` into a `200`. See "Codex OAuth Compatibility" below.
 
@@ -314,7 +314,7 @@ GET https://chatgpt.com/backend-api/celsius/ws/user
 
 Result: `200` JSON with `websocket_url`, scheme `wss`, host `ws.chatgpt.com`, path shape `/p4/ws/user/user-[REDACTED]`, query key `verify`.
 
-Specter validation opened the returned WSS URL successfully, but the socket stayed silent during an idle observation window. This confirms Celsius is a passive stream-handoff channel after a ChatGPT conversation emits `stream_handoff`; it is not a standalone transcript feed, speaker-label feed, or diarization surface.
+Warpsock validation opened the returned WSS URL successfully, but the socket stayed silent during an idle observation window. This confirms Celsius is a passive stream-handoff channel after a ChatGPT conversation emits `stream_handoff`; it is not a standalone transcript feed, speaker-label feed, or diarization surface.
 
 This is ChatGPT conversation stream handoff, not public Realtime API.
 
@@ -340,7 +340,7 @@ Live validation (May 15 2026) proved end-to-end WebRTC connectivity using Codex 
 
 **Response:** `201` with SDP answer body (plain text, not JSON).
 
-**ICE:** Connects in < 1 second. Uses the same Azure ICE servers as `chatgpt.com/realtime/vp` (Azure pool rotates; recent IPs include 4.151.200.38, 40.118.236.137, 20.168.48.117). Earlier VP probes saw STUN timeouts; later VP proof connected after the Tauri Specter POST returned an answer for an Atlas-shaped pre-gathered offer.
+**ICE:** Connects in < 1 second. Uses the same Azure ICE servers as `chatgpt.com/realtime/vp` (Azure pool rotates; recent IPs include 4.151.200.38, 40.118.236.137, 20.168.48.117). Earlier VP probes saw STUN timeouts; later VP proof connected after the Tauri Warpsock POST returned an answer for an Atlas-shaped pre-gathered offer.
 
 **DataChannel:** `oai-events` datachannel opens after ICE connects. `session.created` event arrives with session object: `{ type: "realtime", model: "gpt-4o-realtime-preview-2024-12-17", output_modalities: ["audio"], ... }`.
 

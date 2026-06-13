@@ -55,7 +55,8 @@ pub async fn compact_responses(
             DispatchAction::BedrockAnthropicMessages
             | DispatchAction::GoogleGenerateContent
             | DispatchAction::CursorAgent
-            | DispatchAction::WindsurfChat => Err(CompactionHttpError::new(
+            | DispatchAction::WindsurfChat
+            | DispatchAction::MinimaxChatCompletions => Err(CompactionHttpError::new(
                 StatusCode::BAD_REQUEST,
                 "unsupported_compaction_item_for_target",
                 "invalid_request",
@@ -218,10 +219,10 @@ async fn compact_codex_responses(
     let mut upstream_headers = upstream::codex::codex_headers(state)?;
     copy_compaction_binding_header(&headers, &mut upstream_headers, "session-id");
     copy_compaction_binding_header(&headers, &mut upstream_headers, "thread-id");
-    let client = state.specter.clone();
+    let client = state.warpsock.clone();
     let response = client
         .post(compact_url)
-        .headers(specter::Headers::from(upstream_headers))
+        .headers(warpsock::Headers::from(upstream_headers))
         .json(&value)
         .send()
         .await

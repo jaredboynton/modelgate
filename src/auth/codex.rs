@@ -140,11 +140,11 @@ fn account_id_from_id_token(id_token: &str) -> Option<String> {
 }
 
 pub async fn refresh_codex_auth(state: &AppState) -> AppResult<CodexAuth> {
-    refresh_codex_auth_with_endpoint(&state.specter, state, CODEX_OAUTH_TOKEN_URL).await
+    refresh_codex_auth_with_endpoint(&state.warpsock, state, CODEX_OAUTH_TOKEN_URL).await
 }
 
 pub async fn refresh_codex_auth_with_endpoint(
-    client: &specter::Client,
+    client: &warpsock::Client,
     state: &AppState,
     token_url: &str,
 ) -> AppResult<CodexAuth> {

@@ -141,7 +141,7 @@ async fn bedrock_runtime_transport_uses_bearer_auth_and_path_model_id() {
         .await;
 
     let response = send_runtime_invoke_request(
-        &specter::Client::new().unwrap(),
+        &warpsock::Client::new().unwrap(),
         BedrockRuntimeInvokeRequest {
             url: format!(
                 "{}/model/global.anthropic.claude-sonnet-4-6/invoke",
@@ -188,7 +188,7 @@ async fn bedrock_runtime_stream_transport_decodes_eventstream_incrementally() {
         spawn_incremental_runtime_eventstream_server(false).await;
     release_second_chunk.send(()).unwrap();
     let response = send_runtime_invoke_request(
-        &specter::Client::new().unwrap(),
+        &warpsock::Client::new().unwrap(),
         BedrockRuntimeInvokeRequest {
             url: format!(
                 "{server_url}/model/global.anthropic.claude-sonnet-4-6/invoke-with-response-stream"
@@ -281,7 +281,7 @@ async fn bedrock_runtime_stream_fallback_preserves_bearer_auth() {
     });
 
     let response = send_runtime_invoke_request(
-        &specter::Client::new().unwrap(),
+        &warpsock::Client::new().unwrap(),
         BedrockRuntimeInvokeRequest {
             url: format!(
                 "http://{addr}/model/global.anthropic.claude-sonnet-4-6/invoke-with-response-stream"
@@ -315,7 +315,7 @@ async fn bedrock_runtime_stream_premature_eof_fails() {
         spawn_incremental_runtime_eventstream_server(true).await; // true = premature EOF
     release_second_chunk.send(()).unwrap();
     let response = send_runtime_invoke_request(
-        &specter::Client::new().unwrap(),
+        &warpsock::Client::new().unwrap(),
         BedrockRuntimeInvokeRequest {
             url: format!(
                 "{server_url}/model/global.anthropic.claude-sonnet-4-6/invoke-with-response-stream"
@@ -374,7 +374,7 @@ async fn bedrock_runtime_transport_retries_transient_status() {
         .await;
 
     let response = send_runtime_invoke_request(
-        &specter::Client::new().unwrap(),
+        &warpsock::Client::new().unwrap(),
         BedrockRuntimeInvokeRequest {
             url: format!(
                 "{}/model/global.anthropic.claude-sonnet-4-6/invoke",

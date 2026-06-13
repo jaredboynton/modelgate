@@ -60,11 +60,12 @@ lowest neutral layer over adding a new abstraction.
 
 ## Distribution boundary
 
-`Cargo.toml` resolves Specter through the portable crates.io package:
+`Cargo.toml` resolves Warpsock through the portable GitHub dependency:
 
 ```toml
-specter = { package = "specters", version = "4.1.7" }
+warpsock = { git = "https://github.com/jaredboynton/warpsock", branch = "main" }
 ```
 
-Do not reintroduce local `path = "/Users/.../specter"` dependencies in tracked
-configuration; hosted CI and fresh clones depend on the registry package.
+Do not reintroduce local `path = "/Users/.../warpsock"` dependencies in tracked
+configuration; hosted CI and fresh clones depend on the GitHub dependency pinned
+by `Cargo.lock`.

@@ -9,7 +9,7 @@ Find and prioritize issues in how unified-model-proxy-v2 handles network request
 - The proxy listens on `127.0.0.1:18743` and exposes OpenAI/Anthropic/Google-compatible routes.
 - The current working tree already includes Cursor hardening around protobuf MCP args, terminal stream handling, and batched tool-result continuation validation.
 - Prior analysis showed `/v1/responses` is a universal compatibility layer: provider routing, continuation state, and SSE lifecycle synthesis are separate costs from simple wire-format conversion.
-- Recent Specter releases changed buffering/streaming contracts; any issue that depends on `.text()`, `.bytes()`, `send()`, `send_streaming()`, or `into_buffered()` should be validated against the actual call site.
+- Recent Warpsock releases changed buffering/streaming contracts; any issue that depends on `.text()`, `.bytes()`, `send()`, `send_streaming()`, or `into_buffered()` should be validated against the actual call site.
 
 ## Rules For Agents
 
@@ -25,7 +25,7 @@ Find and prioritize issues in how unified-model-proxy-v2 handles network request
 2. **P1 — Cursor stream lifecycle can hang or leak tasks.** Agent C found three related Cursor transport issues: no timeout while waiting for streaming response headers, total-stream rather than idle read timeout, and heartbeat/reader cleanup depending on explicit `close()` instead of terminal/drop semantics.
 3. **P1 — Streaming access logs record header completion, not body completion.** Agent F showed live Codex/Cursor streams logging `latency_ms=0` while curl observed ~1s–1.5s full-body durations. Late body failures can be hidden behind successful early 200 logs.
 4. **P1/P2 — Stream translators do not consistently flush buffered state on upstream EOF.** Agent B found Google/Anthropic Responses stream adapters map chunks only and do not call translator `finish()` on clean EOF, risking dropped buffered frames or missing terminal events.
-5. **P2 — Buffered fallbacks and full-body reads bypass streaming expectations and size limits.** Agent A found Bedrock/Windsurf/Codex fallback paths that convert requested streams into full-body waits, plus Specter `.bytes()`/`.text()`/`collect_to_bytes()` sites without the proxy's existing Axum-side caps.
+5. **P2 — Buffered fallbacks and full-body reads bypass streaming expectations and size limits.** Agent A found Bedrock/Windsurf/Codex fallback paths that convert requested streams into full-body waits, plus Warpsock `.bytes()`/`.text()`/`collect_to_bytes()` sites without the proxy's existing Axum-side caps.
 6. **P2 — Bedrock passthrough terminal detection is fragile.** Agent B found passthrough SSE terminal detection depends on `text.contains("event: message_stop")`, missing valid SSE spellings like `event:message_stop`, CRLF, or JSON-only terminal data.
 7. **P2 — WebSocket HTTP bridge needs better malformed-frame and backpressure behavior.** Agent E found malformed in-flight client frames abort active turns, and HTTP-backed bridge queue saturation lacks a timeout/error policy.
 8. **P3 — Policy and regression-test gaps remain.** Lower-priority follow-ups include raw Google provider method policy, compression/body-length regression coverage, Codex `[DONE]` terminal policy, and model extraction/logging coverage.
@@ -40,52 +40,52 @@ Find and prioritize issues in how unified-model-proxy-v2 handles network request
 - **Validation:** `cargo fmt --check`, `cargo nextest run` (`799 passed`, `14 skipped`), and `cargo clippy --tests --no-deps --all-features -- -D warnings` passed.
 - **Runtime:** `scripts/install-launchd-release.sh` rebuilt/kickstarted the proxy; `/health` returned `v0.1.11-1-g5946cea-dirty` with build time `2026-05-25T11:26:54Z`.
 - **Live smoke:** bounded Cursor forced-tool stream completed with clean `{"q":"ok"}` arguments; artifact directory `.live-harness/runs/20260525T112754Z-cursor-network-fixes-probe`.
-- **Remaining:** body-drain observability, bounded Specter body collection, Bedrock terminal parsing hardening, WebSocket bridge saturation/malformed-frame policy, and lower-priority route/header policy tests.
+- **Remaining:** body-drain observability, bounded Warpsock body collection, Bedrock terminal parsing hardening, WebSocket bridge saturation/malformed-frame policy, and lower-priority route/header policy tests.
 
-## Agent A: HTTP Client And Specter Contract
+## Agent A: HTTP Client And Warpsock Contract
 
 ### Scope
 
-Audit outbound HTTP client usage for buffering-vs-streaming contract leaks, response-body double reads, incorrect helper selection, and places where Specter behavior may be misused.
+Audit outbound HTTP client usage for buffering-vs-streaming contract leaks, response-body double reads, incorrect helper selection, and places where Warpsock behavior may be misused.
 
 ### Findings
 
 #### A1 — P1 — Bedrock streaming fallback drops SigV4 auth headers
 
 - **Files:** `src/upstream/bedrock.rs:270`, `src/upstream/bedrock.rs:277`, `src/upstream/bedrock.rs:286`, `src/upstream/bedrock.rs:289`
-- **Finding:** `send_runtime_once` applies SigV4 headers to `headers` before the primary `.send_streaming()` path, but the non-H2 fallback rebuilds `headers` from `request.headers.clone()` instead of reusing the signed header map. If Specter returns a non-H2 streaming error and the fallback `.send()` path is used, the fallback request can go upstream without `authorization`, `x-amz-date`, and related signing headers.
+- **Finding:** `send_runtime_once` applies SigV4 headers to `headers` before the primary `.send_streaming()` path, but the non-H2 fallback rebuilds `headers` from `request.headers.clone()` instead of reusing the signed header map. If Warpsock returns a non-H2 streaming error and the fallback `.send()` path is used, the fallback request can go upstream without `authorization`, `x-amz-date`, and related signing headers.
 - **Evidence:** `nl -ba src/upstream/bedrock.rs | sed -n '260,305p'` shows `apply_runtime_auth_headers(request, &mut headers).await?` at line 271, `.headers(headers)` on the streaming request at line 279, and fallback `let headers = request.headers.clone();` at line 289 before `.send()` at line 295.
-- **Impact:** A real Bedrock stream can fail only on the Specter fallback path with provider auth errors, making the fallback unreliable exactly when HTTP/2 streaming setup fails or local/mock transport lacks H2.
+- **Impact:** A real Bedrock stream can fail only on the Warpsock fallback path with provider auth errors, making the fallback unreliable exactly when HTTP/2 streaming setup fails or local/mock transport lacks H2.
 - **Proposed fix/test:** Clone the already-signed `headers` before moving it into the streaming request, and use that signed clone for the fallback `.send()` path. Add/extend an integration test that forces `is_non_h2_streaming_error` fallback and asserts the fallback request still contains SigV4 auth/date headers.
 
 #### A2 — P2 — Buffered fallbacks silently turn requested streams into full-body waits
 
 - **Files:** `src/upstream/bedrock.rs:286`, `src/upstream/bedrock.rs:358`, `src/upstream/windsurf.rs:201`, `src/upstream/windsurf.rs:41`, `src/upstream/codex.rs:863`, `src/upstream/codex.rs:886`
-- **Finding:** Three streaming providers intentionally fall back from `send_streaming()` to buffered `send()` on non-H2 Specter errors, then consume the entire body with `.bytes()`/`collect_specter_body()` before yielding one synthesized stream item. This is acceptable for local H1 mocks, but it is a contract leak if triggered against a real provider: downstream receives no incremental chunks even though the route stays on a streaming code path.
-- **Evidence:** `rg -n "send_streaming|is_non_h2_streaming_error|collect_specter_body|\.bytes\(\)" src/upstream/{bedrock,windsurf,codex}.rs` shows Bedrock fallback at `src/upstream/bedrock.rs:286` and full collection at `src/upstream/bedrock.rs:363`; Windsurf fallback at `src/upstream/windsurf.rs:201` and `.bytes()` at `src/upstream/windsurf.rs:43`; Codex fallback at `src/upstream/codex.rs:863` and `.bytes()` at `src/upstream/codex.rs:888`.
-- **Impact:** If Specter reports the fallbackable error class for a real streaming request, TTFT regresses to full response time and large streams are buffered in memory before the first downstream event.
+- **Finding:** Three streaming providers intentionally fall back from `send_streaming()` to buffered `send()` on non-H2 Warpsock errors, then consume the entire body with `.bytes()`/`collect_warpsock_body()` before yielding one synthesized stream item. This is acceptable for local H1 mocks, but it is a contract leak if triggered against a real provider: downstream receives no incremental chunks even though the route stays on a streaming code path.
+- **Evidence:** `rg -n "send_streaming|is_non_h2_streaming_error|collect_warpsock_body|\.bytes\(\)" src/upstream/{bedrock,windsurf,codex}.rs` shows Bedrock fallback at `src/upstream/bedrock.rs:286` and full collection at `src/upstream/bedrock.rs:363`; Windsurf fallback at `src/upstream/windsurf.rs:201` and `.bytes()` at `src/upstream/windsurf.rs:43`; Codex fallback at `src/upstream/codex.rs:863` and `.bytes()` at `src/upstream/codex.rs:888`.
+- **Impact:** If Warpsock reports the fallbackable error class for a real streaming request, TTFT regresses to full response time and large streams are buffered in memory before the first downstream event.
 - **Proposed fix/test:** Gate buffered fallback to known local/mock bases or expose a metric/header/log field that marks `stream_transport=buffered_fallback`; add provider-specific tests proving real streaming configs fail fast or preserve streaming instead of silently buffering.
 
-#### A3 — P2 — Unbounded Specter full-body reads remain on several upstream paths
+#### A3 — P2 — Unbounded Warpsock full-body reads remain on several upstream paths
 
 - **Files:** `src/upstream_response.rs:168`, `src/upstream/windsurf.rs:29`, `src/upstream/windsurf.rs:43`, `src/upstream/codex.rs:888`, `src/upstream/bedrock.rs:363`, `src/codex_catalog.rs:184`, `src/route/models.rs:178`, `src/upstream/openai_public.rs:166`
-- **Finding:** The Axum-side helpers enforce `MAX_UPSTREAM_BODY_BYTES` / `MAX_UPSTREAM_ERROR_BODY_BYTES`, but Specter response reads use `response.bytes()`, `response.text()`, or `SpecterBody::collect_to_bytes()` directly with no local cap. Some of these are normal bounded metadata paths, but OpenAI passthrough, Codex buffered fallback, Bedrock event-stream fallback, and Windsurf buffered fallback can read provider-controlled bodies into memory.
-- **Evidence:** `nl -ba src/upstream_response.rs | sed -n '155,175p'` shows `collect_specter_body` directly calling `body.collect_to_bytes()`; `rg -n "response\.(bytes|text)\(\)|collect_specter_body" src/upstream src/route src/codex_catalog.rs` identifies the full-body sites above.
+- **Finding:** The Axum-side helpers enforce `MAX_UPSTREAM_BODY_BYTES` / `MAX_UPSTREAM_ERROR_BODY_BYTES`, but Warpsock response reads use `response.bytes()`, `response.text()`, or `WarpsockBody::collect_to_bytes()` directly with no local cap. Some of these are normal bounded metadata paths, but OpenAI passthrough, Codex buffered fallback, Bedrock event-stream fallback, and Windsurf buffered fallback can read provider-controlled bodies into memory.
+- **Evidence:** `nl -ba src/upstream_response.rs | sed -n '155,175p'` shows `collect_warpsock_body` directly calling `body.collect_to_bytes()`; `rg -n "response\.(bytes|text)\(\)|collect_warpsock_body" src/upstream src/route src/codex_catalog.rs` identifies the full-body sites above.
 - **Impact:** Large upstream error bodies or accidental buffered streaming responses can bypass the proxy's existing body-size guardrails and increase memory pressure.
-- **Proposed fix/test:** Add `collect_specter_body_limited(context, limit)` or a limit parameter to `collect_specter_body`, use error-body limits for non-success responses and upstream-body limits for buffered success fallbacks, and add mock upstream tests with over-limit bodies to verify deterministic `AppError` instead of unbounded collection.
+- **Proposed fix/test:** Add `collect_warpsock_body_limited(context, limit)` or a limit parameter to `collect_warpsock_body`, use error-body limits for non-success responses and upstream-body limits for buffered success fallbacks, and add mock upstream tests with over-limit bodies to verify deterministic `AppError` instead of unbounded collection.
 
-#### A4 — P3 — Specter helper selection is mostly correct; no response double-read found
+#### A4 — P3 — Warpsock helper selection is mostly correct; no response double-read found
 
 - **Files:** `src/upstream_response.rs:110`, `src/upstream_response.rs:177`, `src/upstream/openai_public.rs:164`, `src/upstream/openai_public.rs:183`, `build.rs:99`
-- **Finding:** The main passthrough helper uses `UpstreamResponse::from_specter` to preserve the Specter body as an Axum stream, and response-classifying code captures status/headers before a single consuming `.bytes()` read. I did not find a same-response double-read of Specter bodies. The repo also still enforces the no-`reqwest` policy.
+- **Finding:** The main passthrough helper uses `UpstreamResponse::from_warpsock` to preserve the Warpsock body as an Axum stream, and response-classifying code captures status/headers before a single consuming `.bytes()` read. I did not find a same-response double-read of Warpsock bodies. The repo also still enforces the no-`reqwest` policy.
 - **Evidence:** `rg -n "\breqwest\b" src tests Cargo.toml build.rs` returns only the `build.rs` forbidden-policy message/scan; `src/upstream_response.rs:110` converts `response.into_body()` exactly once; `src/upstream/openai_public.rs:164-166` and `src/upstream/openai_public.rs:183-185` read separate first/second responses once each.
 - **Impact:** This lowers migration risk: the critical issues are fallback/header semantics and unbounded full-body reads, not broad helper misuse.
-- **Proposed fix/test:** Keep `from_specter` as the default for provider passthrough. Add a regression scan or unit test around no-`reqwest`/single-consumption assumptions only if future transport helpers are introduced.
+- **Proposed fix/test:** Keep `from_warpsock` as the default for provider passthrough. Add a regression scan or unit test around no-`reqwest`/single-consumption assumptions only if future transport helpers are introduced.
 
 #### Commands run
 
-- `rg -n "streaming-optimization|Specter|HTTP Client|Agent A|outbound HTTP|reqwest|bytes_stream|text\(|json\(" /Users/jaredboynton/.codex/memories/MEMORY.md docs/missions/streaming-optimization-1.md src tests Cargo.toml`
-- `rg -n "send_streaming|into_buffered|send\(|\.text\(\)|\.bytes\(\)|\.json\(|from_specter|observe_specter_response|SpecterBody|specter::Client|client\." src tests build.rs Cargo.toml`
+- `rg -n "streaming-optimization|Warpsock|HTTP Client|Agent A|outbound HTTP|reqwest|bytes_stream|text\(|json\(" /Users/jaredboynton/.codex/memories/MEMORY.md docs/missions/streaming-optimization-1.md src tests Cargo.toml`
+- `rg -n "send_streaming|into_buffered|send\(|\.text\(\)|\.bytes\(\)|\.json\(|from_warpsock|observe_warpsock_response|WarpsockBody|warpsock::Client|client\." src tests build.rs Cargo.toml`
 - `nl -ba src/upstream/bedrock.rs | sed -n '260,305p'`
 - `nl -ba src/upstream/windsurf.rs | sed -n '20,70p;145,205p'`
 - `nl -ba src/upstream/codex.rs | sed -n '850,895p;898,908p'`
@@ -149,10 +149,10 @@ Audit request timeouts, retry loops, idle-stream behavior, cancellation propagat
   - Impact: long but healthy Cursor runs are capped at 90 seconds total even if frames arrive continuously; conversely this does not implement the intended "idle stream" semantics described by the audit scope.
   - Proposed fix/test: move the `timeout(READ_DEADLINE, body.data())` inside the loop and rename/configure it as an idle read deadline; test that periodic frames beyond 90 seconds continue while a silent gap trips timeout.
 
-- **C4 — Medium: HTTP provider streams rely on Specter defaults only; repo config advertises idle/retry knobs that are not wired locally.**
+- **C4 — Medium: HTTP provider streams rely on Warpsock defaults only; repo config advertises idle/retry knobs that are not wired locally.**
   - Evidence: shared client construction calls `.streaming_timeouts()` at `src/state.rs:471`, but `rg -n "stream_idle_timeout|stream_max_retries"` only finds README examples (`README.md:322`, `README.md:323`) and no runtime parsing/wiring. Provider streaming sends use `send_streaming()` for Codex (`src/upstream/codex.rs:861`), Bedrock (`src/upstream/bedrock.rs:282`), and Windsurf (`src/upstream/windsurf.rs:197`), with fallback only for non-h2 streaming errors, not bounded idle or request-level cancellation policy in this crate.
-  - Impact: operators cannot tune advertised stream idle timeout/retry behavior from this repo, and provider stalls may depend on Specter defaults rather than explicit UMP policy.
-  - Proposed fix/test: either wire documented `stream_idle_timeout_ms` / `stream_max_retries` into `RuntimeConfig` and Specter builder if Specter exposes those controls, or remove/update docs; add config parsing tests plus a local stalled-SSE test.
+  - Impact: operators cannot tune advertised stream idle timeout/retry behavior from this repo, and provider stalls may depend on Warpsock defaults rather than explicit UMP policy.
+  - Proposed fix/test: either wire documented `stream_idle_timeout_ms` / `stream_max_retries` into `RuntimeConfig` and Warpsock builder if Warpsock exposes those controls, or remove/update docs; add config parsing tests plus a local stalled-SSE test.
 
 - **C5 — Low/Medium: Responses WebSocket HTTP-bridge task is abort-on-client-drop but not graceful upstream cancel.**
   - Evidence: the mixed-provider Responses WS bridge spawns a provider task at `src/route/websocket.rs:1345`, aborts it on downstream send/read failures at `src/route/websocket.rs:1376` and `src/route/websocket.rs:1395`, but the abort drops `forward_responses_response_to_ws()` and its response body rather than sending a provider-specific cancel/close. Codex WSS is better on dropped downstream clients because it closes the upstream socket at `src/route/websocket.rs:1516`.
@@ -173,7 +173,7 @@ Audit inbound-to-upstream header forwarding, method/path preservation, content-l
 #### D1 — High — Bedrock HTTP/1 streaming fallback drops auth headers
 
 - Evidence: `src/upstream/bedrock.rs:270` clones request headers, `src/upstream/bedrock.rs:271` applies auth, and the first HTTP/2 `send_streaming()` uses those authenticated headers at `src/upstream/bedrock.rs:278`. On non-H2 fallback, `src/upstream/bedrock.rs:289` re-clones `request.headers` and `src/upstream/bedrock.rs:291` sends without re-running `apply_runtime_auth_headers`.
-- Impact: if Specter/provider rejects or cannot establish HTTP/2 streaming and `is_non_h2_streaming_error()` triggers, the fallback request loses Bedrock `authorization`. That turns a transport fallback into a false upstream auth failure and can make streaming Bedrock unusable on HTTP/1-only paths.
+- Impact: if Warpsock/provider rejects or cannot establish HTTP/2 streaming and `is_non_h2_streaming_error()` triggers, the fallback request loses Bedrock `authorization`. That turns a transport fallback into a false upstream auth failure and can make streaming Bedrock unusable on HTTP/1-only paths.
 - Proposed fix: reuse the already-authenticated `headers` in the fallback branch or call `apply_runtime_auth_headers(request, &mut headers).await?` after `let mut headers = request.headers.clone()`.
 - Proposed test: add a Bedrock transport unit/integration test that forces the non-H2 fallback path and asserts the fallback request includes `authorization` plus the Bedrock streaming `accept` headers.
 - Changed files: none.
@@ -249,9 +249,9 @@ Run bounded live proxy calls and inspect current logs for hangs, early 200 logs,
 - **Cursor stream smoke:** same minimal body with `stream=true` returned `http_code=200`, `time_total=0.963509`, `time_starttransfer=0.001374`, `size_download=1644`, `content-type: text/event-stream`, `x-request-id: 65ab2fca-73f0-46dd-a1f6-d841f158f574`, 7 `event:` lines and terminal `response.completed` with output `pong`.
 - **Early 200 / misleading latency:** current logs record streamed requests as completed before body delivery completes. Examples: Codex stream request `823ab01b-34b7-4c88-9a79-c43d997ffafb` logged `status=200 upstream_status=200 latency_ms=0` while curl observed `time_total=1.535730`; Cursor stream request `65ab2fca-73f0-46dd-a1f6-d841f158f574` logged `latency_ms=0` while curl observed `time_total=0.963509`. Severity: **P1 observability gap** because late body failures/dropped streams can be hidden behind a successful early access log.
 - **Late body failures / dropped streams:** no late body failure or dropped stream reproduced in the four bounded live smokes; both successful SSE bodies had terminal `response.completed` and curl exit `0`.
-- **Current log anomalies:** `~/Library/Logs/unified-model-proxy-v2.log` contains recurring Specter h2 errors before these smokes: `H2Driver read error: HttpProtocol("Connection closed")` at `2026-05-25T04:11:46Z`, `04:13:42Z`, `05:13:42Z`, `07:13:43Z`, `09:13:43Z`, plus `Read error: Operation timed out (os error 60)` at `2026-05-25T10:14:07Z`. Severity: **P2 unless correlated with request IDs**; they indicate noisy connection-driver failures but current request-completed logs do not link them to a provider/model/request.
+- **Current log anomalies:** `~/Library/Logs/unified-model-proxy-v2.log` contains recurring Warpsock h2 errors before these smokes: `H2Driver read error: HttpProtocol("Connection closed")` at `2026-05-25T04:11:46Z`, `04:13:42Z`, `05:13:42Z`, `07:13:43Z`, `09:13:43Z`, plus `Read error: Operation timed out (os error 60)` at `2026-05-25T10:14:07Z`. Severity: **P2 unless correlated with request IDs**; they indicate noisy connection-driver failures but current request-completed logs do not link them to a provider/model/request.
 - **Provider/model logging anomaly:** earlier current logs show many `provider=codex` or `provider=cursor` `/v1/responses` completions with `model=unknown`, while the bounded body had a model field. The successful smokes after the current build logged `model=gpt-5.5` and `model=composer-2-fast`, so this may already be improved in the dirty live build or may depend on request body shape. Severity: **P3 follow-up**; add regression coverage for model extraction on streaming and non-streaming Responses bodies.
-- **Proposed fixes/tests:** for streamed responses, move or supplement `request completed` logging with an end-of-body/SSE-drain observation that records final status, body result, bytes/events written, terminal-event presence, and elapsed body duration; include request IDs on Specter h2 driver errors or bridge them into provider-specific upstream spans; add tests that simulate a stream yielding headers/early 200 followed by body error and assert the log/metric reports the late failure instead of only the early 200.
+- **Proposed fixes/tests:** for streamed responses, move or supplement `request completed` logging with an end-of-body/SSE-drain observation that records final status, body result, bytes/events written, terminal-event presence, and elapsed body duration; include request IDs on Warpsock h2 driver errors or bridge them into provider-specific upstream spans; add tests that simulate a stream yielding headers/early 200 followed by body error and assert the log/metric reports the late failure instead of only the early 200.
 - **Changed files:** only `docs/missions/streaming-optimization-1.md` was changed by Agent F.
 
 ## Consolidated Plan
@@ -278,8 +278,8 @@ Run bounded live proxy calls and inspect current logs for hangs, early 200 logs,
    - If allowed, log/emit `stream_transport=buffered_fallback` and bound all collected bodies.
    - If not allowed, fail fast with a provider error rather than silently buffering a streaming request.
 
-5. **Add limited Specter body collection.**
-   - Add a capped Specter body helper aligned with `MAX_UPSTREAM_BODY_BYTES` / `MAX_UPSTREAM_ERROR_BODY_BYTES`.
+5. **Add limited Warpsock body collection.**
+   - Add a capped Warpsock body helper aligned with `MAX_UPSTREAM_BODY_BYTES` / `MAX_UPSTREAM_ERROR_BODY_BYTES`.
    - Replace provider-controlled `.bytes()`, `.text()`, and `collect_to_bytes()` sites where large bodies are possible.
 
 6. **Normalize Bedrock terminal detection.**
@@ -290,7 +290,7 @@ Run bounded live proxy calls and inspect current logs for hangs, early 200 logs,
 
 7. **Add body-drain observability for streaming routes.**
    - Supplement early request-completed logs with end-of-body metrics: body duration, bytes/events written, terminal event seen, body error, and provider/model/request id.
-   - Correlate Specter h2 driver errors to request/provider spans when possible.
+   - Correlate Warpsock h2 driver errors to request/provider spans when possible.
 
 8. **Bound WebSocket bridge stalls.**
    - Add queue-send timeout behavior for HTTP-backed Responses WebSocket bridge paths.
@@ -311,7 +311,7 @@ Run bounded live proxy calls and inspect current logs for hangs, early 200 logs,
 2. Cursor stream lifetime.
 3. EOF flush for Google/Anthropic translators.
 4. Body-drain logging and late-error metrics.
-5. Limited Specter body collection and buffered-fallback policy.
+5. Limited Warpsock body collection and buffered-fallback policy.
 6. WebSocket bridge saturation/malformed-frame hardening.
 7. Policy/test cleanup.
 

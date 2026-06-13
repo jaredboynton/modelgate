@@ -1,10 +1,10 @@
 # Distribution Hygiene
 
-Golden rule: this repo must not have clone-affecting local paths. The previous `specter` path dependency blocker has been resolved.
+Golden rule: this repo must not have clone-affecting local paths. The previous Warpsock path dependency blocker has been resolved.
 
 ## Current Gate
 
-- All dependencies are now portable, with `specter` resolved via crates.io (`specters` version `4.1.7`).
+- All dependencies are now portable, with `warpsock` resolved via the GitHub dependency pinned in `Cargo.lock`.
 - The repo is fully ready for clean remote CI, clone portability, packaging readiness, and release.
 
 ## Hard Fails
@@ -25,4 +25,4 @@ Manifest paths that affect `cargo metadata`, `cargo build --locked`, or remote c
 
 - Did this change add a new local absolute path?
 - Did it add an example that would read real credentials during tests?
-- Did it keep `specter` as the single WebSocket dependency?
+- Did it keep `warpsock` as the single WebSocket dependency?

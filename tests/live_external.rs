@@ -6,7 +6,7 @@ use serde_json::Value;
 #[tokio::test]
 #[ignore = "requires a locally running unified-model-proxy-v2 server"]
 async fn live_health_route_reports_ok() {
-    let client = specter::Client::new().unwrap();
+    let client = warpsock::Client::new().unwrap();
     let response = client
         .get(format!("{}/health", common::live_base_url()))
         .send()
@@ -28,7 +28,7 @@ async fn live_health_route_reports_ok() {
 #[tokio::test]
 #[ignore = "requires a locally running unified-model-proxy-v2 server"]
 async fn live_models_route_returns_at_least_one_model_without_leaking_known_env_secrets() {
-    let client = specter::Client::new().unwrap();
+    let client = warpsock::Client::new().unwrap();
     let response = client
         .get(format!("{}/v1/models", common::live_base_url()))
         .send()
@@ -52,7 +52,7 @@ async fn live_chat_completion_returns_success_when_opted_in() {
         return;
     };
 
-    let client = specter::Client::new().unwrap();
+    let client = warpsock::Client::new().unwrap();
     let response = client
         .post(format!("{}/v1/chat/completions", common::live_base_url()))
         .json(&serde_json::json!({

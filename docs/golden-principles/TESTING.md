@@ -7,7 +7,7 @@ Golden rule: tests are credential-free and must be safe on a developer machine, 
 - Use `AppState::for_tests`, test helpers, temp dirs, and local fixtures instead of real `$HOME`.
 - Mock providers with local servers or fixtures. Do not call Bedrock, Codex/ChatGPT, Google, or OAuth endpoints from unit/integration tests.
 - Keep model/provider behavior locked with route tests whenever error ordering changes.
-- Keep WebSocket behavior locked with `specter`-backed local integration tests, not live Codex sockets.
+- Keep WebSocket behavior locked with `warpsock`-backed local integration tests, not live Codex sockets.
 - Add tests near the behavior owner: route tests for HTTP decisions, auth tests for parsing/storage, upstream tests for provider shaping, adapter tests for format translation.
 
 ## Commands
@@ -29,4 +29,4 @@ Golden rule: tests are credential-free and must be safe on a developer machine, 
 - Can this test pass with empty env and an empty temp home?
 - Does it prove the exact failure code or provider route that matters?
 - Would it still pass on a clean machine before remote creation?
-- Does it avoid depending on the unresolved local `specter` path except through Cargo's declared dependency?
+- Does it avoid depending on the unresolved local `warpsock` path except through Cargo's declared dependency?

@@ -167,7 +167,7 @@ async fn codex_catalog_for_client_version(
 
     let headers = codex_headers(state)?;
     let url = shared_codex_models_endpoint(&state.runtime.codex_models_url, client_version)?;
-    let client = state.specter.clone();
+    let client = state.warpsock.clone();
     let response = client
         .get(url)
         .headers(headers)

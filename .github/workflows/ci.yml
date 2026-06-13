@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       run_rust_checks:
-        description: "Run Rust checks on the GitHub runner only after specter is portable"
+        description: "Run Rust checks on the GitHub runner"
         required: true
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -32,9 +32,8 @@ jobs:
           set -euo pipefail
           echo "rust_checks_enabled=${{ inputs.run_rust_checks }}" >> "$GITHUB_OUTPUT"
           cat <<'MSG'
-          This workflow is intentionally manual while the crate depends on a local specter path.
-          It is CI scaffolding, not required green remote CI.
-          Do not mark remote CI as required until the specter dependency is portable.
+          This workflow is manual, but the Warpsock dependency is portable.
+          The local-path detector below remains a guard against regressions.
           No live provider credentials are used by these jobs.
           MSG
 
@@ -45,8 +44,8 @@ jobs:
           if grep -RInE 'path *= *"/Users/|path *= *"/home/|path *= *"/[^"]+"' Cargo.toml Cargo.lock 2>/dev/null; then
             cat <<'MSG'
           Found an absolute local path in Cargo metadata.
-          Current known blocker: specter is local, so GitHub-hosted CI cannot be required yet.
-          This gate is report-only for scaffolding, but it must be resolved before required remote CI.
+          Current blocker: a tracked local Cargo path would break GitHub-hosted CI.
+          This gate is report-only for scaffolding, but must stay clean before required remote CI.
           MSG
           else
             echo "No absolute local Cargo paths found by this lightweight gate."
@@ -99,6 +98,6 @@ jobs:
       - name: Pending by design
         run: |
           cat <<'MSG'
-          Rust fmt/check/test/clippy/build jobs are defined but skipped by default.
-          Enable run_rust_checks only after specter no longer points at a local absolute path.
+          Rust fmt/check/test/clippy/build jobs are defined but skipped by the workflow input.
+          Re-run with run_rust_checks=true when remote validation is needed.
           MSG

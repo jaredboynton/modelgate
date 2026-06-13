@@ -76,10 +76,9 @@ grep -nE 'enable_request_compression|remote_compaction_v2|\[profiles\.proxy-ws\.
 
 ## CI caveat
 
-Hosted CI remains manual/pending or dependency-gated until the `specter` local
-path in `Cargo.toml` is replaced with a portable dependency strategy. Local
-Cargo validation on this machine is useful, but it is not evidence that a clean
-remote clone can build.
+Hosted CI can run because `warpsock` is resolved through a portable GitHub
+dependency. Local Cargo validation is still not a substitute for a clean-clone
+remote check when distribution behavior changes.
 
 ## Stop condition
 
@@ -88,5 +87,5 @@ Before claiming completion, report:
 - changed files;
 - validation commands run and their result;
 - skipped validation and why;
-- known blockers, especially the pre-remote `specter` portability gate when the
-  work touches distribution or CI docs.
+- known blockers, especially any reintroduced local dependency path when the work
+  touches distribution or CI docs.

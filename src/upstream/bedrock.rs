@@ -9,14 +9,14 @@ use bytes::{Bytes, BytesMut};
 use futures::{future::Either, stream, StreamExt};
 use rand_core::{OsRng, RngCore};
 use serde_json::Value;
-use specter::HttpVersion;
+use warpsock::HttpVersion;
 
 use crate::{
     auth::bedrock::{resolve_bedrock_auth, BedrockAuth},
     model_alias::{self, Provider},
     upstream_response::{
-        collect_specter_body, observe_specter_response, sanitize_specter_headers,
-        specter_body_stream, sse_headers,
+        collect_warpsock_body, observe_warpsock_response, sanitize_warpsock_headers, sse_headers,
+        warpsock_body_stream,
     },
     AppError, AppResult, AppState, UpstreamResponse,
 };
@@ -181,7 +181,7 @@ pub async fn forward_messages_response(
     let normalized_model = resolve_bedrock_runtime_model_id(model)?;
 
     send_runtime_invoke_request(
-        &state.specter,
+        &state.warpsock,
         build_runtime_invoke_request(state, body, &headers, normalized_model)?,
         BedrockRetryPolicy::default(),
     )
@@ -189,7 +189,7 @@ pub async fn forward_messages_response(
 }
 
 pub async fn send_runtime_invoke_request(
-    client: &specter::Client,
+    client: &warpsock::Client,
     request: BedrockRuntimeInvokeRequest,
     retry_policy: BedrockRetryPolicy,
 ) -> AppResult<UpstreamResponse> {
@@ -209,20 +209,20 @@ pub async fn send_runtime_invoke_request(
                 let response = match response {
                     BedrockRuntimeResponse::Buffered(response) => {
                         if request.stream && response.status().is_success() {
-                            runtime_eventstream_response_from_buffered_specter(response).await?
+                            runtime_eventstream_response_from_buffered_warpsock(response).await?
                         } else {
-                            UpstreamResponse::from_specter(BEDROCK_PROVIDER, response)
+                            UpstreamResponse::from_warpsock(BEDROCK_PROVIDER, response)
                         }
                     }
                     BedrockRuntimeResponse::Streaming(response)
                         if request.stream && response.status().is_success() =>
                     {
-                        runtime_eventstream_response_from_specter(response)
+                        runtime_eventstream_response_from_warpsock(response)
                     }
                     BedrockRuntimeResponse::Streaming(response) => {
                         let status = response.status();
-                        let headers = sanitize_specter_headers(response.headers());
-                        let body = collect_specter_body(
+                        let headers = sanitize_warpsock_headers(response.headers());
+                        let body = collect_warpsock_body(
                             response.into_body(),
                             "Bedrock Runtime stream failed",
                         )
@@ -232,19 +232,19 @@ pub async fn send_runtime_invoke_request(
                 };
                 return Ok(response.with_latency_ms(started.elapsed().as_millis()));
             }
-            Err(BedrockSendError::Specter(error))
+            Err(BedrockSendError::Warpsock(error))
                 if should_retry_error(&error) && attempt < attempts =>
             {
                 last_error = Some(error);
                 wait_before_retry(attempt).await;
             }
-            Err(BedrockSendError::Specter(error)) => return Err(specter_error(error)),
+            Err(BedrockSendError::Warpsock(error)) => return Err(warpsock_error(error)),
             Err(BedrockSendError::App(error)) => return Err(error),
         }
     }
 
-    Err(specter_error(
-        last_error.expect("retry loop must retain the last specter error"),
+    Err(warpsock_error(
+        last_error.expect("retry loop must retain the last warpsock error"),
     ))
 }
 
@@ -262,7 +262,7 @@ pub fn bedrock_retry_delay(attempt: usize, jitter_seed: u64) -> Duration {
 }
 
 async fn send_runtime_once(
-    client: &specter::Client,
+    client: &warpsock::Client,
     request: &BedrockRuntimeInvokeRequest,
     body: &Bytes,
 ) -> Result<BedrockRuntimeResponse, BedrockSendError> {
@@ -294,10 +294,10 @@ async fn send_runtime_once(
                     .body(body)
                     .send()
                     .await
-                    .map_err(BedrockSendError::Specter)?;
+                    .map_err(BedrockSendError::Warpsock)?;
                 Ok(BedrockRuntimeResponse::Buffered(response))
             }
-            Err(error) => Err(BedrockSendError::Specter(error)),
+            Err(error) => Err(BedrockSendError::Warpsock(error)),
         }
     } else {
         let client = client.clone();
@@ -310,18 +310,18 @@ async fn send_runtime_once(
             .version(HttpVersion::Http2)
             .send()
             .await
-            .map_err(BedrockSendError::Specter)?;
+            .map_err(BedrockSendError::Warpsock)?;
         Ok(BedrockRuntimeResponse::Buffered(response))
     }
 }
 
-fn runtime_eventstream_response_from_specter(response: specter::Response) -> UpstreamResponse {
-    observe_specter_response(BEDROCK_PROVIDER, &response);
+fn runtime_eventstream_response_from_warpsock(response: warpsock::Response) -> UpstreamResponse {
+    observe_warpsock_response(BEDROCK_PROVIDER, &response);
     let status = response.status();
     let decoder = AwsEventStreamDecoder::default();
     let stream = stream::unfold(
         (
-            specter_body_stream(response.into_body(), "Bedrock Runtime stream failed"),
+            warpsock_body_stream(response.into_body(), "Bedrock Runtime stream failed"),
             decoder,
             false,
         ),
@@ -355,12 +355,12 @@ fn runtime_eventstream_response_from_specter(response: specter::Response) -> Ups
     UpstreamResponse::stream(BEDROCK_PROVIDER, status, sse_headers(), stream)
 }
 
-async fn runtime_eventstream_response_from_buffered_specter(
-    response: specter::Response,
+async fn runtime_eventstream_response_from_buffered_warpsock(
+    response: warpsock::Response,
 ) -> AppResult<UpstreamResponse> {
-    observe_specter_response(BEDROCK_PROVIDER, &response);
+    observe_warpsock_response(BEDROCK_PROVIDER, &response);
     let status = response.status();
-    let body = collect_specter_body(response.into_body(), "Bedrock Runtime stream failed").await?;
+    let body = collect_warpsock_body(response.into_body(), "Bedrock Runtime stream failed").await?;
     let mut decoder = AwsEventStreamDecoder::default();
     let chunks = decoder.push(body)?;
     let stream = stream::iter(chunks.into_iter().map(Ok::<Bytes, AppError>));
@@ -387,8 +387,8 @@ async fn runtime_eventstream_response_from_buffered_specter(
 }
 
 enum BedrockRuntimeResponse {
-    Buffered(specter::Response),
-    Streaming(specter::Response),
+    Buffered(warpsock::Response),
+    Streaming(warpsock::Response),
 }
 
 impl BedrockRuntimeResponse {
@@ -695,7 +695,7 @@ async fn apply_runtime_auth_headers(
 
 #[derive(Debug)]
 enum BedrockSendError {
-    Specter(specter::Error),
+    Warpsock(warpsock::Error),
     App(AppError),
 }
 
@@ -782,25 +782,25 @@ pub fn should_retry_status(status: StatusCode) -> bool {
     )
 }
 
-pub fn should_retry_error(error: &specter::Error) -> bool {
+pub fn should_retry_error(error: &warpsock::Error) -> bool {
     matches!(
         error,
-        specter::Error::Connection(_)
-            | specter::Error::Timeout(_)
-            | specter::Error::ConnectTimeout(_)
-            | specter::Error::TtfbTimeout(_)
-            | specter::Error::ReadIdleTimeout(_)
-            | specter::Error::WriteIdleTimeout(_)
-            | specter::Error::TotalTimeout(_)
+        warpsock::Error::Connection(_)
+            | warpsock::Error::Timeout(_)
+            | warpsock::Error::ConnectTimeout(_)
+            | warpsock::Error::TtfbTimeout(_)
+            | warpsock::Error::ReadIdleTimeout(_)
+            | warpsock::Error::WriteIdleTimeout(_)
+            | warpsock::Error::TotalTimeout(_)
     )
 }
 
-fn specter_error(error: specter::Error) -> AppError {
+fn warpsock_error(error: warpsock::Error) -> AppError {
     AppError::Upstream(error.to_string())
 }
 
-fn is_non_h2_streaming_error(error: &specter::Error) -> bool {
-    matches!(error, specter::Error::HttpProtocol(message) if message.contains("Expected h2 ALPN"))
+fn is_non_h2_streaming_error(error: &warpsock::Error) -> bool {
+    matches!(error, warpsock::Error::HttpProtocol(message) if message.contains("Expected h2 ALPN"))
 }
 
 #[cfg(test)]

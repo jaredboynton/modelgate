@@ -30,20 +30,21 @@ const CODEX_RESPONSES_WSS_URL: &str = "wss://chatgpt.com/backend-api/codex/respo
 const CODEX_RESPONSES_HTTP_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
 const GOOGLE_GENERATE_BASE_URL: &str = "https://generativelanguage.googleapis.com";
 const WINDSURF_CLOUD_BASE_URL: &str = "https://server.codeium.com";
+const MINIMAX_BASE_URL: &str = "https://api.minimax.io";
 const TEST_CODEX_RESPONSES_WSS_URL: &str = "ws://127.0.0.1:1/backend-api/codex/responses";
 const TEST_CODEX_RESPONSES_HTTP_URL: &str = "http://127.0.0.1:1/backend-api/codex/responses";
 const DEFAULT_BEDROCK_REGION: &str = "us-west-2";
 const DEFAULT_CODEX_WSS_POOL_SIZE: usize = 4;
 const RESPONSE_STORAGE_MAX_ENTRIES: usize = 4096;
-const DEFAULT_SPECTER_DNS_CACHE_TTL_MS: u64 = 300_000;
-const DEFAULT_SPECTER_MAX_PENDING_PER_ORIGIN: usize = 20;
-const DEFAULT_SPECTER_STREAM_BODY_BUFFER_SLOTS: usize = 32;
-const DEFAULT_SPECTER_H3_TUNNEL_BYTE_BUDGET: usize = 262_144;
+const DEFAULT_WARPSOCK_DNS_CACHE_TTL_MS: u64 = 300_000;
+const DEFAULT_WARPSOCK_MAX_PENDING_PER_ORIGIN: usize = 20;
+const DEFAULT_WARPSOCK_STREAM_BODY_BUFFER_SLOTS: usize = 32;
+const DEFAULT_WARPSOCK_H3_TUNNEL_BYTE_BUDGET: usize = 262_144;
 pub type CodexHandshakePermit = Option<OwnedSemaphorePermit>;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub specter: specter::Client,
+    pub warpsock: warpsock::Client,
     pub amp_store: AmpStore,
     pub codex_home: Arc<PathBuf>,
     pub auth_home: Arc<PathBuf>,
@@ -58,6 +59,7 @@ pub struct AppState {
     pub cursor_auth: Arc<tokio::sync::Mutex<Option<CursorCredentials>>>,
     pub(crate) google_auth: ResolvedAuthCache<String>,
     pub(crate) windsurf_auth: ResolvedAuthCache<String>,
+    pub(crate) minimax_auth: ResolvedAuthCache<String>,
     pub(crate) bedrock_auth: ResolvedAuthCache<BedrockAuth>,
     codex_handshake_sem: Option<Arc<tokio::sync::Semaphore>>,
     codex_handshake_times: Arc<std::sync::Mutex<std::collections::VecDeque<std::time::Instant>>>,
@@ -69,7 +71,7 @@ pub struct AppState {
 
 struct CodexWsPoolEntry {
     key: String,
-    websocket: specter::WebSocket,
+    websocket: warpsock::WebSocket,
 }
 
 #[derive(Clone, Debug)]
@@ -85,15 +87,16 @@ pub struct RuntimeConfig {
     pub codex_wss_pool_size: usize,
     pub codex_catalog_client_version: String,
     pub codex_catalog_ttl: Duration,
-    pub specter_h3_upgrade: bool,
-    pub specter_http_tls_early_data: bool,
-    pub specter_dns_cache: bool,
-    pub specter_dns_cache_ttl: Duration,
-    pub specter_max_pending_per_origin: usize,
-    pub specter_stream_body_buffer_slots: usize,
-    pub specter_h3_tunnel_byte_budget: usize,
+    pub warpsock_h3_upgrade: bool,
+    pub warpsock_http_tls_early_data: bool,
+    pub warpsock_dns_cache: bool,
+    pub warpsock_dns_cache_ttl: Duration,
+    pub warpsock_max_pending_per_origin: usize,
+    pub warpsock_stream_body_buffer_slots: usize,
+    pub warpsock_h3_tunnel_byte_budget: usize,
     pub google_generate_base_url: String,
     pub windsurf_cloud_base_url: String,
+    pub minimax_base_url: String,
     pub bedrock_discovery_timeout: Duration,
 }
 
@@ -186,7 +189,7 @@ impl AppState {
         let codex_max_concurrent = runtime.codex_max_concurrent;
 
         Self {
-            specter: build_specter_client(&runtime),
+            warpsock: build_warpsock_client(&runtime),
             amp_store: AmpStore::from_env(),
             codex_home: Arc::new(codex_home),
             auth_home: Arc::new(auth_home),
@@ -201,6 +204,7 @@ impl AppState {
             cursor_auth: Arc::new(tokio::sync::Mutex::new(None)),
             google_auth: ResolvedAuthCache::new(),
             windsurf_auth: ResolvedAuthCache::new(),
+            minimax_auth: ResolvedAuthCache::new(),
             bedrock_auth: ResolvedAuthCache::new(),
             codex_handshake_sem: if codex_max_concurrent > 0 {
                 Some(Arc::new(tokio::sync::Semaphore::new(codex_max_concurrent)))
@@ -226,7 +230,7 @@ impl AppState {
         let codex_max_concurrent = runtime.codex_max_concurrent;
 
         Self {
-            specter: build_specter_client(&runtime),
+            warpsock: build_warpsock_client(&runtime),
             amp_store: AmpStore::new(auth_home.join("amp-threads")),
             codex_home: Arc::new(codex_home),
             auth_home: Arc::new(auth_home),
@@ -241,6 +245,7 @@ impl AppState {
             cursor_auth: Arc::new(tokio::sync::Mutex::new(None)),
             google_auth: ResolvedAuthCache::new(),
             windsurf_auth: ResolvedAuthCache::new(),
+            minimax_auth: ResolvedAuthCache::new(),
             bedrock_auth: ResolvedAuthCache::new(),
             codex_handshake_sem: if codex_max_concurrent > 0 {
                 Some(Arc::new(tokio::sync::Semaphore::new(codex_max_concurrent)))
@@ -308,7 +313,7 @@ impl AppState {
         self.codex_wss_failures.store(0, Ordering::Relaxed);
     }
 
-    pub(crate) async fn take_codex_ws(&self, key: &str) -> Option<specter::WebSocket> {
+    pub(crate) async fn take_codex_ws(&self, key: &str) -> Option<warpsock::WebSocket> {
         if self.runtime.codex_wss_pool_size == 0 {
             return None;
         }
@@ -317,7 +322,7 @@ impl AppState {
         pool.remove(index).map(|entry| entry.websocket)
     }
 
-    pub(crate) async fn store_codex_ws(&self, key: String, websocket: specter::WebSocket) {
+    pub(crate) async fn store_codex_ws(&self, key: String, websocket: warpsock::WebSocket) {
         let max_size = self.runtime.codex_wss_pool_size;
         if max_size == 0 {
             return;
@@ -463,22 +468,23 @@ impl ResponseStorage {
     }
 }
 
-fn build_specter_client(runtime: &RuntimeConfig) -> specter::Client {
-    let capacity_policy = specter::CapacityPolicy::bounded(runtime.specter_max_pending_per_origin)
-        .with_streaming_body_buffer_slots(runtime.specter_stream_body_buffer_slots)
-        .with_h3_tunnel_byte_budget(runtime.specter_h3_tunnel_byte_budget);
+fn build_warpsock_client(runtime: &RuntimeConfig) -> warpsock::Client {
+    let capacity_policy =
+        warpsock::CapacityPolicy::bounded(runtime.warpsock_max_pending_per_origin)
+            .with_streaming_body_buffer_slots(runtime.warpsock_stream_body_buffer_slots)
+            .with_h3_tunnel_byte_budget(runtime.warpsock_h3_tunnel_byte_budget);
 
-    specter::Client::builder()
+    warpsock::Client::builder()
         .streaming_timeouts()
         .pool_acquire_timeout(Duration::from_millis(250))
         .prefer_http2(true)
         .capacity_policy(capacity_policy)
-        .h3_upgrade(runtime.specter_h3_upgrade)
-        .http_tls_early_data(runtime.specter_http_tls_early_data)
-        .hickory_dns(runtime.specter_dns_cache)
-        .dns_cache_ttl(runtime.specter_dns_cache_ttl)
+        .h3_upgrade(runtime.warpsock_h3_upgrade)
+        .http_tls_early_data(runtime.warpsock_http_tls_early_data)
+        .hickory_dns(runtime.warpsock_dns_cache)
+        .dns_cache_ttl(runtime.warpsock_dns_cache_ttl)
         .build()
-        .expect("failed to construct Specter client")
+        .expect("failed to construct Warpsock client")
 }
 
 fn is_expired(ttl: Duration, record: &ResponseStateRecord) -> bool {
@@ -563,37 +569,39 @@ impl RuntimeConfig {
             )?,
             codex_catalog_client_version: codex_catalog_config.client_version,
             codex_catalog_ttl: codex_catalog_config.ttl,
-            specter_h3_upgrade: bool_env(&mut var, "UMP_V2_SPECTER_H3_UPGRADE", true)?,
-            specter_http_tls_early_data: bool_env(
+            warpsock_h3_upgrade: bool_env(&mut var, "UMP_V2_WARPSOCK_H3_UPGRADE", true)?,
+            warpsock_http_tls_early_data: bool_env(
                 &mut var,
-                "UMP_V2_SPECTER_HTTP_TLS_EARLY_DATA",
+                "UMP_V2_WARPSOCK_HTTP_TLS_EARLY_DATA",
                 true,
             )?,
-            specter_dns_cache: bool_env(&mut var, "UMP_V2_SPECTER_DNS_CACHE", true)?,
-            specter_dns_cache_ttl: duration_ms_env(
+            warpsock_dns_cache: bool_env(&mut var, "UMP_V2_WARPSOCK_DNS_CACHE", true)?,
+            warpsock_dns_cache_ttl: duration_ms_env(
                 &mut var,
-                "UMP_V2_SPECTER_DNS_CACHE_TTL_MS",
-                DEFAULT_SPECTER_DNS_CACHE_TTL_MS,
+                "UMP_V2_WARPSOCK_DNS_CACHE_TTL_MS",
+                DEFAULT_WARPSOCK_DNS_CACHE_TTL_MS,
             )?,
-            specter_max_pending_per_origin: usize_env(
+            warpsock_max_pending_per_origin: usize_env(
                 &mut var,
-                "UMP_V2_SPECTER_MAX_PENDING_PER_ORIGIN",
-                DEFAULT_SPECTER_MAX_PENDING_PER_ORIGIN,
+                "UMP_V2_WARPSOCK_MAX_PENDING_PER_ORIGIN",
+                DEFAULT_WARPSOCK_MAX_PENDING_PER_ORIGIN,
             )?,
-            specter_stream_body_buffer_slots: usize_env(
+            warpsock_stream_body_buffer_slots: usize_env(
                 &mut var,
-                "UMP_V2_SPECTER_STREAM_BODY_BUFFER_SLOTS",
-                DEFAULT_SPECTER_STREAM_BODY_BUFFER_SLOTS,
+                "UMP_V2_WARPSOCK_STREAM_BODY_BUFFER_SLOTS",
+                DEFAULT_WARPSOCK_STREAM_BODY_BUFFER_SLOTS,
             )?,
-            specter_h3_tunnel_byte_budget: usize_env(
+            warpsock_h3_tunnel_byte_budget: usize_env(
                 &mut var,
-                "UMP_V2_SPECTER_H3_TUNNEL_BYTE_BUDGET",
-                DEFAULT_SPECTER_H3_TUNNEL_BYTE_BUDGET,
+                "UMP_V2_WARPSOCK_H3_TUNNEL_BYTE_BUDGET",
+                DEFAULT_WARPSOCK_H3_TUNNEL_BYTE_BUDGET,
             )?,
             google_generate_base_url: var("UMP_V2_GOOGLE_GENERATE_BASE_URL")
                 .unwrap_or_else(|_| GOOGLE_GENERATE_BASE_URL.to_string()),
             windsurf_cloud_base_url: var("UMP_V2_WINDSURF_CLOUD_BASE_URL")
                 .unwrap_or_else(|_| WINDSURF_CLOUD_BASE_URL.to_string()),
+            minimax_base_url: var("UMP_V2_MINIMAX_BASE_URL")
+                .unwrap_or_else(|_| MINIMAX_BASE_URL.to_string()),
             bedrock_discovery_timeout: duration_ms_env(
                 &mut var,
                 "UMP_V2_BEDROCK_DISCOVERY_TIMEOUT_MS",
@@ -632,15 +640,16 @@ impl Default for RuntimeConfig {
             codex_wss_pool_size: DEFAULT_CODEX_WSS_POOL_SIZE,
             codex_catalog_client_version: CodexCatalogConfig::default().client_version,
             codex_catalog_ttl: CodexCatalogConfig::default().ttl,
-            specter_h3_upgrade: true,
-            specter_http_tls_early_data: true,
-            specter_dns_cache: true,
-            specter_dns_cache_ttl: Duration::from_millis(DEFAULT_SPECTER_DNS_CACHE_TTL_MS),
-            specter_max_pending_per_origin: DEFAULT_SPECTER_MAX_PENDING_PER_ORIGIN,
-            specter_stream_body_buffer_slots: DEFAULT_SPECTER_STREAM_BODY_BUFFER_SLOTS,
-            specter_h3_tunnel_byte_budget: DEFAULT_SPECTER_H3_TUNNEL_BYTE_BUDGET,
+            warpsock_h3_upgrade: true,
+            warpsock_http_tls_early_data: true,
+            warpsock_dns_cache: true,
+            warpsock_dns_cache_ttl: Duration::from_millis(DEFAULT_WARPSOCK_DNS_CACHE_TTL_MS),
+            warpsock_max_pending_per_origin: DEFAULT_WARPSOCK_MAX_PENDING_PER_ORIGIN,
+            warpsock_stream_body_buffer_slots: DEFAULT_WARPSOCK_STREAM_BODY_BUFFER_SLOTS,
+            warpsock_h3_tunnel_byte_budget: DEFAULT_WARPSOCK_H3_TUNNEL_BYTE_BUDGET,
             google_generate_base_url: GOOGLE_GENERATE_BASE_URL.to_string(),
             windsurf_cloud_base_url: WINDSURF_CLOUD_BASE_URL.to_string(),
+            minimax_base_url: MINIMAX_BASE_URL.to_string(),
             bedrock_discovery_timeout: Duration::from_millis(5000),
         }
     }
@@ -758,18 +767,22 @@ mod tests {
         assert_eq!(config.codex_max_concurrent, 20);
         assert_eq!(config.codex_handshakes_per_min, 55);
         assert_eq!(config.codex_wss_pool_size, 4);
-        assert!(config.specter_h3_upgrade);
-        assert!(config.specter_http_tls_early_data);
-        assert!(config.specter_dns_cache);
-        assert_eq!(config.specter_dns_cache_ttl, Duration::from_millis(300_000));
-        assert_eq!(config.specter_max_pending_per_origin, 20);
-        assert_eq!(config.specter_stream_body_buffer_slots, 32);
-        assert_eq!(config.specter_h3_tunnel_byte_budget, 262_144);
+        assert!(config.warpsock_h3_upgrade);
+        assert!(config.warpsock_http_tls_early_data);
+        assert!(config.warpsock_dns_cache);
+        assert_eq!(
+            config.warpsock_dns_cache_ttl,
+            Duration::from_millis(300_000)
+        );
+        assert_eq!(config.warpsock_max_pending_per_origin, 20);
+        assert_eq!(config.warpsock_stream_body_buffer_slots, 32);
+        assert_eq!(config.warpsock_h3_tunnel_byte_budget, 262_144);
         assert_eq!(
             config.google_generate_base_url,
             "https://generativelanguage.googleapis.com"
         );
         assert_eq!(config.windsurf_cloud_base_url, "https://server.codeium.com");
+        assert_eq!(config.minimax_base_url, "https://api.minimax.io");
         assert_eq!(
             config.bedrock_discovery_timeout,
             Duration::from_millis(5000)
@@ -788,15 +801,16 @@ mod tests {
             ("UMP_V2_CODEX_MAX_CONCURRENT", "7"),
             ("UMP_V2_CODEX_HANDSHAKES_PER_MIN", "9"),
             ("UMP_V2_CODEX_WSS_POOL_SIZE", "3"),
-            ("UMP_V2_SPECTER_H3_UPGRADE", "false"),
-            ("UMP_V2_SPECTER_HTTP_TLS_EARLY_DATA", "false"),
-            ("UMP_V2_SPECTER_DNS_CACHE", "false"),
-            ("UMP_V2_SPECTER_DNS_CACHE_TTL_MS", "1234"),
-            ("UMP_V2_SPECTER_MAX_PENDING_PER_ORIGIN", "11"),
-            ("UMP_V2_SPECTER_STREAM_BODY_BUFFER_SLOTS", "17"),
-            ("UMP_V2_SPECTER_H3_TUNNEL_BYTE_BUDGET", "65536"),
+            ("UMP_V2_WARPSOCK_H3_UPGRADE", "false"),
+            ("UMP_V2_WARPSOCK_HTTP_TLS_EARLY_DATA", "false"),
+            ("UMP_V2_WARPSOCK_DNS_CACHE", "false"),
+            ("UMP_V2_WARPSOCK_DNS_CACHE_TTL_MS", "1234"),
+            ("UMP_V2_WARPSOCK_MAX_PENDING_PER_ORIGIN", "11"),
+            ("UMP_V2_WARPSOCK_STREAM_BODY_BUFFER_SLOTS", "17"),
+            ("UMP_V2_WARPSOCK_H3_TUNNEL_BYTE_BUDGET", "65536"),
             ("UMP_V2_GOOGLE_GENERATE_BASE_URL", "http://127.0.0.1:9999"),
             ("UMP_V2_WINDSURF_CLOUD_BASE_URL", "http://127.0.0.1:19999"),
+            ("UMP_V2_MINIMAX_BASE_URL", "http://127.0.0.1:18888"),
             ("UMP_V2_BEDROCK_DISCOVERY_TIMEOUT_MS", "125"),
         ])
         .unwrap();
@@ -810,15 +824,16 @@ mod tests {
         assert_eq!(config.codex_max_concurrent, 7);
         assert_eq!(config.codex_handshakes_per_min, 9);
         assert_eq!(config.codex_wss_pool_size, 3);
-        assert!(!config.specter_h3_upgrade);
-        assert!(!config.specter_http_tls_early_data);
-        assert!(!config.specter_dns_cache);
-        assert_eq!(config.specter_dns_cache_ttl, Duration::from_millis(1234));
-        assert_eq!(config.specter_max_pending_per_origin, 11);
-        assert_eq!(config.specter_stream_body_buffer_slots, 17);
-        assert_eq!(config.specter_h3_tunnel_byte_budget, 65536);
+        assert!(!config.warpsock_h3_upgrade);
+        assert!(!config.warpsock_http_tls_early_data);
+        assert!(!config.warpsock_dns_cache);
+        assert_eq!(config.warpsock_dns_cache_ttl, Duration::from_millis(1234));
+        assert_eq!(config.warpsock_max_pending_per_origin, 11);
+        assert_eq!(config.warpsock_stream_body_buffer_slots, 17);
+        assert_eq!(config.warpsock_h3_tunnel_byte_budget, 65536);
         assert_eq!(config.google_generate_base_url, "http://127.0.0.1:9999");
         assert_eq!(config.windsurf_cloud_base_url, "http://127.0.0.1:19999");
+        assert_eq!(config.minimax_base_url, "http://127.0.0.1:18888");
         assert_eq!(config.bedrock_discovery_timeout, Duration::from_millis(125));
     }
 
@@ -827,21 +842,21 @@ mod tests {
         assert!(config_from(&[("UMP_V2_LISTEN_ADDR", "not an address")]).is_err());
         assert!(config_from(&[("UMP_V2_CODEX_TRANSPORT", "ftp")]).is_err());
         assert!(config_from(&[("UMP_V2_CODEX_MAX_CONCURRENT", "nope")]).is_err());
-        assert!(config_from(&[("UMP_V2_SPECTER_H3_UPGRADE", "maybe")]).is_err());
-        assert!(config_from(&[("UMP_V2_SPECTER_DNS_CACHE_TTL_MS", "nope")]).is_err());
-        assert!(config_from(&[("UMP_V2_SPECTER_MAX_PENDING_PER_ORIGIN", "nope")]).is_err());
+        assert!(config_from(&[("UMP_V2_WARPSOCK_H3_UPGRADE", "maybe")]).is_err());
+        assert!(config_from(&[("UMP_V2_WARPSOCK_DNS_CACHE_TTL_MS", "nope")]).is_err());
+        assert!(config_from(&[("UMP_V2_WARPSOCK_MAX_PENDING_PER_ORIGIN", "nope")]).is_err());
     }
 
     #[test]
-    fn build_specter_client_applies_capacity_policy() {
+    fn build_warpsock_client_applies_capacity_policy() {
         let config = RuntimeConfig {
-            specter_max_pending_per_origin: 9,
-            specter_stream_body_buffer_slots: 33,
-            specter_h3_tunnel_byte_budget: 128 * 1024,
+            warpsock_max_pending_per_origin: 9,
+            warpsock_stream_body_buffer_slots: 33,
+            warpsock_h3_tunnel_byte_budget: 128 * 1024,
             ..RuntimeConfig::default()
         };
 
-        let client = build_specter_client(&config);
+        let client = build_warpsock_client(&config);
 
         assert_eq!(client.h1_max_connections_per_origin(), 9);
         assert_eq!(client.h2_max_concurrent_streams_per_connection(), Some(9));

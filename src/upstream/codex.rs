@@ -6,8 +6,8 @@ use futures::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use specter::{HttpVersion, Message};
 use std::{borrow::Cow, pin::Pin, sync::Arc, time::Duration};
+use warpsock::{HttpVersion, Message};
 
 use crate::{
     auth::codex::{load_codex_auth, refresh_codex_auth, CODEX_OPENAI_BETA, CODEX_ORIGINATOR},
@@ -16,7 +16,7 @@ use crate::{
     rate_limit,
     sse::splice::splice_completed_event_filtered,
     state::CodexTransport,
-    upstream_response::{collect_specter_body, observe_specter_response, specter_body_stream},
+    upstream_response::{collect_warpsock_body, observe_warpsock_response, warpsock_body_stream},
     AppError, AppResult, AppState,
 };
 
@@ -50,7 +50,7 @@ pub async fn refresh_codex_model_catalog(state: &AppState) -> AppResult<Arc<Code
     let headers = codex_headers(state)?;
     state
         .codex_catalog
-        .refresh_from_endpoint(&state.specter, &headers, &state.runtime.codex_models_url)
+        .refresh_from_endpoint(&state.warpsock, &headers, &state.runtime.codex_models_url)
         .await
 }
 
@@ -730,7 +730,7 @@ async fn send_wss_stream(
 pub async fn connect_responses_wss(
     state: &AppState,
     wss_url: &str,
-) -> AppResult<specter::WebSocket> {
+) -> AppResult<warpsock::WebSocket> {
     match connect_responses_wss_once(state, wss_url, None).await {
         Err(err) if maybe_auth_failure(&err) => {
             refresh_codex_auth(state).await?;
@@ -741,7 +741,7 @@ pub async fn connect_responses_wss(
 }
 
 struct CodexWsCheckout {
-    websocket: specter::WebSocket,
+    websocket: warpsock::WebSocket,
     pool_key: String,
     reused: bool,
 }
@@ -784,7 +784,7 @@ async fn checkout_responses_wss_for_body(
 }
 
 struct CodexWssStreamState {
-    websocket: Option<specter::WebSocket>,
+    websocket: Option<warpsock::WebSocket>,
     normalizer: CodexSseNormalizer,
     done: bool,
     state: AppState,
@@ -798,7 +798,7 @@ struct CodexWssStreamState {
 
 async fn reconnect_stale_codex_wss(
     stream_state: &mut CodexWssStreamState,
-) -> AppResult<specter::WebSocket> {
+) -> AppResult<warpsock::WebSocket> {
     stream_state.retry_stale_pool = false;
     let checkout = checkout_responses_wss_for_body(
         &stream_state.state,
@@ -819,7 +819,7 @@ async fn connect_responses_wss_once(
     state: &AppState,
     wss_url: &str,
     body: Option<&serde_json::Value>,
-) -> AppResult<specter::WebSocket> {
+) -> AppResult<warpsock::WebSocket> {
     let headers = match body {
         Some(body) => codex_headers_for_body(state, body)?,
         None => codex_headers(state)?,
@@ -831,14 +831,14 @@ async fn connect_responses_wss_once_with_headers(
     state: &AppState,
     wss_url: &str,
     headers: &HeaderMap,
-) -> AppResult<specter::WebSocket> {
+) -> AppResult<warpsock::WebSocket> {
     // Hold the permit across the WSS handshake so the concurrency limiter
     // bounds real in-flight connection starts rather than just preflight checks.
     let _permit = state.codex_acquire_handshake().await?;
 
     rate_limit::parse_codex_ws_protocol(Some("rfc6455")).map_err(AppError::BadRequest)?;
     let mut builder = state
-        .specter
+        .warpsock
         .websocket(wss_url)
         .connect_timeout(state.runtime.codex_wss_connect_timeout);
     for (name, value) in headers.iter() {
@@ -913,7 +913,7 @@ async fn send_http(
     // Hold the permit across the HTTP call start.
     let _permit = state.codex_acquire_handshake().await?;
     let headers = codex_headers_for_body(state, body)?;
-    let client = state.specter.clone();
+    let client = state.warpsock.clone();
     let request_url = http_url.to_string();
     let request_body = body.clone();
     let response = client
@@ -923,7 +923,7 @@ async fn send_http(
         .send()
         .await
         .map_err(|err| AppError::Upstream(format!("Codex HTTP request failed: {err}")))?;
-    observe_specter_response(CODEX_PROVIDER, &response);
+    observe_warpsock_response(CODEX_PROVIDER, &response);
     let status = response.status();
     let bytes = response
         .bytes()
@@ -939,7 +939,7 @@ async fn send_http_stream(
     // Hold the permit across the HTTP streaming request start.
     let _permit = state.codex_acquire_handshake().await?;
     let headers = codex_headers_for_body(state, body)?;
-    let stream_client = state.specter.clone();
+    let stream_client = state.warpsock.clone();
     let stream_url = http_url.to_string();
     let stream_body = body.clone();
     let request = stream_client
@@ -950,7 +950,7 @@ async fn send_http_stream(
     match Box::pin(request.send_streaming()).await {
         Ok(response) => Ok(CodexStreamResponse::Streaming(Box::new(response))),
         Err(error) if is_non_h2_streaming_error(&error) => {
-            let fallback_client = state.specter.clone();
+            let fallback_client = state.warpsock.clone();
             let fallback_url = http_url.to_string();
             let headers = codex_headers_for_body(state, body)?;
             let fallback_body = body.clone();
@@ -961,7 +961,7 @@ async fn send_http_stream(
             let response = Box::pin(request.send())
                 .await
                 .map_err(|err| AppError::Upstream(format!("Codex HTTP request failed: {err}")))?;
-            observe_specter_response(CODEX_PROVIDER, &response);
+            observe_warpsock_response(CODEX_PROVIDER, &response);
             Ok(CodexStreamResponse::Buffered(Box::new(response)))
         }
         Err(error) => Err(AppError::Upstream(format!(
@@ -990,13 +990,13 @@ async fn response_to_stream(response: CodexStreamResponse) -> AppResult<CodexRes
             let status = response.status();
             let body = response.into_body();
             if !status.is_success() {
-                let body = collect_specter_body(body, "Codex HTTP stream failed").await?;
+                let body = collect_warpsock_body(body, "Codex HTTP stream failed").await?;
                 return Err(AppError::Upstream(format!(
                     "Codex HTTP returned {status}: {}",
                     String::from_utf8_lossy(&body)
                 )));
             }
-            Ok(normalize_sse_stream(specter_body_stream(
+            Ok(normalize_sse_stream(warpsock_body_stream(
                 body,
                 "Codex HTTP stream failed",
             )))
@@ -1076,8 +1076,8 @@ fn normalize_sse_stream(input: BoxStream<'static, AppResult<Bytes>>) -> CodexRes
 }
 
 enum CodexStreamResponse {
-    Buffered(Box<specter::Response>),
-    Streaming(Box<specter::Response>),
+    Buffered(Box<warpsock::Response>),
+    Streaming(Box<warpsock::Response>),
 }
 
 impl CodexStreamResponse {
@@ -1088,8 +1088,8 @@ impl CodexStreamResponse {
     }
 }
 
-fn is_non_h2_streaming_error(error: &specter::Error) -> bool {
-    matches!(error, specter::Error::HttpProtocol(message) if message.contains("Expected h2 ALPN"))
+fn is_non_h2_streaming_error(error: &warpsock::Error) -> bool {
+    matches!(error, warpsock::Error::HttpProtocol(message) if message.contains("Expected h2 ALPN"))
 }
 
 #[derive(Default)]

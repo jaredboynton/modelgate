@@ -10,10 +10,10 @@ use axum::{
     Router,
 };
 use serde_json::{json, Value};
-use specter::Message as SpecterMessage;
 use tempfile::TempDir;
 use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
 use unified_model_proxy_v2::{build_router, AppState};
+use warpsock::Message as WarpsockMessage;
 
 const MISSING_CODEX_AUTH_MESSAGE: &str = "Missing Codex OAuth credentials at ~/.codex/auth.json.";
 
@@ -268,8 +268,8 @@ async fn forbidden_http(
     )
 }
 
-async fn connect_proxy_ws(proxy: &SpawnedServer, path: &str) -> specter::WebSocket {
-    specter::Client::new()
+async fn connect_proxy_ws(proxy: &SpawnedServer, path: &str) -> warpsock::WebSocket {
+    warpsock::Client::new()
         .unwrap()
         .websocket(format!("ws://{}{}", proxy.addr, path))
         .connect()
@@ -277,14 +277,14 @@ async fn connect_proxy_ws(proxy: &SpawnedServer, path: &str) -> specter::WebSock
         .unwrap()
 }
 
-async fn expect_realtime_error(ws: &mut specter::WebSocket) -> Value {
+async fn expect_realtime_error(ws: &mut warpsock::WebSocket) -> Value {
     let message = tokio::time::timeout(Duration::from_secs(2), ws.next())
         .await
         .unwrap()
         .unwrap()
         .unwrap();
     match message {
-        SpecterMessage::Text(text) => {
+        WarpsockMessage::Text(text) => {
             let value = serde_json::from_str::<Value>(&text).unwrap();
             assert_eq!(value["type"], "error", "{value}");
             value
@@ -293,14 +293,14 @@ async fn expect_realtime_error(ws: &mut specter::WebSocket) -> Value {
     }
 }
 
-async fn expect_close(ws: &mut specter::WebSocket) {
+async fn expect_close(ws: &mut warpsock::WebSocket) {
     let message = tokio::time::timeout(Duration::from_secs(2), ws.next())
         .await
         .unwrap()
         .unwrap();
     if let Some(message) = message {
         assert!(
-            matches!(message, SpecterMessage::Close(_)),
+            matches!(message, WarpsockMessage::Close(_)),
             "expected websocket close frame or closed stream, got {message:?}"
         );
     }

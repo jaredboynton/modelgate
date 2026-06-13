@@ -252,7 +252,7 @@ pub async fn send_google_direct(
     body: Bytes,
     stream_response: bool,
 ) -> AppResult<UpstreamResponse> {
-    let client = state.specter.clone();
+    let client = state.warpsock.clone();
     let url = request.url;
     let response = client
         .request(method, url)
@@ -268,7 +268,7 @@ pub async fn send_google_direct(
             };
             AppError::Upstream(format!("Google {kind}: {err}"))
         })?;
-    Ok(UpstreamResponse::from_specter(GOOGLE_PROVIDER, response))
+    Ok(UpstreamResponse::from_warpsock(GOOGLE_PROVIDER, response))
 }
 
 pub async fn forward_generate_content_direct_response(

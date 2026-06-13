@@ -6,7 +6,7 @@ It describes the current blocker state; it does not change runtime behavior.
 ## Current status
 
 - Local development can validate the current checkout with Cargo commands.
-- Remote clone portability is fully active: the dependency is resolved via crates.io.
+- Remote clone portability is fully active: the dependency is resolved via GitHub.
 - Hosted CI can run normally.
 - Runtime secrets, `.env`, `.omx/`, `target/`, logs, and live captures must stay untracked.
 - Mixed UMP Codex profiles keep `enable_request_compression = true` and
@@ -14,7 +14,7 @@ It describes the current blocker state; it does not change runtime behavior.
 
 ## Pre-remote blocker
 
-There are currently no active clone-affecting local paths. The pre-remote blocker for `specter` has been resolved by publishing and depending on the `specters` crate version `4.1.7` from crates.io.
+There are currently no active clone-affecting local paths. The pre-remote blocker for Warpsock has been resolved by depending on the portable GitHub repository.
 
 ## Manual checklist
 
@@ -42,7 +42,7 @@ Before distribution:
 
 ## CI status
 
-Hosted CI is no longer blocked by the local `specter` path. CI now requires formatting, check, test, clippy, and build, with no live credentials.
+Hosted CI is no longer blocked by a local Warpsock path. CI can run formatting, check, test, clippy, and build, with no live credentials.
 
 ## Local path inventory
 
