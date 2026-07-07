@@ -618,6 +618,115 @@ pub fn encode_request_context_result(
     encode_exec_result(exec, exec_message::REQUEST_CONTEXT_ARGS, result)
 }
 
+/// Encode a rejection/error result for a native Cursor exec request, so the
+/// model falls back to MCP tools instead of using its built-in grep/read/ls/etc.
+///
+/// Mirrors the cursor-oauth-opencode plugin's "reject native tools" strategy:
+/// the model tries native Cursor tools first; responding with an error result
+/// (rather than rendering the exec as a client tool call) forces it to retry
+/// via the MCP tools registered in the request context.
+///
+/// Returns `None` for exec kinds that have no meaningful rejection envelope
+/// (RequestContext, Mcp) or that are handled elsewhere (codebase search).
+pub fn encode_native_exec_rejection(exec: &ExecRequest, reason: &str) -> Option<Vec<u8>> {
+    let (result_field, result_body) = match exec.kind {
+        ExecKind::Grep => {
+            // GrepResult { result: Error(GrepError { error }) }
+            let error = encode_string_field(1, reason);
+            let result = encode_message_field(2, &error);
+            (exec_message::GREP_ARGS, result)
+        }
+        ExecKind::Read => {
+            // ReadResult { result: Rejected(ReadRejected { path, reason }) }
+            let path = decode_string_field(&exec.args, 1).unwrap_or_default();
+            let rejected = concat_bytes(&[
+                encode_string_field(1, &path),
+                encode_string_field(2, reason),
+            ]);
+            let result = encode_message_field(3, &rejected);
+            (exec_message::READ_ARGS, result)
+        }
+        ExecKind::Ls => {
+            // LsResult { result: Rejected(LsRejected { path, reason }) }
+            let path = decode_string_field(&exec.args, 1).unwrap_or_default();
+            let rejected = concat_bytes(&[
+                encode_string_field(1, &path),
+                encode_string_field(2, reason),
+            ]);
+            let result = encode_message_field(3, &rejected);
+            (exec_message::LS_ARGS, result)
+        }
+        ExecKind::Write => {
+            // WriteResult { result: Rejected(WriteRejected { path, reason }) }
+            let path = decode_string_field(&exec.args, 1).unwrap_or_default();
+            let rejected = concat_bytes(&[
+                encode_string_field(1, &path),
+                encode_string_field(2, reason),
+            ]);
+            let result = encode_message_field(6, &rejected);
+            (exec_message::WRITE_ARGS, result)
+        }
+        ExecKind::Delete => {
+            // DeleteResult { result: Rejected(DeleteRejected { path, reason }) }
+            let path = decode_string_field(&exec.args, 1).unwrap_or_default();
+            let rejected = concat_bytes(&[
+                encode_string_field(1, &path),
+                encode_string_field(2, reason),
+            ]);
+            let result = encode_message_field(6, &rejected);
+            (exec_message::DELETE_ARGS, result)
+        }
+        ExecKind::Shell | ExecKind::ShellStream => {
+            // ShellResult { result: Rejected(ShellRejected { command, working_directory, reason, is_readonly }) }
+            let command = decode_string_field(&exec.args, 1).unwrap_or_default();
+            let workdir = decode_string_field(&exec.args, 2).unwrap_or_default();
+            let rejected = concat_bytes(&[
+                encode_string_field(1, &command),
+                encode_string_field(2, &workdir),
+                encode_string_field(3, reason),
+                encode_bool_field(4, false),
+            ]);
+            let result = encode_message_field(4, &rejected);
+            (exec_message::SHELL_ARGS, result)
+        }
+        ExecKind::BackgroundShellSpawn => {
+            let command = decode_string_field(&exec.args, 1).unwrap_or_default();
+            let workdir = decode_string_field(&exec.args, 2).unwrap_or_default();
+            let rejected = concat_bytes(&[
+                encode_string_field(1, &command),
+                encode_string_field(2, &workdir),
+                encode_string_field(3, reason),
+                encode_bool_field(4, false),
+            ]);
+            let result = encode_message_field(4, &rejected);
+            (exec_message::BACKGROUND_SHELL_SPAWN_ARGS, result)
+        }
+        ExecKind::Fetch => {
+            // FetchResult { result: Error(FetchError { url, error }) }
+            let url = decode_string_field(&exec.args, 1).unwrap_or_default();
+            let error =
+                concat_bytes(&[encode_string_field(1, &url), encode_string_field(2, reason)]);
+            let result = encode_message_field(2, &error);
+            (exec_message::FETCH_ARGS, result)
+        }
+        ExecKind::Diagnostics => {
+            // DiagnosticsResult { result: Error(DiagnosticsError { error }) }
+            let error = encode_string_field(1, reason);
+            let result = encode_message_field(2, &error);
+            (exec_message::DIAGNOSTICS_ARGS, result)
+        }
+        ExecKind::RequestContext
+        | ExecKind::Mcp
+        | ExecKind::ListMcpResources
+        | ExecKind::ReadMcpResource
+        | ExecKind::WriteShellStdin
+        | ExecKind::RecordScreen
+        | ExecKind::ComputerUse
+        | ExecKind::Other(_) => return None,
+    };
+    Some(encode_exec_result(exec, result_field, result_body))
+}
+
 fn encode_mcp_tools(tools: &[crate::cursor_agent::CursorTool]) -> Vec<u8> {
     let tool_defs = encode_mcp_tool_definitions(tools);
     if tool_defs.is_empty() {

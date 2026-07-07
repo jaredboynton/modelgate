@@ -39,8 +39,9 @@ use crate::{
         proto::{
             decode_agent_server_message, decode_exec_public_tool_call, decode_get_blob_args,
             decode_set_blob_args, encode_agent_run_request, encode_get_blob_result,
-            encode_request_context_result, encode_set_blob_result, AgentRunRequestInput,
-            InteractionEvent, KvKind, Message, RequestedModelInput, RequestedModelParameter,
+            encode_native_exec_rejection, encode_request_context_result, encode_set_blob_result,
+            AgentRunRequestInput, InteractionEvent, KvKind, Message, RequestedModelInput,
+            RequestedModelParameter,
         },
         session::ConversationState,
         transport::open_streaming_run,
@@ -253,6 +254,33 @@ pub async fn run_with_credentials(
                                 return;
                             }
                             continue;
+                        }
+                        // Reject native Cursor exec requests when the client
+                        // has registered MCP tools, forcing the model to fall
+                        // back to the MCP tools (grep, read, ls, etc.) instead
+                        // of using Cursor's built-in equivalents. This mirrors
+                        // the cursor-oauth-opencode plugin strategy and avoids
+                        // empty-pattern grep calls that arise when the model
+                        // mixes native and MCP tool lanes.
+                        if !cursor_visible_tools.is_empty()
+                            && should_reject_native_exec(request.client_profile.into(), exec)
+                        {
+                            let reason = "Tool not available in this environment. Use the MCP tools provided instead.";
+                            if let Some(rejection) = encode_native_exec_rejection(exec, reason) {
+                                debug!(
+                                    exec_id = %exec.exec_id,
+                                    kind = ?exec.kind,
+                                    "rejecting native cursor exec to force MCP fallback"
+                                );
+                                if send_cursor_client_frame(&mut transport_stream, rejection)
+                                    .await
+                                    .is_err()
+                                {
+                                    let _ = transport_stream.close().await;
+                                    return;
+                                }
+                                continue;
+                            }
                         }
                         if let Some(call) =
                             pending_tool_call_for_exec(request.client_profile.into(), exec)
@@ -467,6 +495,31 @@ fn handle_kv_request(
         }
         KvKind::Other(_) => None,
     }
+}
+
+/// Determine whether a native Cursor exec request should be rejected (forcing
+/// the model to fall back to MCP tools) rather than rendered as a client tool
+/// call. Returns true for native tool exec kinds that have MCP analogs
+/// (grep, read, ls, write, delete, fetch, diagnostics) and false for shell
+/// execs (which are bridged via the per-profile renderers to the caller's
+/// bash/shell tool — rejecting shell stalls the agent server-side, the
+/// known subagent "hang"), MCP, RequestContext, and other proxy-internal
+/// exec kinds.
+fn should_reject_native_exec(
+    _profile: ClientProfile,
+    exec: &crate::upstream::cursor::proto::ExecRequest,
+) -> bool {
+    use crate::upstream::cursor::proto::ExecKind;
+    matches!(
+        exec.kind,
+        ExecKind::Grep
+            | ExecKind::Read
+            | ExecKind::Ls
+            | ExecKind::Write
+            | ExecKind::Delete
+            | ExecKind::Fetch
+            | ExecKind::Diagnostics
+    )
 }
 
 /// Render a Cursor exec request as one or more neutral
@@ -1612,5 +1665,99 @@ mod tests {
         assert!(text.contains(r#""path":"/tmp/workspace/docs/wiki.md""#));
         assert!(text.contains("Tool call call-ls named ls"));
         assert!(text.contains(r#""path":"/tmp/workspace""#));
+    }
+
+    #[test]
+    fn encode_native_exec_rejection_produces_valid_grep_error() {
+        use crate::upstream::cursor::proto::encode_native_exec_rejection;
+
+        let exec = ExecRequest {
+            id: 42,
+            exec_id: "exec-grep-1".to_string(),
+            kind: ExecKind::Grep,
+            args: encode_string_field(1, "some pattern"),
+        };
+        let frame = encode_native_exec_rejection(&exec, "use MCP tools").unwrap();
+        // The outer frame is an AgentClientMessage with an ExecClientMessage.
+        // Verify the exec_id and the GrepResult error envelope are present.
+        let frame_str = String::from_utf8_lossy(&frame);
+        assert!(frame_str.contains("exec-grep-1"));
+    }
+
+    #[test]
+    fn encode_native_exec_rejection_produces_valid_read_rejected() {
+        use crate::upstream::cursor::proto::encode_native_exec_rejection;
+
+        let exec = ExecRequest {
+            id: 43,
+            exec_id: "exec-read-1".to_string(),
+            kind: ExecKind::Read,
+            args: encode_string_field(1, "/some/path"),
+        };
+        let frame = encode_native_exec_rejection(&exec, "use MCP tools").unwrap();
+        let frame_str = String::from_utf8_lossy(&frame);
+        assert!(frame_str.contains("exec-read-1"));
+        assert!(frame_str.contains("use MCP tools"));
+    }
+
+    #[test]
+    fn encode_native_exec_rejection_returns_none_for_mcp() {
+        use crate::upstream::cursor::proto::encode_native_exec_rejection;
+
+        let exec = ExecRequest {
+            id: 44,
+            exec_id: "exec-mcp-1".to_string(),
+            kind: ExecKind::Mcp,
+            args: Vec::new(),
+        };
+        assert!(encode_native_exec_rejection(&exec, "reason").is_none());
+    }
+
+    #[test]
+    fn should_reject_native_exec_covers_native_kinds() {
+        use super::should_reject_native_exec;
+
+        for kind in [
+            ExecKind::Grep,
+            ExecKind::Read,
+            ExecKind::Ls,
+            ExecKind::Write,
+            ExecKind::Delete,
+            ExecKind::Fetch,
+        ] {
+            let exec = ExecRequest {
+                id: 0,
+                exec_id: String::new(),
+                kind,
+                args: Vec::new(),
+            };
+            assert!(
+                should_reject_native_exec(ClientProfile::GenericOpenAi, &exec),
+                "should reject {:?}",
+                kind
+            );
+        }
+
+        // Shell execs are bridged via per-profile renderers, NOT rejected
+        // (rejecting shell stalls the agent server-side — the subagent hang).
+        for kind in [
+            ExecKind::Shell,
+            ExecKind::ShellStream,
+            ExecKind::BackgroundShellSpawn,
+            ExecKind::Mcp,
+            ExecKind::RequestContext,
+        ] {
+            let exec = ExecRequest {
+                id: 0,
+                exec_id: String::new(),
+                kind,
+                args: Vec::new(),
+            };
+            assert!(
+                !should_reject_native_exec(ClientProfile::GenericOpenAi, &exec),
+                "should NOT reject {:?}",
+                kind
+            );
+        }
     }
 }
